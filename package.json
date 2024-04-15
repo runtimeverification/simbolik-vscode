@@ -1,0 +1,190 @@
+{
+  "name": "simbolik",
+  "displayName": "Simbolik: Solidity Debugger",
+  "repository": {
+    "type": "github",
+    "url": "https://github.com/runtimeverification/simbolik-vscode"
+  },
+  "author": {
+    "name": "Runtime Verification, Inc.",
+    "email": "contact@runtimeverification.com"
+  },
+  "publisher": "runtimeverification",
+  "description": "",
+  "version": "0.0.1-beta",
+  "engines": {
+    "vscode": "^1.79.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onDebug",
+    "onLanguage:solidity"
+  ],
+  "main": "./build/extension.js",
+  "browser": "./build-web/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "solidity",
+        "aliases": [
+          "solidity",
+          "Solidity"
+        ],
+        "extensions": [
+          ".sol"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Simbolik: Solidity Debugger",
+      "properties": {
+        "simbolik.server": {
+          "type": "string",
+          "default": "ws://localhost:6789",
+          "description": "The websocket URL where the dap server is listening."
+        },
+        "simbolik.bmc-depth": {
+          "type": "integer",
+          "description": "Boundend model checking depth.",
+          "default": 3
+        },
+        "simbolik.stop-at-first-opcode": {
+          "type": "boolean",
+          "description": "If set to true, the debugger will stop at the first opcode.",
+          "default": false
+        },
+        "simbolik.show-sourcemaps": {
+          "type": "boolean",
+          "default": false,
+          "description": "If set to true, the debugger will include sourcemaps in the disassembly view."
+        },
+        "simbolik.show-kcfg-web-panel": {
+          "type": "boolean",
+          "default": true,
+          "description": "If set to true, the KCFG web panel will be shown."
+        },
+        "simbolik.anvil-port": {
+          "type": "integer",
+          "default": 8545,
+          "description": "The port where the Anvil server is listening."
+        },
+        "simbolik.simbolik-autostart": {
+          "type": "boolean",
+          "default": true,
+          "description": "If set to true, the debugger will start the simbolik debug server automatically with VSCode."
+        },
+        "simbolik.anvil-autostart": {
+          "type": "boolean",
+          "default": true,
+          "description": "If set to true, the debugger will start the anvil server automatically with VSCode."
+        },
+        "evm-sematnics-dap.autobuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "If set to true, the debugger will automatically build the project before starting the debugger."
+        },
+        "simbolik.enable-parameters": {
+          "type": "boolean",
+          "default": false,
+          "description": "If set to true, the debugger will show a debug button above functions with parameters. Notice, that this requires a backend that supports parameter debugging. The default Foundry backend does not support parameter debugging."
+        }
+      }
+    },
+    "breakpoints": [
+      {
+        "language": "solidity"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "solidity",
+        "label": "Solidity",
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "file",
+              "contractName",
+              "methodSignature"
+            ],
+            "properties": {
+              "contractName": {
+                "type": "string",
+                "description": "The name of the contract to debug."
+              },
+              "methodSignature": {
+                "type": "string",
+                "description": "The signature of the method to debug."
+              },
+              "file": {
+                "type": "string",
+                "description": "The file containing the smart contract to debug."
+              },
+              "stopAtFirstOpcode": {
+                "type": "boolean",
+                "description": "If set to true, the debugger will stop at the first opcode.",
+                "default": false
+              },
+              "showSourcemaps": {
+                "type": "boolean",
+                "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
+                "default": false
+              }
+            }
+          }
+        }
+      }
+    ],
+    "menus": {
+      "debug/callstack/context": [
+        {
+          "command": "simbolik.viewKast",
+          "when": "inDebugMode"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "simbolik.viewKast",
+        "title": "Open KEVM View"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile-web": "webpack",
+    "compile": "tsc -p ./tsconfig.json",
+    "watch": "tsc -watch -p ./tsconfig.json",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "gts lint",
+    "test": "node ./out/test/runTest.js",
+    "clean": "gts clean",
+    "fix": "gts fix",
+    "prepare": "npm run compile",
+    "posttest": "npm run lint"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "20.11.5",
+    "@types/vscode": "^1.79.0",
+    "@typescript-eslint/eslint-plugin": "^5.59.8",
+    "@typescript-eslint/parser": "^5.59.8",
+    "@vscode/test-electron": "^2.3.2",
+    "eslint": "^8.41.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "process": "^0.11.10",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.2.0",
+    "webpack": "^5.90.3",
+    "webpack-cli": "^5.1.4",
+    "gts": "^5.3.0"
+  },
+  "dependencies": {
+    "@solidity-parser/parser": "^0.18.0",
+    "@types/ws": "^8.5.10",
+    "ws": "^8.16.0"
+  }
+}
