@@ -1,0 +1,14 @@
+.github/**
+.vscode/**
+node_modules/**
+sampleWorkspace/**
+src/**
+.editorconfig
+.eslintignore
+.eslint.json
+.gitignore
+.gitmodules
+.prettierrc.js
+.vscodeignore
+tsconfig.json
+tsconfig.web.json

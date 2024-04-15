@@ -1,0 +1,19 @@
+{
+  "extends": "./node_modules/gts/tsconfig-google.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "build-web",
+    "lib": ["ES2020", "DOM"],
+    "target": "ES2020"
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "src/react-app",
+    "src/extension.ts",
+    "src/DebugAdapter.ts",
+    "sampleWorkspace",
+  ]
+}
