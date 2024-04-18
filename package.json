@@ -138,20 +138,6 @@
           }
         }
       }
-    ],
-    "menus": {
-      "debug/callstack/context": [
-        {
-          "command": "simbolik.viewKast",
-          "when": "inDebugMode"
-        }
-      ]
-    },
-    "commands": [
-      {
-        "command": "simbolik.viewKast",
-        "title": "Open KEVM View"
-      }
     ]
   },
   "scripts": {
