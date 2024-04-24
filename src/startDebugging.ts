@@ -53,13 +53,16 @@ export async function startDebugging(
   const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', false);
   const showSourcemaps = getConfigValue('show-sourcemaps', false);
   const debugConfigName = `${contractName}.${methodSignature}`;
+  const anvilPort = getConfigValue('anvil-port', '8545');
+  const rpcUrl = `http://localhost:${anvilPort}`;
   const myDebugConfig = debugConfig(
     debugConfigName,
     file,
     contractName,
     methodSignature,
     stopAtFirstOpcode,
-    showSourcemaps
+    showSourcemaps,
+    rpcUrl
   );
 
   const autobuild = getConfigValue('autobuild', true);
@@ -104,7 +107,8 @@ function debugConfig(
   contractName: string,
   methodSignature: string,
   stopAtFirstOpcode: boolean,
-  showSourcemaps: boolean
+  showSourcemaps: boolean,
+  rpcUrl: string
 ) {
   return {
     name: name,
@@ -115,6 +119,7 @@ function debugConfig(
     methodSignature: methodSignature,
     stopAtFirstOpcode: stopAtFirstOpcode,
     showSourcemaps: showSourcemaps,
+    rpcUrl: rpcUrl
   };
 }
 
