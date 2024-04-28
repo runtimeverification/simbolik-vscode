@@ -46,7 +46,7 @@
         "simbolik.server": {
           "type": "string",
           "default": "ws://localhost:6789",
-          "description": "The websocket URL where the dap server is listening."
+          "description": "The websocket URL where the simbolik server is listening."
         },
         "simbolik.bmc-depth": {
           "type": "integer",
@@ -73,10 +73,25 @@
           "default": true,
           "description": "If set to true, the debugger will start the simbolik server automatically with VSCode."
         },
+        "simbolik.simbolik-path": {
+          "type": "string",
+          "default": "simbolik",
+          "description": "The path to the simbolik executable. If simbolik-autostart is set to true, the debugger will start the simbolik server with this executable. If simbolik is not in the PATH, you can set the path here."
+        },
         "simbolik.anvil-autostart": {
           "type": "boolean",
           "default": true,
           "description": "If set to true, the debugger will start the anvil server automatically with VSCode."
+        },
+        "simbolik.anvil-path": {
+          "type": "string",
+          "default": "anvil",
+          "description": "The path to the anvil executable. If anvil-autostart is set to true, the debugger will start the anvil server with this executable. If anvil is not in the PATH, you can set the path here."
+        },
+        "simbolik.forge-path": {
+          "type": "string",
+          "default": "forge",
+          "description": "The path to the forge executable. Simbolik uses forge to compile the smart contracts. If forge is not in the PATH, you can set the path here."
         },
         "simbolik.autobuild": {
           "type": "boolean",

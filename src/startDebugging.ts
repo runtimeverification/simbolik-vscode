@@ -125,6 +125,7 @@ function debugConfig(
 
 function forgeBuildTask(file: string) {
   const incrementalBuild = getConfigValue('incremental-build', false);
+  const forgePath = getConfigValue('forge-path', 'forge');
   const cwd = file.substring(0, file.lastIndexOf('/'));
   const task = new vscode.Task(
     {
@@ -134,7 +135,7 @@ function forgeBuildTask(file: string) {
     vscode.TaskScope.Workspace,
     'forge',
     'simbolik',
-    new vscode.ShellExecution('forge', ['build'], {
+    new vscode.ShellExecution(forgePath, ['build'], {
       cwd,
       env: {
         'FOUNDRY_OPTIMIZER': 'false',
