@@ -66,6 +66,7 @@ export class Supervisor {
 
 function anvilTask() {
   const port = getConfigValue('anvil-port', 8545);
+  const anvilPath = getConfigValue('anvil-path', 'anvil');
   const task = new vscode.Task(
     {
       label: 'anvil',
@@ -74,7 +75,7 @@ function anvilTask() {
     vscode.TaskScope.Workspace,
     'anvil',
     'simbolik',
-    new vscode.ShellExecution('anvil', [
+    new vscode.ShellExecution(anvilPath, [
       '--steps-tracing',
       '--port',
       `${port}`,
@@ -89,6 +90,7 @@ function anvilTask() {
 
 function simbolikTask() {
   const server = getConfigValue('server', 'ws://localhost:6789');
+  const simbolikPath = getConfigValue('simbolik-path', 'simbolik');
   const port = server.split(':')[2];
   const task = new vscode.Task(
     {
@@ -99,7 +101,7 @@ function simbolikTask() {
     'simbolik',
     'simbolik',
     new vscode.ShellExecution(
-      'simbolik',
+      simbolikPath,
       ['--port', port.toString()],
     )
   );

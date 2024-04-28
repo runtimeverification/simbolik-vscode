@@ -7,5 +7,9 @@ import * as vscode from 'vscode';
  */
 export function getConfigValue<T = string>(key: string, fallback: T): T {
   const config = vscode.workspace.getConfiguration('simbolik');
-  return config.get(key) ?? fallback;
+  const value = config.get<T>(key);
+  if (value === undefined || value === '') {
+    return fallback;
+  }
+  return value;
 }
