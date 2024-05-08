@@ -143,7 +143,7 @@ function forgeBuildTask(file: string) {
         'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_CACHE': incrementalBuild ? 'true' : 'false',
+        'FOUNDRY_CACHE': 'true',
       }
     })
   );
