@@ -68,22 +68,50 @@ export async function startDebugging(
   const autobuild = getConfigValue('autobuild', true);
 
   if (autobuild) {
-    const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
-    const buildExecution = await vscode.tasks.executeTask(build);
-    try {
-      await completed(buildExecution);
-      const session = await vscode.debug.startDebugging(
-        workspaceFolder,
-        myDebugConfig
-      );
-    } catch (e) {
-      vscode.window.showErrorMessage('Failed to build project.');
-    }
+    autoBuild(activeTextEditor, workspaceFolder, myDebugConfig);
   } else {
     const session = await vscode.debug.startDebugging(
       workspaceFolder,
       myDebugConfig
     );
+  }
+}
+
+async function autoBuild(
+  activeTextEditor: vscode.TextEditor,
+  workspaceFolder: vscode.WorkspaceFolder,
+  myDebugConfig: vscode.DebugConfiguration
+) {
+  const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
+  const buildExecution = await vscode.tasks.executeTask(build);
+  try {
+    await completed(buildExecution);
+    const session = await vscode.debug.startDebugging(
+      workspaceFolder,
+      myDebugConfig
+    );
+  } catch (e) {
+    const action = await vscode.window.showErrorMessage(
+      'Failed to build project. Confirm you have forge in your PATH, or add it to Settings.',
+      'Open Settings',
+      'Try Again',
+      'Help'
+    );
+    if (action === 'Open Settings') {
+      vscode.commands.executeCommand(
+        'workbench.action.openSettings',
+        'forge-path'
+      );
+    }
+    if (action === 'Try Again') {
+      autoBuild(activeTextEditor, workspaceFolder, myDebugConfig);
+    }
+    if (action === 'Help') {
+      vscode.commands.executeCommand(
+        'vscode.open',
+        vscode.Uri.parse('https://docs.runtimeverification.com/simbolik')
+      );
+    }
   }
 }
 

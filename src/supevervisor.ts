@@ -14,19 +14,31 @@ export class Supervisor {
       if (e.execution === this._anvil) {
         this._anvil?.terminate();
         this._anvil = undefined;
-        const action = await vscode.window.showErrorMessage(
-          'Anvil terminated unexpectedly',
+        let action = await vscode.window.showErrorMessage(
+          'Anvil terminated unexpectedly. Confirm you have anvil on your PATH, or add it to Settings.',
           'Open Settings',
-          'Try Again'
+          'Try Again',
+          'Help'
         );
         if (action === 'Open Settings') {
           vscode.commands.executeCommand(
             'workbench.action.openSettings',
-            'simbolik.anvil-port'
+            'anvil-path'
+          );
+          action = await vscode.window.showInformationMessage(
+            'Anvil task',
+            'Try Again',
+            'Help'
           );
         }
         if (action === 'Try Again') {
           this.anvil();
+        }
+        if (action === 'Help') {
+          vscode.commands.executeCommand(
+            'vscode.open',
+            vscode.Uri.parse('https://docs.runtimeverification.com/simbolik')
+          );
         }
       }
     });
