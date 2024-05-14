@@ -49,12 +49,23 @@ export async function startDebugging(
   const file = activeTextEditor.document.uri.toString();
   const contractName = contract['name'];
   const methodSignature = `${method['name']}(${parameters.join(',')})`;
-
   const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', false);
   const showSourcemaps = getConfigValue('show-sourcemaps', false);
   const debugConfigName = `${contractName}.${methodSignature}`;
   const anvilPort = getConfigValue('anvil-port', '8545');
   const rpcUrl = `http://localhost:${anvilPort}`;
+  const autobuild = getConfigValue('autobuild', true);
+  if (autobuild) {
+    const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
+    const buildExecution = await vscode.tasks.executeTask(build);
+    try {
+      await completed(buildExecution);
+    } catch (e) {
+      vscode.window.showErrorMessage('Failed to build project.');
+    }
+  }
+  const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri.fsPath);
+  const buildInfo = await loadBuildInfo(activeTextEditor.document.uri.fsPath);
   const myDebugConfig = debugConfig(
     debugConfigName,
     file,
@@ -62,29 +73,14 @@ export async function startDebugging(
     methodSignature,
     stopAtFirstOpcode,
     showSourcemaps,
-    rpcUrl
+    rpcUrl,
+    buildInfo,
+    myFoundryRoot
   );
-
-  const autobuild = getConfigValue('autobuild', true);
-
-  if (autobuild) {
-    const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
-    const buildExecution = await vscode.tasks.executeTask(build);
-    try {
-      await completed(buildExecution);
-      const session = await vscode.debug.startDebugging(
-        workspaceFolder,
-        myDebugConfig
-      );
-    } catch (e) {
-      vscode.window.showErrorMessage('Failed to build project.');
-    }
-  } else {
-    const session = await vscode.debug.startDebugging(
-      workspaceFolder,
-      myDebugConfig
-    );
-  }
+  const session = await vscode.debug.startDebugging(
+    workspaceFolder,
+    myDebugConfig
+  );
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
@@ -108,7 +104,9 @@ function debugConfig(
   methodSignature: string,
   stopAtFirstOpcode: boolean,
   showSourcemaps: boolean,
-  rpcUrl: string
+  rpcUrl: string,
+  buildInfo: string,
+  clientMount: string
 ) {
   return {
     name: name,
@@ -119,7 +117,9 @@ function debugConfig(
     methodSignature: methodSignature,
     stopAtFirstOpcode: stopAtFirstOpcode,
     showSourcemaps: showSourcemaps,
-    rpcUrl: rpcUrl
+    rpcUrl: rpcUrl,
+    buildInfo: buildInfo,
+    clientMount: clientMount,
   };
 }
 
@@ -150,4 +150,48 @@ function forgeBuildTask(file: string) {
   task.isBackground = true;
   task.presentationOptions.reveal = vscode.TaskRevealKind.Always;
   return task;
+}
+
+
+async function loadBuildInfo(file: string) : Promise<string> {
+  const root = await foundryRoot(file);
+  const buildInfo = await forgeBuildInfo(root);
+  return buildInfo[0];
+}
+
+async function foundryRoot(file: string) {
+  // Find the root of the project, which is the directory containing the foundry.toml file
+  let root = file;
+  let stat;
+  try {
+    stat = await vscode.workspace.fs.stat(vscode.Uri.file(`${root}/foundry.toml`));
+  } catch (e) {
+    stat = false;
+  }
+  while (!stat) {
+    const lastSlash = root.lastIndexOf('/');
+    if (lastSlash === -1) {
+      throw new Error('Could not find foundry.toml');
+    }
+    root = root.substring(0, lastSlash);
+    try {
+      stat = await vscode.workspace.fs.stat(vscode.Uri.file(`${root}/foundry.toml`));
+    } catch (e) {
+      stat = false;
+    }
+  }
+  return root;
+}
+
+async function forgeBuildInfo(root: string) : Promise<string[]> {
+  // Return the string contents of all build-info files. The files are stored under out/build-info/$hash.json
+  // TODO: Ordering of files. Should we sort by timestamp?
+  const buildInfoDir = `${root}/out/build-info`;
+  const buildInfoFiles = (await vscode.workspace.fs.readDirectory(vscode.Uri.file(buildInfoDir))).filter(([file, type]) => {
+    return type === vscode.FileType.File && file.endsWith('.json');
+  });
+  return Promise.all(buildInfoFiles.flatMap(async ([file, _type]) => {
+    const buildInfo = await vscode.workspace.fs.readFile(vscode.Uri.file(`${buildInfoDir}/${file}`));
+    return buildInfo.toString();
+  }));
 }

@@ -60,6 +60,8 @@ function retry<T>(
   });
 }
 
+type WithApiKey = { apiKey: string };
+
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 
@@ -74,7 +76,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   onDidSendMessage = this._onDidSendMessage.event;
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    this.websocket.send(JSON.stringify(message));
+    const messageWithApiKey : vscode.DebugProtocolMessage & WithApiKey = Object.assign({}, message, {apiKey: "valid-api-key"});
+    this.websocket.send(JSON.stringify(messageWithApiKey));
   }
 
   dispose() {
