@@ -92,9 +92,8 @@ async function autoBuild(
     );
   } catch (e) {
     const action = await vscode.window.showErrorMessage(
-      'Failed to build project. Confirm you have forge in your PATH, or add it to Settings.',
+      'Failed to build project.',
       'Open Settings',
-      'Try Again',
       'Help'
     );
     if (action === 'Open Settings') {
@@ -102,9 +101,6 @@ async function autoBuild(
         'workbench.action.openSettings',
         'forge-path'
       );
-    }
-    if (action === 'Try Again') {
-      autoBuild(activeTextEditor, workspaceFolder, myDebugConfig);
     }
     if (action === 'Help') {
       vscode.commands.executeCommand(
