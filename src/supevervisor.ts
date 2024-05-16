@@ -14,7 +14,7 @@ export class Supervisor {
       if (e.execution === this._anvil) {
         this._anvil?.terminate();
         this._anvil = undefined;
-        let action = await vscode.window.showErrorMessage(
+        const action = await vscode.window.showErrorMessage(
           'Anvil terminated unexpectedly.',
           'Open Settings',
           'Try Again',
