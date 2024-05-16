@@ -33,7 +33,7 @@ export class Supervisor {
         if (action === 'Help') {
           vscode.commands.executeCommand(
             'vscode.open',
-            vscode.Uri.parse('https://docs.runtimeverification.com/simbolik')
+            vscode.Uri.parse('https://docs.runtimeverification.com/simbolik/overview/troubleshooting#anvil-terminated-unexpectedly')
           );
           this.anvil();
         }

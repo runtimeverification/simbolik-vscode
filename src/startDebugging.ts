@@ -105,8 +105,9 @@ async function autoBuild(
     if (action === 'Help') {
       vscode.commands.executeCommand(
         'vscode.open',
-        vscode.Uri.parse('https://docs.runtimeverification.com/simbolik')
+        vscode.Uri.parse('https://docs.runtimeverification.com/simbolik/overview/troubleshooting#failed-to-build-project')
       );
+      autoBuild(activeTextEditor, workspaceFolder, myDebugConfig);
     }
   }
 }
