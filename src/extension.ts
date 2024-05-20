@@ -26,9 +26,9 @@ export function activate(context: vscode.ExtensionContext) {
   if (getConfigValue('simbolik-autostart', true)) {
     supervisor.simbolik();
   }
-  if (getConfigValue('anvil-autostart', true)) {
-    supervisor.anvil();
-  }
+  //if (getConfigValue('anvil-autostart', true)) {
+  //  supervisor.anvil();
+  //}
   context.subscriptions.push(supervisor);
 
   const codelensProvider = new CodelensProvider();

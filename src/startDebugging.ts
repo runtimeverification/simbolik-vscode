@@ -6,11 +6,16 @@ import {
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
+import {Supervisor} from './supevervisor';
 
 export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
+  const supervisor = new Supervisor();
+  if (getConfigValue('anvil-autostart', true)) {
+    supervisor.anvil();
+  }
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');
@@ -85,6 +90,7 @@ export async function startDebugging(
       myDebugConfig
     );
   }
+  supervisor.anvilTerminate();
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {

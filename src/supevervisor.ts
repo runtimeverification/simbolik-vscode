@@ -62,6 +62,10 @@ export class Supervisor {
     this._anvil?.terminate();
     this._simbolik?.terminate();
   }
+
+  public anvilTerminate(): void {
+    this._anvil?.terminate();
+  }
 }
 
 function anvilTask() {
@@ -100,10 +104,7 @@ function simbolikTask() {
     vscode.TaskScope.Workspace,
     'simbolik',
     'simbolik',
-    new vscode.ShellExecution(
-      simbolikPath,
-      ['--port', port.toString()],
-    )
+    new vscode.ShellExecution(simbolikPath, ['--port', port.toString()])
   );
   task.isBackground = true;
   task.presentationOptions.reveal = vscode.TaskRevealKind.Never;
