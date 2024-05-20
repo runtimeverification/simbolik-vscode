@@ -26,9 +26,6 @@ export function activate(context: vscode.ExtensionContext) {
   if (getConfigValue('simbolik-autostart', true)) {
     supervisor.simbolik();
   }
-  //if (getConfigValue('anvil-autostart', true)) {
-  //  supervisor.anvil();
-  //}
   context.subscriptions.push(supervisor);
 
   const codelensProvider = new CodelensProvider();
@@ -47,7 +44,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   disposable = vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    startDebugging
+    startDebugging,
+    supervisor
   );
   context.subscriptions.push(disposable);
 
@@ -62,6 +60,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
+  });
+
+  vscode.debug.onDidTerminateDebugSession(session => {
+    supervisor.anvilTerminate();
+    outputChannel.info(`Debug session ended: ${session.id}`);
   });
 }
 

@@ -9,12 +9,13 @@ import {getConfigValue} from './utils';
 import {Supervisor} from './supevervisor';
 
 export async function startDebugging(
+  this: Supervisor,
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
-  const supervisor = new Supervisor();
   if (getConfigValue('anvil-autostart', true)) {
-    supervisor.anvil();
+    this.anvilTerminate();
+    this.anvil();
   }
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
@@ -90,7 +91,6 @@ export async function startDebugging(
       myDebugConfig
     );
   }
-  supervisor.anvilTerminate();
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {

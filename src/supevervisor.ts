@@ -11,7 +11,7 @@ export class Supervisor {
       vscode.window.showErrorMessage('Anvil failed to start');
     }
     vscode.tasks.onDidEndTaskProcess(async e => {
-      if (e.execution === this._anvil) {
+      if (e.execution === this._anvil && e.exitCode !== undefined) {
         this._anvil?.terminate();
         this._anvil = undefined;
         const action = await vscode.window.showErrorMessage(
