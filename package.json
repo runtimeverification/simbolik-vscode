@@ -43,75 +43,89 @@
     "configuration": {
       "title": "Simbolik: Solidity Debugger",
       "properties": {
-        "simbolik.server": {
-          "type": "string",
-          "default": "ws://localhost:6789",
-          "description": "The websocket URL where the simbolik server is listening."
-        },
         "simbolik.api-key": {
           "type": "string",
           "default": "valid-api-key",
-          "description": "The API key to authenticate with the simbolik server."
+          "description": "The API key to authenticate with the simbolik server.",
+          "order": 0
         },
-        "simbolik.bmc-depth": {
-          "type": "integer",
-          "description": "Signals the backend that it should only unroll loops up to this depth. This parameter is only relevant for symbolic execution backends.",
-          "default": 3
-        },
-        "simbolik.stop-at-first-opcode": {
-          "type": "boolean",
-          "description": "If set to true, the debugger will stop at the first opcode. Otherwise it will stop at the function entry.",
-          "default": true
-        },
-        "simbolik.show-sourcemaps": {
-          "type": "boolean",
-          "default": false,
-          "description": "If set to true, the debugger will include sourcemaps in the disassembly view. This is useful when debugging sourcemaps."
-        },
-        "simbolik.anvil-port": {
-          "type": "integer",
-          "default": 8545,
-          "description": "The port where the Anvil server is listening. If anvil-autostart is set to true, the debugger passes this port to the anvil server."
-        },
-        "simbolik.simbolik-autostart": {
-          "type": "boolean",
-          "default": true,
-          "description": "If set to true, the debugger will start the simbolik server automatically with VSCode."
-        },
-        "simbolik.simbolik-path": {
+        "simbolik.server": {
           "type": "string",
-          "default": "simbolik",
-          "description": "The path to the simbolik executable. If simbolik-autostart is set to true, the debugger will start the simbolik server with this executable. If simbolik is not in the PATH, you can set the path here."
-        },
-        "simbolik.anvil-autostart": {
-          "type": "boolean",
-          "default": true,
-          "description": "If set to true, the debugger will start the anvil server automatically with VSCode."
-        },
-        "simbolik.anvil-path": {
-          "type": "string",
-          "default": "anvil",
-          "description": "The path to the anvil executable. If anvil-autostart is set to true, the debugger will start the anvil server with this executable. If anvil is not in the PATH, you can set the path here."
+          "default": "ws://beta.simbolik.runtimeverification.com:3000",
+          "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
+          "order": 1
         },
         "simbolik.forge-path": {
           "type": "string",
           "default": "forge",
-          "description": "The path to the forge executable. Simbolik uses forge to compile the smart contracts. If forge is not in the PATH, you can set the path here."
+          "description": "The path to the forge executable. Simbolik uses forge to compile the smart contracts. If forge is not in the PATH, you can set the path here.",
+          "order": 2
         },
         "simbolik.autobuild": {
           "type": "boolean",
           "default": true,
-          "description": "If set to true, the debugger will automatically build the project before starting the debugger."
+          "description": "If set to true, the debugger will automatically build the project before starting the debugger.",
+          "order": 3
         },
         "simbolik.incremental-build": {
           "type": "boolean",
           "default": false,
-          "description": "If autobuild is eanbled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected sourcemaps."
+          "description": "If autobuild is eanbled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
+          "order": 4
+        },
+        "simbolik.stop-at-first-opcode": {
+          "type": "boolean",
+          "description": "If set to true, the debugger will stop at the first opcode. Otherwise it will stop at the function entry. Disabling this option is experimental and may lead to unexpected behavior.",
+          "default": true,
+          "order": 5
+        },
+        "simbolik.anvil-port": {
+          "type": "integer",
+          "default": 8545,
+          "description": "The port where the Anvil server is listening. If anvil-autostart is set to true, the debugger passes this port to the anvil server. This options is only used when you're running your own simbolik server.",
+          "order": 6
+        },
+        "simbolik.simbolik-autostart": {
+          "type": "boolean",
+          "default": false,
+          "description": "If set to true, the debugger will start the simbolik server automatically with VSCode. This option can only be used if you have the simbolik server installed on your machine.",
+          "order": 7
+        },
+        "simbolik.simbolik-path": {
+          "type": "string",
+          "default": "simbolik",
+          "description": "The path to the simbolik executable. If simbolik-autostart is set to true, the debugger will start the simbolik server with this executable. If simbolik is not in the PATH, you can set the path here.",
+          "order": 8
+        },
+        "simbolik.anvil-autostart": {
+          "type": "boolean",
+          "default": false,
+          "description": "If set to true, the debugger will start the anvil server for every debugging session. Only set this to true if you are running your own simbolik server.",
+          "order": 9
+        },
+        "simbolik.anvil-path": {
+          "type": "string",
+          "default": "anvil",
+          "description": "The path to the anvil executable. If anvil-autostart is set to true, the debugger will start the anvil server with this executable. If anvil is not in the PATH, you can set the path here.",
+          "order": 10
         },
         "simbolik.enable-parameters": {
           "type": "boolean",
           "default": false,
-          "description": "If set to true, the debugger will show a debug button above functions with parameters. Notice, that this requires a backend that supports parameter debugging. The default Foundry backend does not support parameter debugging."
+          "description": "If set to true, the debugger will show a debug button above functions with parameters. Notice, that this requires a backend that supports parameter debugging. The default Foundry backend does not support parameter debugging.",
+          "order": 11
+        },
+        "simbolik.show-sourcemaps": {
+          "type": "boolean",
+          "default": false,
+          "description": "If set to true, the debugger will include sourcemaps in the disassembly view. This is useful when debugging sourcemaps.",
+          "order": 12
+        },
+        "simbolik.bmc-depth": {
+          "type": "integer",
+          "description": "Signals the backend that it should only unroll loops up to this depth. This parameter is only relevant for symbolic execution backends.",
+          "default": 3,
+          "order": 13
         }
       }
     },
