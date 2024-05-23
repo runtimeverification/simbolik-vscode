@@ -66,6 +66,28 @@ export function activate(context: vscode.ExtensionContext) {
     supervisor.anvilTerminate();
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
+
+  vscode.debug.onDidReceiveDebugSessionCustomEvent(async event => {
+    if (event.event === 'api-key-validation-failed') {
+
+      const action = await vscode.window.showErrorMessage(
+        'API key validation failed',
+        'Open Settings',
+        'Learn More'
+      );
+      if (action === 'Open Settings') {
+        vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          'simbolik.apiKey'
+        );
+      }
+      if (action === 'Learn More') {
+        vscode.env.openExternal(vscode.Uri.parse('https://simbolik.runtimeverification.com'));
+      }
+
+    }
+    console.log(event);
+  });
 }
 
 // This method is called when your extension is deactivated
