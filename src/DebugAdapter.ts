@@ -76,7 +76,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   onDidSendMessage = this._onDidSendMessage.event;
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    const messageWithApiKey : vscode.DebugProtocolMessage & WithApiKey = Object.assign({}, message, {apiKey: "valid-api-key"});
+    const apiKey = getConfigValue('apiKey', '');
+    const messageWithApiKey : vscode.DebugProtocolMessage & WithApiKey = Object.assign({}, message, {apiKey});
     this.websocket.send(JSON.stringify(messageWithApiKey));
   }
 
