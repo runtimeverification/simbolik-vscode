@@ -61,6 +61,9 @@ function retry<T>(
 }
 
 type WithApiKey = { apiKey: string };
+type WithClientVersion = { clientVersion: string };
+
+type DebugProtocolMessage = vscode.DebugProtocolMessage & WithApiKey & WithClientVersion;
 
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -77,7 +80,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
     const apiKey = getConfigValue('apiKey', '');
-    const messageWithApiKey : vscode.DebugProtocolMessage & WithApiKey = Object.assign({}, message, {apiKey});
+    const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
+    const messageWithApiKey : DebugProtocolMessage = Object.assign({}, message, {apiKey, clientVersion});
     this.websocket.send(JSON.stringify(messageWithApiKey));
   }
 
