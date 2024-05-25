@@ -7,7 +7,7 @@ import {
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { Supervisor } from './supevervisor';
-import { forgeBuild, forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
+import { forgeBuild, foundryRoot, loadBuildInfo } from './foundry';
 
 export async function startDebugging(
   this: Supervisor,
