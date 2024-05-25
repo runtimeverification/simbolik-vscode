@@ -1,0 +1,59 @@
+on: workflow_dispatch
+
+name: Publish VS Code Extension to Microsoft Marketplace and Open VSX
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: 'Install nodejs 18'
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+      # Run install dependencies
+      - name: Install dependencies
+        run: |
+          corepack enable
+          yarn install
+      # Run tests
+      - name: Build
+        run: yarn run build
+      - name: Get current package version
+        id: package_version
+        uses: martinbeentjes/npm-get-version-action@v1.1.0
+      - name: Check version is mentioned in Changelog
+        uses: mindsers/changelog-reader-action@v2.0.0
+        with:
+          version: ${{ steps.package_version.outputs.current-version }}
+          path: 'CHANGELOG.md'
+      - name: Create a Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name : ${{ steps.package_version.outputs.current-version}}
+          release_name: ${{ steps.package_version.outputs.current-version}}
+          body: Publish ${{ steps.package_version.outputs.current-version}}
+      - name:  Publish extension to Visual Studio Marketplace
+        id: create_vsix
+        uses: HaaLeo/publish-vscode-extension@v1
+        with:
+          pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+          registryUrl: https://marketplace.visualstudio.com
+      - name: Publish extension to Open VSX
+        uses: HaaLeo/publish-vscode-extension@v1
+        with:
+          pat: ${{ secrets.OPEN_VSX_TOKEN }}
+          extensionFile: ${{ steps.create_vsix.outputs.vsixPath }}
+          packagePath: ''
+      - name: Attach vsix to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.create_vsix.outputs.vsixPath}}
+          asset_name: ${{ steps.create_vsix.outputs.vsixPath}}
+          asset_content_type: application/vsix
