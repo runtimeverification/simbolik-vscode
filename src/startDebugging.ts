@@ -5,14 +5,17 @@ import {
   VariableDeclaration,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
-import {getConfigValue} from './utils';
-import {Supervisor} from './supevervisor';
+import { getConfigValue } from './utils';
+import { Supervisor } from './supevervisor';
+import { forgeBuild, forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 
 export async function startDebugging(
   this: Supervisor,
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
+
+  
   if (getConfigValue('anvil-autostart', true)) {
     this.anvilTerminate();
     this.anvil();
@@ -20,6 +23,17 @@ export async function startDebugging(
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');
+  }
+
+  const autobuild = getConfigValue('autobuild', true);
+
+  if (autobuild) {
+    try {
+      await forgeBuild(activeTextEditor);
+    } catch (e) {
+      vscode.window.showErrorMessage(e);
+      return;
+    }
   }
 
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(
@@ -55,12 +69,14 @@ export async function startDebugging(
   const file = activeTextEditor.document.uri.toString();
   const contractName = contract['name'];
   const methodSignature = `${method['name']}(${parameters.join(',')})`;
-
   const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', false);
   const showSourcemaps = getConfigValue('show-sourcemaps', false);
   const debugConfigName = `${contractName}.${methodSignature}`;
   const anvilPort = getConfigValue('anvil-port', '8545');
   const rpcUrl = `http://localhost:${anvilPort}`;
+  const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri.fsPath);
+  const buildInfo = await loadBuildInfo(activeTextEditor.document.uri.fsPath);
+  
   const myDebugConfig = debugConfig(
     debugConfigName,
     file,
@@ -68,68 +84,15 @@ export async function startDebugging(
     methodSignature,
     stopAtFirstOpcode,
     showSourcemaps,
-    rpcUrl
+    rpcUrl,
+    buildInfo,
+    myFoundryRoot
   );
 
-  const autobuild = getConfigValue('autobuild', true);
-
-  if (autobuild) {
-    autoBuild(activeTextEditor, workspaceFolder, myDebugConfig);
-  } else {
-    const session = await vscode.debug.startDebugging(
-      workspaceFolder,
-      myDebugConfig
-    );
-  }
-}
-
-async function autoBuild(
-  activeTextEditor: vscode.TextEditor,
-  workspaceFolder: vscode.WorkspaceFolder,
-  myDebugConfig: vscode.DebugConfiguration
-) {
-  const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
-  const buildExecution = await vscode.tasks.executeTask(build);
-  try {
-    await completed(buildExecution);
-    const session = await vscode.debug.startDebugging(
-      workspaceFolder,
-      myDebugConfig
-    );
-  } catch (e) {
-    const action = await vscode.window.showErrorMessage(
-      'Failed to build project.',
-      'Open Settings',
-      'Help'
-    );
-    if (action === 'Open Settings') {
-      vscode.commands.executeCommand(
-        'workbench.action.openSettings',
-        'forge-path'
-      );
-    }
-    if (action === 'Help') {
-      vscode.commands.executeCommand(
-        'vscode.open',
-        vscode.Uri.parse('https://docs.runtimeverification.com/simbolik/overview/troubleshooting#failed-to-build-project')
-      );
-      autoBuild(activeTextEditor, workspaceFolder, myDebugConfig);
-    }
-  }
-}
-
-function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-      if ((e.execution as any)._id !== (tastkExecution as any)._id) return;
-      if (e.exitCode !== 0) {
-        reject();
-      } else {
-        resolve();
-      }
-      disposable.dispose();
-    });
-  });
+  const session = await vscode.debug.startDebugging(
+    workspaceFolder,
+    myDebugConfig
+  );
 }
 
 function debugConfig(
@@ -139,7 +102,9 @@ function debugConfig(
   methodSignature: string,
   stopAtFirstOpcode: boolean,
   showSourcemaps: boolean,
-  rpcUrl: string
+  rpcUrl: string,
+  buildInfo: string,
+  clientMount: string
 ) {
   return {
     name: name,
@@ -150,35 +115,8 @@ function debugConfig(
     methodSignature: methodSignature,
     stopAtFirstOpcode: stopAtFirstOpcode,
     showSourcemaps: showSourcemaps,
-    rpcUrl: rpcUrl
+    rpcUrl: rpcUrl,
+    buildInfo: buildInfo,
+    clientMount: clientMount,
   };
-}
-
-function forgeBuildTask(file: string) {
-  const incrementalBuild = getConfigValue('incremental-build', false);
-  const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.substring(0, file.lastIndexOf('/'));
-  const task = new vscode.Task(
-    {
-      label: 'forge build',
-      type: 'shell',
-    },
-    vscode.TaskScope.Workspace,
-    'forge',
-    'simbolik',
-    new vscode.ShellExecution(forgePath, ['build'], {
-      cwd,
-      env: {
-        'FOUNDRY_OPTIMIZER': 'false',
-        'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources"]',
-        'FOUNDRY_BYTECODE_HASH': 'ipfs',
-        'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_CACHE': incrementalBuild ? 'true' : 'false',
-      }
-    })
-  );
-  task.isBackground = true;
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Always;
-  return task;
 }

@@ -15,5 +15,6 @@
     "src/extension.web.ts",
     "src/DebugAdapter.web.ts",
     "sampleWorkspace",
+    "node_modules",
   ]
 }
