@@ -11,7 +11,7 @@ export class Supervisor {
       vscode.window.showErrorMessage('Anvil failed to start');
     }
     vscode.tasks.onDidEndTaskProcess(async e => {
-      if (e.execution === this._anvil) {
+      if (e.execution === this._anvil && e.exitCode !== undefined) {
         this._anvil?.terminate();
         this._anvil = undefined;
         const action = await vscode.window.showErrorMessage(
@@ -71,6 +71,10 @@ export class Supervisor {
     this._anvil?.terminate();
     this._simbolik?.terminate();
   }
+
+  public anvilTerminate(): void {
+    this._anvil?.terminate();
+  }
 }
 
 function anvilTask() {
@@ -109,10 +113,7 @@ function simbolikTask() {
     vscode.TaskScope.Workspace,
     'simbolik',
     'simbolik',
-    new vscode.ShellExecution(
-      simbolikPath,
-      ['--port', port.toString()],
-    )
+    new vscode.ShellExecution(simbolikPath, ['--port', port.toString()])
   );
   task.isBackground = true;
   task.presentationOptions.reveal = vscode.TaskRevealKind.Never;
