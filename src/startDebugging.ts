@@ -5,8 +5,9 @@ import {
   VariableDeclaration,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
-import {getConfigValue} from './utils';
-import {Supervisor} from './supevervisor';
+import { getConfigValue } from './utils';
+import { Supervisor } from './supevervisor';
+import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 
 export async function startDebugging(
   this: Supervisor,
@@ -127,77 +128,4 @@ function debugConfig(
     buildInfo: buildInfo,
     clientMount: clientMount,
   };
-}
-
-function forgeBuildTask(file: string) {
-  const incrementalBuild = getConfigValue('incremental-build', false);
-  const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.substring(0, file.lastIndexOf('/'));
-  const task = new vscode.Task(
-    {
-      label: 'forge build',
-      type: 'shell',
-    },
-    vscode.TaskScope.Workspace,
-    'forge',
-    'simbolik',
-    new vscode.ShellExecution(forgePath, ['build'], {
-      cwd,
-      env: {
-        'FOUNDRY_OPTIMIZER': 'false',
-        'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources"]',
-        'FOUNDRY_BYTECODE_HASH': 'ipfs',
-        'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_CACHE': incrementalBuild ? 'true' : 'false',
-      }
-    })
-  );
-  task.isBackground = true;
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Always;
-  return task;
-}
-
-
-async function loadBuildInfo(file: string) : Promise<string> {
-  const root = await foundryRoot(file);
-  const buildInfo = await forgeBuildInfo(root);
-  return buildInfo[0];
-}
-
-async function foundryRoot(file: string) {
-  // Find the root of the project, which is the directory containing the foundry.toml file
-  let root = file;
-  let stat;
-  try {
-    stat = await vscode.workspace.fs.stat(vscode.Uri.file(`${root}/foundry.toml`));
-  } catch (e) {
-    stat = false;
-  }
-  while (!stat) {
-    const lastSlash = root.lastIndexOf('/');
-    if (lastSlash === -1) {
-      throw new Error('Could not find foundry.toml');
-    }
-    root = root.substring(0, lastSlash);
-    try {
-      stat = await vscode.workspace.fs.stat(vscode.Uri.file(`${root}/foundry.toml`));
-    } catch (e) {
-      stat = false;
-    }
-  }
-  return root;
-}
-
-async function forgeBuildInfo(root: string) : Promise<string[]> {
-  // Return the string contents of all build-info files. The files are stored under out/build-info/$hash.json
-  // TODO: Ordering of files. Should we sort by timestamp?
-  const buildInfoDir = `${root}/out/build-info`;
-  const buildInfoFiles = (await vscode.workspace.fs.readDirectory(vscode.Uri.file(buildInfoDir))).filter(([file, type]) => {
-    return type === vscode.FileType.File && file.endsWith('.json');
-  });
-  return Promise.all(buildInfoFiles.flatMap(async ([file, _type]) => {
-    const buildInfo = await vscode.workspace.fs.readFile(vscode.Uri.file(`${buildInfoDir}/${file}`));
-    return buildInfo.toString();
-  }));
 }
