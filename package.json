@@ -210,7 +210,7 @@
   "dependencies": {
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
-    "ws": "^8.16.0",
-    "toml": "^3.0.0"
+    "toml": "^3.0.0",
+    "ws": "^8.16.0"
   }
 }

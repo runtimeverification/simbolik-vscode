@@ -5,17 +5,15 @@ import {
   VariableDeclaration,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
-import { getConfigValue } from './utils';
-import { Supervisor } from './supevervisor';
-import { forgeBuild, foundryRoot, loadBuildInfo } from './foundry';
+import {getConfigValue} from './utils';
+import {Supervisor} from './supevervisor';
+import {forgeBuild, foundryRoot, loadBuildInfo} from './foundry';
 
 export async function startDebugging(
   this: Supervisor,
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
-
-  
   if (getConfigValue('anvil-autostart', true)) {
     this.anvilTerminate();
     this.anvil();
@@ -31,7 +29,7 @@ export async function startDebugging(
     try {
       await forgeBuild(activeTextEditor);
     } catch (e) {
-      vscode.window.showErrorMessage(e);
+      if (e instanceof Error) vscode.window.showErrorMessage(e.message);
       return;
     }
   }
@@ -76,7 +74,7 @@ export async function startDebugging(
   const rpcUrl = `http://localhost:${anvilPort}`;
   const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri.fsPath);
   const buildInfo = await loadBuildInfo(activeTextEditor.document.uri.fsPath);
-  
+
   const myDebugConfig = debugConfig(
     debugConfigName,
     file,
