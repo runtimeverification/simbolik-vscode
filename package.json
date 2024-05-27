@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "2.0.0-beta",
+  "version": "2.0.0",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -175,6 +175,7 @@
     ]
   },
   "scripts": {
+    "build": "npm run vscode:prepublish",
     "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-base-web -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
     "esbuild-base-web": "esbuild ./src/extension.web.ts --bundle --outfile=build/extension.web.js --external:vscode --format=esm --platform=browser",
