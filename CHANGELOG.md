@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [2.0.2] - 2024-05-27
+
+- Added information about the Simbolik API.
+
 ## [2.0.1] - 2024-05-27
 
 - Updated README.md with more detailed instructions and troubleshooting tips
