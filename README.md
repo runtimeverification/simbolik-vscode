@@ -4,6 +4,10 @@
 > This extension is currently in beta. If you encounter any issues, please report them on [GitHub](https://github.com/runtimeverification/simbolik-vscode/issues).
 > You need to have a free API key from the [Simbolik Website](https://simbolik.runtimeverification.com) to use this extension, see below for more information.
 
+> [!IMPORTANT]
+> The extension connects to the Simbolik API to provide debugging capabilities, and it transfers your compilation artifacts to our servers.
+> The data is deleted after the debugging session is finished.
+
 ## Overview
 
 Simbolik is a powerful extension that allows developers to debug their Solidity smart contracts directly within Visual Studio Code.
