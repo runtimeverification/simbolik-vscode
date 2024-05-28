@@ -7,7 +7,7 @@
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",
-				"${workspaceFolder}/../simbolik-examples"
+				"${workspaceFolder}/sampleWorkspace"
 			],
 			"outFiles": [
 				"${workspaceFolder}/build/*.js",
