@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
-import {parse as parseToml} from 'toml';
+import {parse as parseToml} from 'smol-toml';
 
 
 export
