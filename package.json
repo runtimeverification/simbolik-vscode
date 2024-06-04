@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "2.0.0",
+  "version": "2.0.3",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -210,7 +210,7 @@
   "dependencies": {
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
-    "toml": "^3.0.0",
+    "smol-toml": "^1.2.0",
     "ws": "^8.16.0"
   }
 }

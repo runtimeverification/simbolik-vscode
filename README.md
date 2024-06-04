@@ -1,5 +1,13 @@
 # Solidity Debugger for Visual Studio Code
 
+> [!IMPORTANT]
+> This extension is currently in beta. If you encounter any issues, please report them on [GitHub](https://github.com/runtimeverification/simbolik-vscode/issues).
+> You need to have a free API key from the [Simbolik Website](https://simbolik.runtimeverification.com) to use this extension, see below for more information.
+
+> [!IMPORTANT]
+> The extension connects to the Simbolik API to provide debugging capabilities, and it transfers your compilation artifacts to our servers.
+> The data is deleted after the debugging session is finished.
+
 ## Overview
 
 Simbolik is a powerful extension that allows developers to debug their Solidity smart contracts directly within Visual Studio Code.
@@ -8,26 +16,38 @@ With this extension, you can easily set breakpoints, inspect variables, step thr
 ## Features
 
 - **Step-by-step debugging**: Debug your Solidity smart contracts line by line.
+- **Inspect EVM state**: View the current state of the EVM while debugging.
 - **Breakpoints**: Set breakpoints in your Solidity code to pause execution and inspect the state.
-- **Variable inspection**: View the current values of variables while debugging.
 - **Bytecode debugging**: Debug the compiled bytecode of your Solidity contracts.
+
+## Coming Soon
+
+- **Variable inspection**: View the current values of variables while debugging.
+- **Foundry Cheatcodes**: Use Foundry's cheatcodes to quickly find bugs in your Solidity code.
+- **Symbolic Execution**: Enter an advanced symbolic execution mode to explore all possible paths through your Solidity code. You can get a sneak-peek of this feature at [try.simbolik.runtimeverification.com](try.simbolik.runtimeverification.com).
 
 ## Requirements
 
-To use the Solidity Debugger for Visual Studio Code, you need:
+To use the Solidity Debugger for Visual Studio Code, you need Foundry installed on your machine.
+Furthermore, you need a free API key from the Simbolik Website.
 
-- [Foundry](https://book.getfoundry.sh/) and a Foundry project.
-- [Simbolik Server](https://simbolik.runtimeverification.com/).
+### Setup Foundry
 
-```
+```bash
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
-pip3 install simbolik
 ```
+
+### Get a free API key
+
+1. Go to the [Simbolik Website](https://simbolik.runtimeverification.com) and login with GitHub, Metamask or Google.
+2. Copy the API key from the dashboard.
+3. Open the settings in Visual Studio Code and search for "Simbolik API Key".
+4. Paste the API key into the input field.
 
 ## Usage
 
-1. Open your Solidity project in Visual Studio Code.
+1. Open your Foundry project in Visual Studio Code. If you don't have a project at hand, you can clone our [example project](https://github.com/runtimeverification/simbolik-examples).
 2. Set breakpoints in your Solidity code by clicking on the gutter area next to the line numbers.
 3. Click the "Debug" button above any parameterless public/external function in your Solidity contract.
 5. Use the debug toolbar to step through your code, inspect variables, and control the debugging process.
