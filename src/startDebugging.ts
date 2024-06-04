@@ -5,9 +5,9 @@ import {
   VariableDeclaration,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
-import { getConfigValue } from './utils';
-import { Supervisor } from './supevervisor';
-import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
+import {getConfigValue} from './utils';
+import {Supervisor} from './supevervisor';
+import {forgeBuild, foundryRoot, loadBuildInfo} from './foundry';
 
 export async function startDebugging(
   this: Supervisor,
@@ -21,6 +21,17 @@ export async function startDebugging(
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');
+  }
+
+  const autobuild = getConfigValue('autobuild', true);
+
+  if (autobuild) {
+    try {
+      await forgeBuild(activeTextEditor);
+    } catch (e) {
+      if (e instanceof Error) vscode.window.showErrorMessage(e.message);
+      return;
+    }
   }
 
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(
@@ -61,18 +72,9 @@ export async function startDebugging(
   const debugConfigName = `${contractName}.${methodSignature}`;
   const anvilPort = getConfigValue('anvil-port', '8545');
   const rpcUrl = `http://localhost:${anvilPort}`;
-  const autobuild = getConfigValue('autobuild', true);
-  if (autobuild) {
-    const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
-    const buildExecution = await vscode.tasks.executeTask(build);
-    try {
-      await completed(buildExecution);
-    } catch (e) {
-      vscode.window.showErrorMessage('Failed to build project.');
-    }
-  }
   const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri.fsPath);
   const buildInfo = await loadBuildInfo(activeTextEditor.document.uri.fsPath);
+
   const myDebugConfig = debugConfig(
     debugConfigName,
     file,
@@ -84,24 +86,11 @@ export async function startDebugging(
     buildInfo,
     myFoundryRoot
   );
+
   const session = await vscode.debug.startDebugging(
     workspaceFolder,
     myDebugConfig
   );
-}
-
-function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-      if ((e.execution as any)._id !== (tastkExecution as any)._id) return;
-      if (e.exitCode !== 0) {
-        reject();
-      } else {
-        resolve();
-      }
-      disposable.dispose();
-    });
-  });
 }
 
 function debugConfig(

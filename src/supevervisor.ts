@@ -15,17 +15,26 @@ export class Supervisor {
         this._anvil?.terminate();
         this._anvil = undefined;
         const action = await vscode.window.showErrorMessage(
-          'Anvil terminated unexpectedly',
+          'Anvil terminated unexpectedly.',
           'Open Settings',
-          'Try Again'
+          'Try Again',
+          'Help'
         );
         if (action === 'Open Settings') {
           vscode.commands.executeCommand(
             'workbench.action.openSettings',
-            'simbolik.anvil-port'
+            'anvil-path'
           );
+          this.anvil();
         }
         if (action === 'Try Again') {
+          this.anvil();
+        }
+        if (action === 'Help') {
+          vscode.commands.executeCommand(
+            'vscode.open',
+            vscode.Uri.parse('https://docs.runtimeverification.com/simbolik/overview/troubleshooting#anvil-terminated-unexpectedly')
+          );
           this.anvil();
         }
       }
