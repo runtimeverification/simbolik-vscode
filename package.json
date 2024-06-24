@@ -109,10 +109,10 @@
           "description": "The path to the anvil executable. If anvil-autostart is set to true, the debugger will start the anvil server with this executable. If anvil is not in the PATH, you can set the path here.",
           "order": 10
         },
-        "simbolik.enable-parameters": {
+        "simbolik.enable-symbolic-excution": {
           "type": "boolean",
           "default": false,
-          "description": "If set to true, the debugger will show a debug button above functions with parameters. Notice, that this requires a backend that supports parameter debugging. The default Foundry backend does not support parameter debugging.",
+          "description": "Enable symbolic execution. Notice, this requires the Simbolik-Kontrol backend, which is not available in the public beta.",
           "order": 11
         },
         "simbolik.show-sourcemaps": {

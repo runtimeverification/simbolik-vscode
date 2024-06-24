@@ -6,6 +6,14 @@ type Location = any;
 type ContractDefinition = any;
 type FunctionDefinition = any;
 
+type CodeLenseCandiate = {
+  contract: ContractDefinition;
+  hasConstructorParams: boolean;
+  function: FunctionDefinition;
+  hasFunctionParams: boolean;
+};
+
+
 /**
  * CodelensProvider
  */
@@ -25,22 +33,37 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     document: vscode.TextDocument,
     token: vscode.CancellationToken
   ): Promise<vscode.CodeLens[]> {
+    const enableSymbolicExecution = getConfigValue('enable-symbolic-excution', false);
+
     const codeLenses = [];
     try {
       const content = document.getText();
       const ast = parser.parse(content, {loc: true});
-      const functions = this.getFunctions(ast);
-      for (const [contract, f] of functions) {
-        const loc = f.loc as Location;
+      const codeLenseCandiates = this.getCodeLenseCandidates(ast);
+      for (const codeLenseCandiate of codeLenseCandiates) {
+        const loc = codeLenseCandiate.function.loc as Location;
         const range: vscode.Range = this.locToRange(loc);
-        const debugCommand = {
-          title: '▷ Debug',
-          tooltip: 'Start symbolic debugging',
-          command: 'simbolik.startDebugging',
-          arguments: [contract, f],
-        };
-        const debugLens = new vscode.CodeLens(range, debugCommand);
-        codeLenses.push(debugLens);
+
+        if (!codeLenseCandiate.hasConstructorParams && !codeLenseCandiate.hasFunctionParams) {
+          const debugCommand = {
+            title: '▷ Debug',
+            tooltip: 'Start debugging',
+            command: 'simbolik.startDebugging',
+            arguments: [codeLenseCandiate.contract, codeLenseCandiate.function, 'RPCDriver'],
+          };
+          const debugLens = new vscode.CodeLens(range, debugCommand);
+          codeLenses.push(debugLens);
+        }
+        if (!codeLenseCandiate.hasConstructorParams && enableSymbolicExecution) {
+          const symbolicCommand = {
+            title: 'ᗌ Symbolic',
+            tooltip: 'Start symbolic debugging',
+            command: 'simbolik.startDebugging',
+            arguments: [codeLenseCandiate.contract, codeLenseCandiate.function, 'KontrolDriver'],
+          };
+          const symdebugLens = new vscode.CodeLens(range, symbolicCommand);
+          codeLenses.push(symdebugLens);
+        }
       }
     } catch (e) {
       if (e instanceof parser.ParserError) {
@@ -57,9 +80,8 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     return new vscode.Range(start, end);
   }
 
-  private getFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
-    const enableParameters = getConfigValue('enable-parameters', false);
-    const results: [ContractDefinition, FunctionDefinition][] = [];
+  private getCodeLenseCandidates(ast: any): CodeLenseCandiate[] {
+    const results: CodeLenseCandiate[] = [];
     parser.visit(ast, {
       ContractDefinition: contract => {
         if (!this.canBeInstantiated(contract)) {
@@ -73,18 +95,18 @@ export class CodelensProvider implements vscode.CodeLensProvider {
             }
           },
         });
-        if (enableParameters || !hasConstructorArgs) {
-          parser.visit(contract, {
-            FunctionDefinition: fn => {
-              if (
-                this.isExecutable(fn) &&
-                (enableParameters || fn.parameters.length === 0)
-              ) {
-                results.push([contract, fn]);
-              }
-            },
-          });
-        }
+        parser.visit(contract, {
+          FunctionDefinition: fn => {
+            if ( this.isExecutable(fn) ) {
+              results.push({
+                contract,
+                hasConstructorParams: hasConstructorArgs,
+                function: fn,
+                hasFunctionParams: fn.parameters.length > 0,
+              });
+            }
+          },
+        });
       },
     });
     return results;
