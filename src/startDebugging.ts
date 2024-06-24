@@ -12,7 +12,8 @@ import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 export async function startDebugging(
   this: Supervisor,
   contract: ContractDefinition,
-  method: FunctionDefinition
+  method: FunctionDefinition,
+  driver: 'RPCBackend' | 'KontrolBackend' | string
 ) {
   if (getConfigValue('anvil-autostart', true)) {
     this.anvilTerminate();
@@ -82,7 +83,8 @@ export async function startDebugging(
     showSourcemaps,
     rpcUrl,
     buildInfo,
-    myFoundryRoot
+    myFoundryRoot,
+    driver
   );
   const session = await vscode.debug.startDebugging(
     workspaceFolder,
@@ -113,7 +115,8 @@ function debugConfig(
   showSourcemaps: boolean,
   rpcUrl: string,
   buildInfo: string,
-  clientMount: string
+  clientMount: string,
+  driver: 'RPCBackend' | 'KontrolBackend' | string
 ) {
   return {
     name: name,
@@ -127,5 +130,6 @@ function debugConfig(
     rpcUrl: rpcUrl,
     buildInfo: buildInfo,
     clientMount: clientMount,
+    driver: driver,
   };
 }
