@@ -7,7 +7,7 @@ import {
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { Supervisor } from './supevervisor';
-import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
+import { forgeCleanTask, forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 
 export async function startDebugging(
   this: Supervisor,
@@ -63,6 +63,13 @@ export async function startDebugging(
   const rpcUrl = `http://localhost:${anvilPort}`;
   const autobuild = getConfigValue('autobuild', true);
   if (autobuild) {
+    const clean = forgeCleanTask(activeTextEditor.document.uri.fsPath);
+    const cleanExecution = await vscode.tasks.executeTask(clean);
+    try {
+      await completed(cleanExecution);
+    } catch (e) {
+      vscode.window.showErrorMessage('Failed to clean project.');
+    }
     const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
     const buildExecution = await vscode.tasks.executeTask(build);
     try {
