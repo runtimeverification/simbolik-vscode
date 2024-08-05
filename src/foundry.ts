@@ -2,6 +2,26 @@ import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
 
+export
+function forgeCleanTask(file: string) {
+  const forgePath = getConfigValue('forge-path', 'forge');
+  const cwd = file.substring(0, file.lastIndexOf('/'));
+  const task = new vscode.Task(
+    {
+      label: 'forge clean',
+      type: 'shell',
+    },
+    vscode.TaskScope.Workspace,
+    'forge',
+    'simbolik',
+    new vscode.ShellExecution(forgePath, ['clean'], {
+      cwd,
+    })
+  );
+  task.isBackground = true;
+  task.presentationOptions.reveal = vscode.TaskRevealKind.Always;
+  return task;
+}
 
 export
 function forgeBuildTask(file: string) {
