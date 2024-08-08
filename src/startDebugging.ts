@@ -68,7 +68,7 @@ export async function startDebugging(
     try {
       await completed(buildExecution);
     } catch (e) {
-      vscode.window.showErrorMessage('Failed to build project.');
+      throw new Error('Failed to build project.');
     }
   }
   const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri.fsPath);
