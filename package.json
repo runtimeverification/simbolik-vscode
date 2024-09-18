@@ -55,34 +55,34 @@
           "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
           "order": 1
         },
+        "simbolik.json-rpc-url": {
+          "type": "string",
+          "default": "http://localhost:8545",
+          "description": "The URL of the JSON-RPC server. Notice, that the JSON RPC server must be reachable from the simbolik server. `localhost` here refers to the machine where the simbolik server is running.",
+          "order": 2
+        },
         "simbolik.forge-path": {
           "type": "string",
           "default": "forge",
           "description": "The path to the forge executable. Simbolik uses forge to compile the smart contracts. If forge is not in the PATH, you can set the path here.",
-          "order": 2
+          "order": 23
         },
         "simbolik.autobuild": {
           "type": "boolean",
           "default": true,
           "description": "If set to true, the debugger will automatically build the project before starting the debugger.",
-          "order": 3
+          "order": 4
         },
         "simbolik.incremental-build": {
           "type": "boolean",
           "default": false,
           "description": "If autobuild is eanbled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
-          "order": 4
+          "order": 5
         },
         "simbolik.stop-at-first-opcode": {
           "type": "boolean",
           "description": "If set to true, the debugger will stop at the first opcode. Otherwise it will stop at the function entry. Disabling this option is experimental and may lead to unexpected behavior.",
           "default": true,
-          "order": 5
-        },
-        "simbolik.anvil-port": {
-          "type": "integer",
-          "default": 8545,
-          "description": "The port where the Anvil server is listening. If anvil-autostart is set to true, the debugger passes this port to the anvil server. This options is only used when you're running your own simbolik server.",
           "order": 6
         },
         "simbolik.simbolik-autostart": {
@@ -126,6 +126,30 @@
           "description": "Signals the backend that it should only unroll loops up to this depth. This parameter is only relevant for symbolic execution backends.",
           "default": 3,
           "order": 13
+        },
+        "simbolik.auto-open-disassembly-view": {
+          "type": "boolean",
+          "description": "If set to true, the debugger will automatically open the disassembly view when starting a debugging session.",
+          "default": true,
+          "order": 14
+        },
+        "simbolik.sourcify-autostart": {
+          "type": "boolean",
+          "description": "If set to true, the debugger will start the sourcify server for every debugging session. Only set this to true if you are running your own simbolik server.",
+          "default": false,
+          "order": 15
+        },
+        "simbolik.sourcify-solc-repo": {
+          "type": "string",
+          "description": "The folder containing different solidity compiler versions.",
+          "default": "~/.local/bin",
+          "order": 16
+        },
+        "simbolik.sourcify-url": {
+          "type": "string",
+          "description": "The URL of the Sourcify server. This is only relevant if you are running your own Sourcify server.",
+          "default": "http://localhost:5555",
+          "order": 17
         }
       }
     },
@@ -143,7 +167,9 @@
             "required": [
               "file",
               "contractName",
-              "methodSignature"
+              "methodSignature",
+              "jsonRpcUrl",
+              "clientMount"
             ],
             "properties": {
               "contractName": {
@@ -158,6 +184,14 @@
                 "type": "string",
                 "description": "The file containing the smart contract to debug."
               },
+              "clientMount": {
+                "type": "string",
+                "description": "The absolute file system path to the project root."
+              },
+              "jsonRpcUrl": {
+                "type": "string",
+                "description": "The URL of the JSON-RPC server."
+              },
               "stopAtFirstOpcode": {
                 "type": "boolean",
                 "description": "If set to true, the debugger will stop at the first opcode.",
@@ -169,12 +203,99 @@
                 "default": false
               }
             }
+          },
+          "attach": {
+            "required": [
+              "txHash",
+              "jsonRpcUrl",
+              "sourcifyUrl",
+              "clientMount"
+            ],
+            "properties": {
+              "txHash": {
+                "type": "string",
+                "description": "The transaction hash to attach to."
+              },
+              "jsonRpcUrl": {
+                "type": "string",
+                "description": "The URL of the JSON-RPC server."
+              },
+              "sourcifyUrl": {
+                "type": "string",
+                "description": "The URL of the Sourcify server."
+              },
+              "stopAtFirstOpcode": {
+                "type": "boolean",
+                "description": "If set to true, the debugger will stop at the first opcode.",
+                "default": false
+              },
+              "showSourcemaps": {
+                "type": "boolean",
+                "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
+                "default": false
+              },
+              "clientMount": {
+                "type": "string",
+                "description": "The absolute file system path to the project root."
+              }
+            }
           }
         }
+      }
+    ],
+    "menus": {
+      "debug/toolBar": [
+        {
+          "command": "simbolik.toNextJump",
+          "when": "debugType == 'solidity'",
+          "group": "simbolik@1"
+        },
+        {
+          "command": "simbolik.toNextCall",
+          "when": "debugType == 'solidity'",
+          "group": "simbolik@2"
+        },
+        {
+          "command": "simbolik.outInternalCall",
+          "when": "debugType == 'solidity'",
+          "group": "simbolik@3"
+        },
+        {
+          "command": "simbolik.outExternalCall",
+          "when": "debugType == 'solidity'",
+          "group": "simbolik@4"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "simbolik.toNextJump",
+        "title": "Step to next jump",
+        "category": "Debug",
+        "icon": "$(debug-step-into)"
+      },
+      {
+        "command": "simbolik.toNextCall",
+        "title": "Step to next call",
+        "category": "Debug",
+        "icon": "$(debug-step-into)"
+      },
+      {
+        "command": "simbolik.outInternalCall",
+        "title": "Step out of internal call",
+        "category": "Debug",
+        "icon": "$(debug-step-out)"
+      },
+      {
+        "command": "simbolik.outExternalCall",
+        "title": "Step out of external call",
+        "category": "Debug",
+        "icon": "$(debug-step-out)"
       }
     ]
   },
   "scripts": {
+    "build-sourcify": "cd vendor/sourcify && npm install && npm run build:lerna",
     "build": "npm run vscode:prepublish",
     "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-base-web -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
@@ -187,7 +308,6 @@
     "test": "node ./out/test/runTest.js",
     "clean": "gts clean",
     "fix": "gts fix",
-    "prepare": "npm run compile",
     "posttest": "npm run lint"
   },
   "devDependencies": {
@@ -211,6 +331,7 @@
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
+    "sourcify-server": "file:./vendor/sourcify/services/server",
     "ws": "^8.16.0"
   }
 }

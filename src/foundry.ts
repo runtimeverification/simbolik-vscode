@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
 
-
 export
 function forgeBuildTask(file: string) {
   const incrementalBuild = getConfigValue('incremental-build', false);

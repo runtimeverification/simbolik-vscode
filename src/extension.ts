@@ -7,6 +7,7 @@ import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 import {Supervisor} from './supevervisor';
 import {getConfigValue} from './utils';
+import { debug } from 'console';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Symbolic Solidity Debugger',
@@ -44,12 +45,44 @@ export function activate(context: vscode.ExtensionContext) {
 
   disposable = vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    startDebugging,
-    supervisor
+    (contract, method) => startDebugging(supervisor, contract, method),
   );
   context.subscriptions.push(disposable);
 
   disposable = vscode.commands.registerCommand('simbolik.viewKast', viewKast);
+  context.subscriptions.push(disposable);
+
+  disposable = vscode.commands.registerCommand('simbolik.toNextJump', () => {
+    const debugSession = vscode.debug.activeDebugSession;
+    const threadId = vscode.debug.activeStackItem?.threadId;
+    if (debugSession != null && threadId != null) {
+      debugSession.customRequest('simbolik/stepToNextJumpdest', { threadId });
+    }
+  });
+  context.subscriptions.push(disposable);
+  disposable = vscode.commands.registerCommand('simbolik.toNextCall', () => {
+    const debugSession = vscode.debug.activeDebugSession;
+    const threadId = vscode.debug.activeStackItem?.threadId;
+    if (debugSession != null && threadId != null) {
+      debugSession.customRequest('simbolik/stepToNextCall', { threadId });
+    }
+  });
+  context.subscriptions.push(disposable);
+  disposable = vscode.commands.registerCommand('simbolik.outInternalCall', () => {
+    const debugSession = vscode.debug.activeDebugSession;
+    const threadId = vscode.debug.activeStackItem?.threadId;
+    if (debugSession != null && threadId != null) {
+      debugSession.customRequest('simbolik/stepOutInternalCall', { threadId });
+    }
+  });
+  context.subscriptions.push(disposable);
+  disposable = vscode.commands.registerCommand('simbolik.outExternalCall', () => {
+    const debugSession = vscode.debug.activeDebugSession;
+    const threadId = vscode.debug.activeStackItem?.threadId;
+    if (debugSession != null && threadId != null) {
+      debugSession.customRequest('simbolik/stepOutExterncallCall', { threadId });
+    }
+  });
   context.subscriptions.push(disposable);
 
   const kastProvider = new KastProvider();
@@ -60,6 +93,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
+    if (session.type === 'solidity') {
+      if (getConfigValue('auto-open-disassembly-view', true)) {
+        vscode.commands.executeCommand('debug.action.openDisassemblyView');
+     }
+    }
   });
 
   vscode.debug.onDidTerminateDebugSession(session => {

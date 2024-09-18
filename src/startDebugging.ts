@@ -10,14 +10,19 @@ import { Supervisor } from './supevervisor';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 
 export async function startDebugging(
-  this: Supervisor,
+  supervisor: Supervisor,
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
   if (getConfigValue('anvil-autostart', true)) {
-    this.anvilTerminate();
-    this.anvil();
+    supervisor.anvilTerminate();
+    supervisor.anvil();
   }
+
+  if (getConfigValue('sourcify-autostart', true)) {
+    await supervisor.sourcify();
+  }
+
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');
@@ -59,8 +64,8 @@ export async function startDebugging(
   const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', false);
   const showSourcemaps = getConfigValue('show-sourcemaps', false);
   const debugConfigName = `${contractName}.${methodSignature}`;
-  const anvilPort = getConfigValue('anvil-port', '8545');
-  const rpcUrl = `http://localhost:${anvilPort}`;
+  const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
+  const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
   const autobuild = getConfigValue('autobuild', true);
   if (autobuild) {
     const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
@@ -80,7 +85,8 @@ export async function startDebugging(
     methodSignature,
     stopAtFirstOpcode,
     showSourcemaps,
-    rpcUrl,
+    jsonRpcUrl,
+    sourcifyUrl,
     buildInfo,
     myFoundryRoot
   );
@@ -111,7 +117,8 @@ function debugConfig(
   methodSignature: string,
   stopAtFirstOpcode: boolean,
   showSourcemaps: boolean,
-  rpcUrl: string,
+  jsonRpcUrl: string,
+  sourcifyUrl: string,
   buildInfo: string,
   clientMount: string
 ) {
@@ -124,7 +131,8 @@ function debugConfig(
     methodSignature: methodSignature,
     stopAtFirstOpcode: stopAtFirstOpcode,
     showSourcemaps: showSourcemaps,
-    rpcUrl: rpcUrl,
+    jsonRpcUrl: jsonRpcUrl,
+    sourcifyUrl: sourcifyUrl,
     buildInfo: buildInfo,
     clientMount: clientMount,
   };

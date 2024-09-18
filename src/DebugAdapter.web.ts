@@ -1,34 +1,44 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 
-const DAP_CONNECTION_TIMEOUT_MILLISECONDS = 10000;
+// How long to wait for the server to respond before giving up
+const CONNECTION_TIMEOUT = 3000;
 
 export class SolidityDebugAdapterDescriptorFactory
   implements vscode.DebugAdapterDescriptorFactory
 {
-  async createDebugAdapterDescriptor(
+  createDebugAdapterDescriptor(
     session: vscode.DebugSession,
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
-    const server = getConfigValue('server', 'ws://localhost:6789');
-    const websocket = new WebSocket(server);
-    const timeout = new Promise((_, reject) =>
-      setTimeout(reject, DAP_CONNECTION_TIMEOUT_MILLISECONDS)
-    );
-    const connecting = new Promise((resolve, reject) => {
-      websocket.onopen = resolve;
-      websocket.onerror = reject;
+    return new Promise((resolve, reject) => {
+      const server = getConfigValue('server', 'ws://localhost:6789');
+      const websocket = new WebSocket(server);
+      websocket.onopen = () => {
+        const websocketAdapter = new WebsocketDebugAdapter(websocket);
+        const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
+        resolve(implementation);
+      };
+      websocket.onerror = () => {
+        if (websocket.readyState === WebSocket.OPEN) {
+          return;
+        }
+        websocket.close();
+        vscode.window.showWarningMessage(
+          "Oops! Simbolik's servers are currently experiencing technical difficulties. We apologize for the inconvenience, but we'll be back online shortly."
+        );
+      };
+      setTimeout(() => {
+        if (websocket.readyState === WebSocket.OPEN) {
+          return;
+        }
+        websocket.close();
+        reject(new Error('Connection timed out'));
+        vscode.window.showWarningMessage(
+          "Oops! Simbolik's servers are currently experiencing technical difficulties. We apologize for the inconvenience, but we'll be back online shortly."
+        );
+      }, CONNECTION_TIMEOUT);
     });
-    const joinedPromises = Promise.race([connecting, timeout]);
-    try {
-      await joinedPromises;
-    } catch (e: unknown) {
-      vscode.window.showWarningMessage(
-        "Oops! Simbolik's servers are currently experiencing technical difficulties. We apologize for the inconvenience, but we'll be back online shortly."
-      );
-    }
-    const websocketAdapter = new WebsocketDebugAdapter(websocket);
-    return new vscode.DebugAdapterInlineImplementation(websocketAdapter);
   }
 }
 
