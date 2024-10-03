@@ -18,6 +18,10 @@ export async function startDebugging(
     this.anvilTerminate();
     this.anvil();
   }
+  if (getConfigValue('kontrol-node', true)) {
+    this.kontrolTerminate();
+    this.kontrol();
+  }
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');
@@ -59,8 +63,12 @@ export async function startDebugging(
   const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', false);
   const showSourcemaps = getConfigValue('show-sourcemaps', false);
   const debugConfigName = `${contractName}.${methodSignature}`;
-  const anvilPort = getConfigValue('anvil-port', '8545');
-  const rpcUrl = `http://localhost:${anvilPort}`;
+  let port = getConfigValue('anvil-port', '8545');
+  port = getConfigValue('kontrol-node-port', '8081');
+  if (getConfigValue('kontrol-node', true)) {
+    port = getConfigValue('kontrol-node-port', '8081');
+  }
+  const rpcUrl = `http://localhost:${port}`;
   const autobuild = getConfigValue('autobuild', true);
   if (autobuild) {
     const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);

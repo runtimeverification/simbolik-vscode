@@ -64,6 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidTerminateDebugSession(session => {
     supervisor.anvilTerminate();
+    supervisor.kontrolTerminate();
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
 
