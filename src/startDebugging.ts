@@ -19,10 +19,6 @@ export async function startDebugging(
     supervisor.anvil();
   }
 
-  if (getConfigValue('sourcify-autostart', true)) {
-    await supervisor.sourcify();
-  }
-
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');

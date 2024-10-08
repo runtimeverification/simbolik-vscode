@@ -81,7 +81,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
 
   /**
    * Recursively walk over all object properties and for each property
-   * names `path` and type `string`, remove the foundry root from the path.
+   * named `path` and type `string`, remove the foundry root from the path.
    * @param message
    */
   trimPaths(message: {[key: string]: any} | any[] ) : {[key: string]: any} | any[] {
@@ -105,7 +105,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
 
   /**
    * Recursively walk over all object properties and for each property
-   * names `path` and type `string`, prepend the foundry root to the path.
+   * named `path` and type `string`, prepend the foundry root to the path.
    * @param message
    */
   prependPaths(message: {[key: string]: any} | any[]) : {[key: string]: any} | any[] {
