@@ -7,7 +7,7 @@ import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 
 const outputChannel = vscode.window.createOutputChannel(
-  'Symbolic Solidity Debugger',
+  'Simbolik Solidity Debugger',
   {log: true}
 );
 

@@ -10,7 +10,7 @@ import {getConfigValue} from './utils';
 import { debug } from 'console';
 
 const outputChannel = vscode.window.createOutputChannel(
-  'Symbolic Solidity Debugger',
+  'Simbolik Solidity Debugger',
   {log: true}
 );
 
