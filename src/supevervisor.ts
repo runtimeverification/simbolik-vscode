@@ -1,9 +1,6 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 
-
-import { SessionOptions } from 'express-session';
-
 export class Supervisor {
   private _simbolik: vscode.TaskExecution | undefined;
   private _anvil: vscode.TaskExecution | undefined;
