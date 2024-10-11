@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "2.0.3",
+  "version": "3.0.0",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -241,56 +241,6 @@
             }
           }
         }
-      }
-    ],
-    "menus": {
-      "debug/toolBar": [
-        {
-          "command": "simbolik.toNextJump",
-          "when": "debugType == 'solidity'",
-          "group": "simbolik@1"
-        },
-        {
-          "command": "simbolik.toNextCall",
-          "when": "debugType == 'solidity'",
-          "group": "simbolik@2"
-        },
-        {
-          "command": "simbolik.outInternalCall",
-          "when": "debugType == 'solidity'",
-          "group": "simbolik@3"
-        },
-        {
-          "command": "simbolik.outExternalCall",
-          "when": "debugType == 'solidity'",
-          "group": "simbolik@4"
-        }
-      ]
-    },
-    "commands": [
-      {
-        "command": "simbolik.toNextJump",
-        "title": "Step to next jump",
-        "category": "Debug",
-        "icon": "$(debug-step-into)"
-      },
-      {
-        "command": "simbolik.toNextCall",
-        "title": "Step to next call",
-        "category": "Debug",
-        "icon": "$(debug-step-into)"
-      },
-      {
-        "command": "simbolik.outInternalCall",
-        "title": "Step out of internal call",
-        "category": "Debug",
-        "icon": "$(debug-step-out)"
-      },
-      {
-        "command": "simbolik.outExternalCall",
-        "title": "Step out of external call",
-        "category": "Debug",
-        "icon": "$(debug-step-out)"
       }
     ]
   },
