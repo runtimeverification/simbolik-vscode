@@ -1,3 +1,0 @@
-[submodule "vendor/sourcify"]
-	path = vendor/sourcify
-	url = git@github.com:ethereum/sourcify.git
