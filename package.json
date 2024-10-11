@@ -245,7 +245,6 @@
     ]
   },
   "scripts": {
-    "build-sourcify": "cd vendor/sourcify && npm install && npm run build:lerna",
     "build": "npm run vscode:prepublish",
     "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-base-web -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
@@ -281,7 +280,6 @@
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
-    "sourcify-server": "file:./vendor/sourcify/services/server",
     "ws": "^8.16.0"
   }
 }
