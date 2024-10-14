@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "2.0.3",
+  "version": "3.0.0",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -79,53 +79,35 @@
           "default": true,
           "order": 5
         },
-        "simbolik.anvil-port": {
-          "type": "integer",
-          "default": 8545,
-          "description": "The port where the Anvil server is listening. If anvil-autostart is set to true, the debugger passes this port to the anvil server. This options is only used when you're running your own simbolik server.",
-          "order": 6
-        },
-        "simbolik.simbolik-autostart": {
-          "type": "boolean",
-          "default": false,
-          "description": "If set to true, the debugger will start the simbolik server automatically with VSCode. This option can only be used if you have the simbolik server installed on your machine.",
-          "order": 7
-        },
-        "simbolik.simbolik-path": {
-          "type": "string",
-          "default": "simbolik",
-          "description": "The path to the simbolik executable. If simbolik-autostart is set to true, the debugger will start the simbolik server with this executable. If simbolik is not in the PATH, you can set the path here.",
-          "order": 8
-        },
-        "simbolik.anvil-autostart": {
-          "type": "boolean",
-          "default": false,
-          "description": "If set to true, the debugger will start the anvil server for every debugging session. Only set this to true if you are running your own simbolik server.",
-          "order": 9
-        },
-        "simbolik.anvil-path": {
-          "type": "string",
-          "default": "anvil",
-          "description": "The path to the anvil executable. If anvil-autostart is set to true, the debugger will start the anvil server with this executable. If anvil is not in the PATH, you can set the path here.",
-          "order": 10
-        },
         "simbolik.enable-parameters": {
           "type": "boolean",
           "default": false,
           "description": "If set to true, the debugger will show a debug button above functions with parameters. Notice, that this requires a backend that supports parameter debugging. The default Foundry backend does not support parameter debugging.",
-          "order": 11
+          "order": 6
         },
         "simbolik.show-sourcemaps": {
           "type": "boolean",
           "default": false,
           "description": "If set to true, the debugger will include sourcemaps in the disassembly view. This is useful when debugging sourcemaps.",
-          "order": 12
+          "order": 7
         },
-        "simbolik.bmc-depth": {
-          "type": "integer",
-          "description": "Signals the backend that it should only unroll loops up to this depth. This parameter is only relevant for symbolic execution backends.",
-          "default": 3,
-          "order": 13
+        "simbolik.auto-open-disassembly-view": {
+          "type": "boolean",
+          "description": "If set to true, the debugger will automatically open the disassembly view when starting a debugging session.",
+          "default": true,
+          "order": 8
+        },
+        "simbolik.json-rpc-url": {
+          "type": "string",
+          "default": "http://localhost:8545",
+          "description": "Attach requests use this URL as the JSON-RPC endpoint. Notice, that the JSON RPC server must be reachable from the simbolik server. `localhost` here refers to the machine where the simbolik server is running.",
+          "order": 9
+        },
+        "simbolik.sourcify-url": {
+          "type": "string",
+          "description": "Attach requests use this Sourcify endpoint to download the source code of the debugged transaction.",
+          "default": "http://localhost:5555",
+          "order": 10
         }
       }
     },
@@ -143,7 +125,9 @@
             "required": [
               "file",
               "contractName",
-              "methodSignature"
+              "methodSignature",
+              "jsonRpcUrl",
+              "clientMount"
             ],
             "properties": {
               "contractName": {
@@ -158,6 +142,14 @@
                 "type": "string",
                 "description": "The file containing the smart contract to debug."
               },
+              "clientMount": {
+                "type": "string",
+                "description": "The absolute file system path to the project root."
+              },
+              "jsonRpcUrl": {
+                "type": "string",
+                "description": "The URL of the JSON-RPC server."
+              },
               "stopAtFirstOpcode": {
                 "type": "boolean",
                 "description": "If set to true, the debugger will stop at the first opcode.",
@@ -167,6 +159,42 @@
                 "type": "boolean",
                 "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
                 "default": false
+              }
+            }
+          },
+          "attach": {
+            "required": [
+              "txHash",
+              "jsonRpcUrl",
+              "sourcifyUrl",
+              "clientMount"
+            ],
+            "properties": {
+              "txHash": {
+                "type": "string",
+                "description": "The transaction hash to attach to."
+              },
+              "jsonRpcUrl": {
+                "type": "string",
+                "description": "The URL of the JSON-RPC server."
+              },
+              "sourcifyUrl": {
+                "type": "string",
+                "description": "The URL of the Sourcify server."
+              },
+              "stopAtFirstOpcode": {
+                "type": "boolean",
+                "description": "If set to true, the debugger will stop at the first opcode.",
+                "default": false
+              },
+              "showSourcemaps": {
+                "type": "boolean",
+                "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
+                "default": false
+              },
+              "clientMount": {
+                "type": "string",
+                "description": "The absolute file system path to the project root."
               }
             }
           }
@@ -187,7 +215,6 @@
     "test": "node ./out/test/runTest.js",
     "clean": "gts clean",
     "fix": "gts fix",
-    "prepare": "npm run compile",
     "posttest": "npm run lint"
   },
   "devDependencies": {

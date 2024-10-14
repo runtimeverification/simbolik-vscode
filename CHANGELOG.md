@@ -2,6 +2,12 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [3.0.0] - 2024-11-10
+
+- Compatibility with the latest version of the Simbolik API
+- Compatibility with the latest version of Foundry
+- Improved path mapping between local and remote file systems
+
 ## [2.0.3] - 2024-05-28
 
 - Fixed a bug in the TOML parser

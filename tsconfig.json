@@ -4,7 +4,8 @@
     "rootDir": "src",
     "outDir": "build",
     "lib": ["ES2022"],
-    "target": "ES2022"
+    "target": "ES2022",
+    "esModuleInterop": true
   },
   "include": [
     "src/**/*.ts",
@@ -16,5 +17,6 @@
     "src/DebugAdapter.web.ts",
     "sampleWorkspace",
     "node_modules",
+    "vendor",
   ]
 }

@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
 
-
 export
 function forgeBuildTask(file: string) {
   const incrementalBuild = getConfigValue('incremental-build', false);
@@ -21,10 +20,10 @@ function forgeBuildTask(file: string) {
       env: {
         'FOUNDRY_OPTIMIZER': 'false',
         'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources"]',
+        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.legacyAssembly"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_CACHE': incrementalBuild ? 'true' : 'false',
+        'FOUNDRY_FORCE': incrementalBuild ? 'false' : 'true',
       }
     })
   );
