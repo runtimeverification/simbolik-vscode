@@ -5,9 +5,7 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
-import {Supervisor} from './supevervisor';
 import {getConfigValue} from './utils';
-import { debug } from 'console';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -22,12 +20,6 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, your extension "simbolik" is now active!');
 
   let disposable: vscode.Disposable;
-
-  const supervisor = new Supervisor();
-  if (getConfigValue('simbolik-autostart', true)) {
-    supervisor.simbolik();
-  }
-  context.subscriptions.push(supervisor);
 
   const codelensProvider = new CodelensProvider();
   disposable = vscode.languages.registerCodeLensProvider(
@@ -45,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   disposable = vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    (contract, method) => startDebugging(supervisor, contract, method),
+    (contract, method) => startDebugging(contract, method),
   );
   context.subscriptions.push(disposable);
 
@@ -101,7 +93,6 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   vscode.debug.onDidTerminateDebugSession(session => {
-    supervisor.anvilTerminate();
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
 

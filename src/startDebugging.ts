@@ -6,19 +6,12 @@ import {
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
-import { Supervisor } from './supevervisor';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 
 export async function startDebugging(
-  supervisor: Supervisor,
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
-  if (getConfigValue('anvil-autostart', true)) {
-    supervisor.anvilTerminate();
-    supervisor.anvil();
-  }
-
   const activeTextEditor = vscode.window.activeTextEditor;
   if (!activeTextEditor) {
     throw new Error('No active text editor.');
@@ -57,7 +50,7 @@ export async function startDebugging(
   const file = activeTextEditor.document.uri.toString();
   const contractName = contract['name'];
   const methodSignature = `${method['name']}(${parameters.join(',')})`;
-  const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', false);
+  const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', true);
   const showSourcemaps = getConfigValue('show-sourcemaps', false);
   const debugConfigName = `${contractName}.${methodSignature}`;
   const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
