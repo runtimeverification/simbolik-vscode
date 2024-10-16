@@ -195,6 +195,10 @@
               "clientMount": {
                 "type": "string",
                 "description": "The absolute file system path to the project root."
+              },
+              "chainId": {
+                "type": "number",
+                "description": "The chain ID of the network."
               }
             }
           }
