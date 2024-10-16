@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [3.1.0] - 2024-16-10
+
+- Added `chainId` option to attach-configurations
+
 ## [3.0.0] - 2024-11-10
 
 - Compatibility with the latest version of the Simbolik API
