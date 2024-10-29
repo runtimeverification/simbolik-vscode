@@ -56,8 +56,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     websocket.onmessage = (message: MessageEvent) => {
       const payload = message.data.toString();
       const data = JSON.parse(payload);
-      const dataWithAbsolutePaht = this.prependPaths(data);
-      this._onDidSendMessage.fire(dataWithAbsolutePaht);
+      const dataWithAbsolutePaths = this.prependPaths(data);
+      this._onDidSendMessage.fire(dataWithAbsolutePaths);
     };
   }
 
