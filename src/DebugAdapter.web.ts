@@ -15,7 +15,7 @@ export class SolidityDebugAdapterDescriptorFactory
       const server = getConfigValue('server', 'ws://beta.simbolik.runtimeverification.com:3000');
       const websocket = new WebSocket(server);
       websocket.onopen = () => {
-        const websocketAdapter = new WebsocketDebugAdapter(websocket);
+        const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
         const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
         resolve(implementation);
       };
@@ -45,22 +45,88 @@ export class SolidityDebugAdapterDescriptorFactory
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 
-  constructor(private websocket: WebSocket) {
+  constructor(private websocket: WebSocket, private configuration: vscode.DebugConfiguration) {
     websocket.onmessage = (message: MessageEvent) => {
-      message.data.text().then((payload: string) => {
-        const json = JSON.parse(payload);
-        this._onDidSendMessage.fire(json);
-      });
+      const data = JSON.parse(message.data);
+      const dataWithAbsolutePaths = this.prependPaths(data);
+      this._onDidSendMessage.fire(dataWithAbsolutePaths);
     };
   }
 
   onDidSendMessage = this._onDidSendMessage.event;
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    this.websocket.send(JSON.stringify(message));
+    const messageWithRelativePaths = this.trimPaths(message);
+    this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
 
   dispose() {
     this.websocket.close();
   }
+
+  
+  foundryRoot() : string {
+    const uri = vscode.Uri.from(this.configuration['clientMount']);
+    return uri.toString();
+  }
+
+  /**
+   * Recursively walk over all object properties and for each property
+   * named `path` and type `string`, remove the foundry root from the path.
+   * @param message
+   */
+  trimPaths(message: {[key: string]: any} | any[] ) : {[key: string]: any} | any[] {
+    if (Array.isArray(message)) {
+      return message.map((item) => this.trimPaths(item));
+    } else if (message instanceof Object) {
+      const result = Object.assign({}, message);
+      for (const key in message) {
+        if (['path', 'symbolFilePath'].includes(key) && typeof message[key] === 'string') {
+          console.log('before', result[key]);
+          result[key] = stripPrefix(message[key], this.foundryRoot());
+          console.log('after', result[key]);
+        } else if (key == 'file' && typeof message[key] === 'string') {
+          console.log('before', result[key]);
+          result[key] = stripPrefix(message[key], this.foundryRoot());
+          console.log('after', result[key]);
+        } else if (typeof message[key] === 'object') {
+          result[key] = this.trimPaths(message[key]);
+        }
+      }
+      return result;
+    }
+    return message;
+  }
+
+  /**
+   * Recursively walk over all object properties and for each property
+   * named `path` and type `string`, prepend the foundry root to the path.
+   * @param message
+   */
+  prependPaths(message: {[key: string]: any} | any[]) : {[key: string]: any} | any[] {
+    if (Array.isArray(message)) {
+      return message.map((item) => this.prependPaths(item));
+    } else if (message instanceof Object) {
+      const result = Object.assign({}, message);
+      for (const key in message) {
+        if (['path', 'symbolFilePath', 'file'].includes(key) && typeof message[key] === 'string') {
+          result[key] = `${this.foundryRoot()}/${message[key]}`;
+        } else if (key == 'file' && typeof message[key] === 'string') {
+          result[key] = `file://${this.foundryRoot()}/${message[key]}`;
+        } else if (typeof message[key] === 'object') {
+          result[key] = this.prependPaths(message[key]);
+        }
+      }
+      return result;
+    }
+    return message;
+  }
+}
+
+
+function stripPrefix(s: string, prefix: string): string {
+  if (s.startsWith(prefix)) {
+    return s.slice(prefix.length);
+  }
+  return s;
 }

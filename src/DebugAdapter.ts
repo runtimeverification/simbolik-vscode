@@ -76,7 +76,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   }
 
   foundryRoot() : string {
-    return this.configuration['clientMount']
+    return (this.configuration['clientMount'] as vscode.Uri).toString();
   }
 
   /**

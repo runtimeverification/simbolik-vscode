@@ -6,6 +6,8 @@ import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 
+console.log("Hello from Simbolik!");
+
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
   {log: true}
@@ -36,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   disposable = vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    startDebugging
+    (contract, method) => startDebugging(contract, method),
   );
   context.subscriptions.push(disposable);
 
@@ -51,6 +53,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
+    if (session.type === 'solidity') {
+      vscode.commands.executeCommand('debug.action.openDisassemblyView');
+    }
+  });
+
+  vscode.debug.onDidTerminateDebugSession(session => {
+    outputChannel.info(`Debug session ended: ${session.id}`);
   });
 }
 

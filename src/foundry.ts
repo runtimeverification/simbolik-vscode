@@ -3,10 +3,10 @@ import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
 
 export
-function forgeBuildTask(file: string) {
+function forgeBuildTask(file: vscode.Uri) {
   const incrementalBuild = getConfigValue('incremental-build', false);
   const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.substring(0, file.lastIndexOf('/'));
+  const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
   const task = new vscode.Task(
     {
       label: 'forge build',
@@ -33,56 +33,59 @@ function forgeBuildTask(file: string) {
 }
 
 export
-async function loadBuildInfo(file: string): Promise<string> {
+async function loadBuildInfo(file: vscode.Uri): Promise<string> {
   const root = await foundryRoot(file);
   const buildInfo = await forgeBuildInfo(root);
   return buildInfo;
 }
 
 export
-async function foundryRoot(file: string) {
+async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
   // Find the root of the project, which is the directory containing the foundry.toml file
-  let root = file;
+  let base = file.with({'path': '/'})
+  let pathSegments = file.path.split('/');
   let stat;
   try {
-    stat = await vscode.workspace.fs.stat(vscode.Uri.file(`${root}/foundry.toml`));
+    const uri = vscode.Uri.joinPath(base, ...pathSegments, 'foundry.toml');
+    stat = await vscode.workspace.fs.stat(uri);
   } catch (e) {
     stat = false;
   }
   while (!stat) {
-    const lastSlash = root.lastIndexOf('/');
-    if (lastSlash === -1) {
-      throw new Error('Could not find foundry.toml');
+    if (pathSegments.length === 0) {
+      throw new Error('No foundry.toml found');
     }
-    root = root.substring(0, lastSlash);
+    pathSegments.pop();
     try {
-      stat = await vscode.workspace.fs.stat(vscode.Uri.file(`${root}/foundry.toml`));
+      const uri = vscode.Uri.joinPath(base, ...pathSegments, 'foundry.toml');
+      stat = await vscode.workspace.fs.stat(uri);
     } catch (e) {
       stat = false;
     }
   }
-  return root;
+  return vscode.Uri.joinPath(base, ...pathSegments);
 }
 
 export
 type FoundryConfig = { 'profile'?: { [profile: string]: { [key: string]: string } } };
 
 export
-async function foundryConfig(root: string): Promise<FoundryConfig> {
-  const configPath = `${root}/foundry.toml`;
-  const config = await vscode.workspace.fs.readFile(vscode.Uri.file(configPath));
-  return parseToml(config.toString());
+async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
+  const configPath = vscode.Uri.joinPath(root, 'foundry.toml');
+  const config = await vscode.workspace.fs.readFile(configPath);
+  const text = new TextDecoder().decode(config);
+  return parseToml(text);
 }
 
-async function forgeBuildInfo(root: string): Promise<string> {
+async function forgeBuildInfo(root: vscode.Uri): Promise<string> {
   const config = await foundryConfig(root);
   const out = config?.profile?.default?.out ?? 'out';
 
   // Get the contents of the youngest build-info file
-  const buildInfoDir = `${root}/${out}/build-info`;
+  const buildInfoDir = vscode.Uri.joinPath(root, out, 'build-info');
 
   // Get list of build-info files
-  const files = await vscode.workspace.fs.readDirectory(vscode.Uri.file(buildInfoDir));
+  const files = await vscode.workspace.fs.readDirectory(buildInfoDir);
   const buildInfoFiles = files.filter(([file, type]) => type === vscode.FileType.File && file.endsWith('.json'));
 
   if (buildInfoFiles.length === 0) {
@@ -95,13 +98,14 @@ async function forgeBuildInfo(root: string): Promise<string> {
 
   // Read the youngest build-info file
   const youngestBuildInfo = await vscode.workspace.fs.readFile(sortedFiles[0].uri);
-  return youngestBuildInfo.toString();
+  const text = new TextDecoder().decode(youngestBuildInfo);
+  return text;
 }
 
-async function getSortedFilesByCreationTime(buildInfoDir: string, buildInfoFiles: [string, vscode.FileType][]): Promise<{ file: string, uri: vscode.Uri, ctime: number }[]> {
+async function getSortedFilesByCreationTime(buildInfoDir: vscode.Uri, buildInfoFiles: [string, vscode.FileType][]): Promise<{ file: string, uri: vscode.Uri, ctime: number }[]> {
   const filesWithStats = await Promise.all(
     buildInfoFiles.map(async ([file]) => {
-      const fileUri = vscode.Uri.file(`${buildInfoDir}/${file}`);
+      const fileUri = vscode.Uri.joinPath(buildInfoDir, file);
       const fileStat = await vscode.workspace.fs.stat(fileUri);
       return { file, uri: fileUri, ctime: fileStat.ctime };
     })
