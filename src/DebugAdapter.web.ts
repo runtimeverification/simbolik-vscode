@@ -42,11 +42,17 @@ export class SolidityDebugAdapterDescriptorFactory
   }
 }
 
+type WithApiKey = { apiKey: string };
+type WithClientVersion = { clientVersion: string };
+
+type DebugProtocolMessage = vscode.DebugProtocolMessage & WithApiKey & WithClientVersion;
+
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 
   constructor(private websocket: WebSocket, private configuration: vscode.DebugConfiguration) {
     websocket.onmessage = (message: MessageEvent) => {
+      console.log('Received message', message);
       const data = JSON.parse(message.data);
       const dataWithAbsolutePaths = this.prependPaths(data);
       this._onDidSendMessage.fire(dataWithAbsolutePaths);
@@ -56,7 +62,12 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   onDidSendMessage = this._onDidSendMessage.event;
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    const messageWithRelativePaths = this.trimPaths(message);
+    console.log('Sending message', message);
+    const apiKey = getConfigValue('api-key', '');
+    const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
+    const messageWithApiKey : DebugProtocolMessage = Object.assign({}, message, {apiKey, clientVersion});
+    const messageWithRelativePaths = this.trimPaths(messageWithApiKey);
+    console.log('Sending message with relative paths', messageWithRelativePaths);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
 
