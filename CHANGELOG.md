@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [3.1.1] - 2024-30-10
+
+- Communication with the Simbolik API is now done over HTTPS and WSS
+
 ## [3.1.0] - 2024-16-10
 
 - Added `chainId` option to attach-configurations

@@ -12,7 +12,7 @@ export class SolidityDebugAdapterDescriptorFactory
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
-      const server = getConfigValue('server', 'ws://beta.simbolik.runtimeverification.com:3000');
+      const server = getConfigValue('server', 'wss://beta.simbolik.runtimeverification.com');
       const websocket = new WebSocket(server);
       websocket.onopen = () => {
         const websocketAdapter = new WebsocketDebugAdapter(websocket);
