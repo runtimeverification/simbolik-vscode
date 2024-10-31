@@ -94,7 +94,7 @@
         "simbolik.auto-open-disassembly-view": {
           "type": "boolean",
           "description": "If set to true, the debugger will automatically open the disassembly view when starting a debugging session.",
-          "default": true,
+          "default": false,
           "order": 8
         },
         "simbolik.json-rpc-url": {

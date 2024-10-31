@@ -83,10 +83,11 @@ export function activate(context: vscode.ExtensionContext) {
     kastProvider
   );
 
+  
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
     if (session.type === 'solidity') {
-      if (getConfigValue('auto-open-disassembly-view', true)) {
+      if (getConfigValue('auto-open-disassembly-view', false)) {
         vscode.commands.executeCommand('debug.action.openDisassemblyView');
      }
     }

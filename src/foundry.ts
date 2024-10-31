@@ -20,7 +20,7 @@ function forgeBuildTask(file: vscode.Uri) {
       env: {
         'FOUNDRY_OPTIMIZER': 'false',
         'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.legacyAssembly"]',
+        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.legacyAssembly", "evm.deployedBytecode.immutableReferences"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
         'FOUNDRY_FORCE': incrementalBuild ? 'false' : 'true',
