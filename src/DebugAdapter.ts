@@ -76,7 +76,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   }
 
   foundryRoot() : string {
-    return (this.configuration['clientMount'] as vscode.Uri).toString();
+    return vscode.Uri.from(this.configuration['clientMount']).toString();
   }
 
   /**
@@ -93,7 +93,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
         if (['path', 'symbolFilePath'].includes(key) && typeof message[key] === 'string') {
           result[key] = stripPrefix(message[key], `${this.foundryRoot()}/`);
         } else if (key == 'file' && typeof message[key] === 'string') {
-          result[key] = stripPrefix(message[key], `file://${this.foundryRoot()}/`);
+          result[key] = stripPrefix(message[key], `${this.foundryRoot()}/`);
         } else if (typeof message[key] === 'object') {
           result[key] = this.trimPaths(message[key]);
         }
