@@ -5,6 +5,7 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
+import {getConfigValue} from './utils';
 
 console.log("Hello from Simbolik!");
 
@@ -54,7 +55,9 @@ export function activate(context: vscode.ExtensionContext) {
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
     if (session.type === 'solidity') {
-      vscode.commands.executeCommand('debug.action.openDisassemblyView');
+      if (getConfigValue('auto-open-disassembly-view', false)) {
+        vscode.commands.executeCommand('debug.action.openDisassemblyView');
+      }
     }
   });
 

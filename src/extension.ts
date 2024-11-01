@@ -89,7 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (session.type === 'solidity') {
       if (getConfigValue('auto-open-disassembly-view', false)) {
         vscode.commands.executeCommand('debug.action.openDisassemblyView');
-     }
+      }
     }
   });
 
