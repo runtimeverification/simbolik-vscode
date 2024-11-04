@@ -75,8 +75,12 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     this.websocket.close();
   }
 
-  foundryRoot() : string {
-    return vscode.Uri.from(this.configuration['clientMount']).toString();
+  foundryRoot() : vscode.Uri {
+    if (!this.configuration['clientMount']) {
+      return vscode.Uri.parse('file:///');
+    }
+    const uri = vscode.Uri.from(this.configuration['clientMount']);
+    return uri;
   }
 
   /**
@@ -91,9 +95,11 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
       const result = Object.assign({}, message);
       for (const key in message) {
         if (['path', 'symbolFilePath'].includes(key) && typeof message[key] === 'string') {
-          result[key] = stripPrefix(message[key], `${this.foundryRoot()}/`);
+          const uri = vscode.Uri.parse(message[key]);
+          result[key] = relativeTo(uri, this.foundryRoot());
         } else if (key == 'file' && typeof message[key] === 'string') {
-          result[key] = stripPrefix(message[key], `${this.foundryRoot()}/`);
+          const uri = vscode.Uri.parse(message[key]);
+          result[key] = relativeTo(uri, this.foundryRoot());
         } else if (typeof message[key] === 'object') {
           result[key] = this.trimPaths(message[key]);
         }
@@ -117,7 +123,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
         if (['path', 'symbolFilePath', 'file'].includes(key) && typeof message[key] === 'string') {
           result[key] = `${this.foundryRoot()}/${message[key]}`;
         } else if (key == 'file' && typeof message[key] === 'string') {
-          result[key] = `file://${this.foundryRoot()}/${message[key]}`;
+          result[key] = `${this.foundryRoot()}/${message[key]}`;
         } else if (typeof message[key] === 'object') {
           result[key] = this.prependPaths(message[key]);
         }
@@ -127,6 +133,14 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     return message;
   }
 
+}
+
+function relativeTo(uri: vscode.Uri, prefixUri: vscode.Uri): string {
+  const s = uri.path;
+  const prefix = prefixUri.path + '/';
+  const relative = stripPrefix(s, prefix);
+  const result = stripPrefix(relative, '/');
+  return result;
 }
 
 function stripPrefix(s: string, prefix: string): string {

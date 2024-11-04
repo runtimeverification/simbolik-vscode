@@ -52,7 +52,6 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
 
   constructor(private websocket: WebSocket, private configuration: vscode.DebugConfiguration) {
     websocket.onmessage = (message: MessageEvent) => {
-      console.log('Received message', message);
       const data = JSON.parse(message.data);
       const dataWithAbsolutePaths = this.prependPaths(data);
       this._onDidSendMessage.fire(dataWithAbsolutePaths);
@@ -62,12 +61,10 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   onDidSendMessage = this._onDidSendMessage.event;
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    console.log('Sending message', message);
     const apiKey = getConfigValue('api-key', '');
     const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
     const messageWithApiKey : DebugProtocolMessage = Object.assign({}, message, {apiKey, clientVersion});
     const messageWithRelativePaths = this.trimPaths(messageWithApiKey);
-    console.log('Sending message with relative paths', messageWithRelativePaths);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
 
@@ -75,10 +72,12 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     this.websocket.close();
   }
 
-  
-  foundryRoot() : string {
+  foundryRoot() : vscode.Uri {
+    if (!this.configuration['clientMount']) {
+      return vscode.Uri.parse('file:///');
+    }
     const uri = vscode.Uri.from(this.configuration['clientMount']);
-    return uri.toString();
+    return uri;
   }
 
   /**
@@ -93,13 +92,11 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
       const result = Object.assign({}, message);
       for (const key in message) {
         if (['path', 'symbolFilePath'].includes(key) && typeof message[key] === 'string') {
-          console.log('before', result[key]);
-          result[key] = stripPrefix(message[key], this.foundryRoot());
-          console.log('after', result[key]);
+          const uri = vscode.Uri.parse(message[key]);
+          result[key] = relativeTo(uri, this.foundryRoot());
         } else if (key == 'file' && typeof message[key] === 'string') {
-          console.log('before', result[key]);
-          result[key] = stripPrefix(message[key], this.foundryRoot());
-          console.log('after', result[key]);
+          const uri = vscode.Uri.parse(message[key]);
+          result[key] = relativeTo(uri, this.foundryRoot());
         } else if (typeof message[key] === 'object') {
           result[key] = this.trimPaths(message[key]);
         }
@@ -123,7 +120,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
         if (['path', 'symbolFilePath', 'file'].includes(key) && typeof message[key] === 'string') {
           result[key] = `${this.foundryRoot()}/${message[key]}`;
         } else if (key == 'file' && typeof message[key] === 'string') {
-          result[key] = `file://${this.foundryRoot()}/${message[key]}`;
+          result[key] = `${this.foundryRoot()}/${message[key]}`;
         } else if (typeof message[key] === 'object') {
           result[key] = this.prependPaths(message[key]);
         }
@@ -134,6 +131,16 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   }
 }
 
+function relativeTo(uri: vscode.Uri, prefixUri: vscode.Uri): string {
+  const s = uri.path;
+  const prefix = prefixUri.path;
+  const relative = stripPrefix(s, prefix);
+  const result = stripPrefix(relative, '/');
+  console.log('uri', uri);
+  console.log('prefixUri', prefixUri);
+  console.log('result', result);
+  return result;
+}
 
 function stripPrefix(s: string, prefix: string): string {
   if (s.startsWith(prefix)) {
