@@ -123,6 +123,32 @@ export function activate(context: vscode.ExtensionContext) {
     }
     console.log(event);
   });
+
+  // Check if the user opened the `simbolik-examples` repository.
+  // If so, we register a VSCode walkthrough to get the user up and running
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (workspaceFolders) {
+    const filePath = vscode.Uri.joinPath(workspaceFolders[0].uri, 'test', 'DebugCPAMM.sol');
+    vscode.workspace.fs.stat(filePath).then(
+      () => {
+        vscode.commands.executeCommand('setContext', 'simbolik.debugCPAMMFileExists', true);
+      },
+      () => {
+        vscode.commands.executeCommand('setContext', 'simbolik.debugCPAMMFileExists', false);
+      }
+    );
+
+    // Listen for when a text document is opened
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      const filePath = vscode.Uri.joinPath(workspaceFolders[0].uri, 'test', 'DebugCPAMM.sol').path;
+      if (document.uri.path === filePath) {
+        vscode.commands.executeCommand('setContext', 'simbolik.debugCPAMMFileOpened', true);
+      } else {
+        vscode.commands.executeCommand('setContext', 'simbolik.debugCPAMMFileOpened', false);
+      }
+    });
+  }
+
 }
 
 // This method is called when your extension is deactivated

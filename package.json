@@ -23,7 +23,8 @@
   ],
   "activationEvents": [
     "onDebug",
-    "onLanguage:solidity"
+    "onLanguage:solidity",
+    "onStartupFinished:isWeb"
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
@@ -203,6 +204,40 @@
             }
           }
         }
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "gettingStarted",
+        "title": "Getting Started with Simbolik",
+        "description": "Learn how to use Simbolik for debugging.",
+        "when": "simbolik.debugCPAMMFileExists",
+        "steps": [
+          {
+            "id": "openDebugCPAMMFile",
+            "title": "Open DebugCPAMM.sol",
+            "description": "Open the `test/DebugCPAMM.sol` file.",
+            "media": {
+              "image": "images/open-file.png",
+              "altText": "Open DebugCPAMM.sol"
+            },
+            "completionEvents": [
+              "onContext:simbolik.debugCPAMMFileOpened"
+            ]
+          },
+          {
+            "id": "clickDebugButton",
+            "title": "Click the Debug Button",
+            "description": "Click the `Debug` button above the `debugSwap()` function.",
+            "media": {
+              "image": "images/click-debug-button.png",
+              "altText": "Click Debug Button"
+            },
+            "completionEvents": [
+              "onCommand:simbolik.startDebugging"
+            ]
+          }
+        ]
       }
     ]
   },
