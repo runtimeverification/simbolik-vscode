@@ -57,7 +57,7 @@ export async function startDebugging(
   const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
   const autobuild = getConfigValue('autobuild', true);
   if (autobuild) {
-    const build = forgeBuildTask(activeTextEditor.document.uri.fsPath);
+    const build = forgeBuildTask(activeTextEditor.document.uri);
     const buildExecution = await vscode.tasks.executeTask(build);
     try {
       await completed(buildExecution);
@@ -65,8 +65,8 @@ export async function startDebugging(
       vscode.window.showErrorMessage('Failed to build project.');
     }
   }
-  const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri.fsPath);
-  const buildInfo = await loadBuildInfo(activeTextEditor.document.uri.fsPath);
+  const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
+  const buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
   const myDebugConfig = debugConfig(
     debugConfigName,
     file,
@@ -79,6 +79,7 @@ export async function startDebugging(
     buildInfo,
     myFoundryRoot
   );
+  console.log(myDebugConfig);
   const session = await vscode.debug.startDebugging(
     workspaceFolder,
     myDebugConfig
@@ -109,7 +110,7 @@ function debugConfig(
   jsonRpcUrl: string,
   sourcifyUrl: string,
   buildInfo: string,
-  clientMount: string
+  clientMount: vscode.Uri
 ) {
   return {
     name: name,
