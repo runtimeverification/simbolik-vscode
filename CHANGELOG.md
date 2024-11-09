@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [4.0.0] - 2024-11-09
+
+- Fixed the web extension.
+
 ## [3.1.1] - 2024-30-10
 
 - Communication with the Simbolik API is now done over HTTPS and WSS
