@@ -12,78 +12,91 @@ export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition
 ) {
-  const activeTextEditor = vscode.window.activeTextEditor;
-  if (!activeTextEditor) {
-    throw new Error('No active text editor.');
-  }
+  return await vscode.window.withProgress({
+    location: vscode.ProgressLocation.Notification,
+    title: "Simbolik",
+    cancellable: true
+  }, async (progress, token) => {
+    token.onCancellationRequested(() => {
+      throw new Error('Debugging session aborted on user request.');
+    });
 
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(
-    activeTextEditor.document.uri
-  );
-  if (!workspaceFolder) {
-    throw new Error('No workspace folder.');
-  }
+    const activeTextEditor = vscode.window.activeTextEditor;
+    if (!activeTextEditor) {
+      throw new Error('No active text editor.');
+    }
 
-  const parameters = method.parameters.flatMap((param: VariableDeclaration) => {
-    if (param.typeName === null) {
-      console.error(
-        `Missing TypeName for parameter ${param} in method ${method} in contract ${contract}`
-      );
-      return [];
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+      activeTextEditor.document.uri
+    );
+    if (!workspaceFolder) {
+      throw new Error('No workspace folder.');
     }
-    const typeName: TypeName = param.typeName;
-    if (!('name' in typeName)) {
-      console.error(
-        `Missing name for TypeName for parameter ${param} in method ${method} in contract ${contract}`
-      );
-      return [];
+
+    const parameters = method.parameters.flatMap((param: VariableDeclaration) => {
+      if (param.typeName === null) {
+        console.error(
+          `Missing TypeName for parameter ${param} in method ${method} in contract ${contract}`
+        );
+        return [];
+      }
+      const typeName: TypeName = param.typeName;
+      if (!('name' in typeName)) {
+        console.error(
+          `Missing name for TypeName for parameter ${param} in method ${method} in contract ${contract}`
+        );
+        return [];
+      }
+      if (typeof typeName.name !== 'string') {
+        console.error(
+          `Unexpected type for name of TypeName for parameter ${param} in method ${method} in contract ${contract}`
+        );
+        return [];
+      }
+      return [typeName.name];
+    });
+
+    const file = activeTextEditor.document.uri.toString();
+    const contractName = contract['name'];
+    const methodSignature = `${method['name']}(${parameters.join(',')})`;
+    const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', true);
+    const showSourcemaps = getConfigValue('show-sourcemaps', false);
+    const debugConfigName = `${contractName}.${methodSignature}`;
+    const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
+    const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
+    const autobuild = getConfigValue('autobuild', true);
+    if (autobuild) {
+      progress.report({ message: "Compiling" });
+      const build = forgeBuildTask(activeTextEditor.document.uri);
+      const buildExecution = await vscode.tasks.executeTask(build);
+      try {
+        await completed(buildExecution);
+      } catch (e) {
+        vscode.window.showErrorMessage('Failed to build project.');
+        return;
+      }
     }
-    if (typeof typeName.name !== 'string') {
-      console.error(
-        `Unexpected type for name of TypeName for parameter ${param} in method ${method} in contract ${contract}`
-      );
-      return [];
-    }
-    return [typeName.name];
+    const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
+    const buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+    const myDebugConfig = debugConfig(
+      debugConfigName,
+      file,
+      contractName,
+      methodSignature,
+      stopAtFirstOpcode,
+      showSourcemaps,
+      jsonRpcUrl,
+      sourcifyUrl,
+      buildInfo,
+      myFoundryRoot
+    );
+    console.log(myDebugConfig);
+    progress.report({message: "Launching testnet"});
+    const session = await vscode.debug.startDebugging(
+      workspaceFolder,
+      myDebugConfig
+    );
   });
-
-  const file = activeTextEditor.document.uri.toString();
-  const contractName = contract['name'];
-  const methodSignature = `${method['name']}(${parameters.join(',')})`;
-  const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', true);
-  const showSourcemaps = getConfigValue('show-sourcemaps', false);
-  const debugConfigName = `${contractName}.${methodSignature}`;
-  const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
-  const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
-  const autobuild = getConfigValue('autobuild', true);
-  if (autobuild) {
-    const build = forgeBuildTask(activeTextEditor.document.uri);
-    const buildExecution = await vscode.tasks.executeTask(build);
-    try {
-      await completed(buildExecution);
-    } catch (e) {
-      vscode.window.showErrorMessage('Failed to build project.');
-    }
-  }
-  const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
-  const buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
-  const myDebugConfig = debugConfig(
-    debugConfigName,
-    file,
-    contractName,
-    methodSignature,
-    stopAtFirstOpcode,
-    showSourcemaps,
-    jsonRpcUrl,
-    sourcifyUrl,
-    buildInfo,
-    myFoundryRoot
-  );
-  console.log(myDebugConfig);
-  const session = await vscode.debug.startDebugging(
-    workspaceFolder,
-    myDebugConfig
-  );
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
