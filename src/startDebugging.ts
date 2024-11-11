@@ -14,13 +14,8 @@ export async function startDebugging(
 ) {
   return await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
-    title: "Simbolik",
-    cancellable: true
-  }, async (progress, token) => {
-    token.onCancellationRequested(() => {
-      throw new Error('Debugging session aborted on user request.');
-    });
-
+    title: "Simbolik"
+  }, async (progress) => {
     const activeTextEditor = vscode.window.activeTextEditor;
     if (!activeTextEditor) {
       throw new Error('No active text editor.');
