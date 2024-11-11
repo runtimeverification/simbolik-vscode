@@ -28,7 +28,8 @@ function forgeBuildTask(file: vscode.Uri) {
     })
   );
   task.isBackground = true;
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Always;
+  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
+  task.presentationOptions.clear = true;
   return task;
 }
 
