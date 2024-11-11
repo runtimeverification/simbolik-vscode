@@ -39,4 +39,4 @@ All notable changes to the "Simbolik VSCode" extension will be documented in thi
 
 ## [2.0.0] - 2024-05-27
 
-- Public Beta release of the extension##
+- Public Beta release of the extension
