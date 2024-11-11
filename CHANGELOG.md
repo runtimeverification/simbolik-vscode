@@ -2,6 +2,11 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [4.0.1] - 2024-11-11
+
+- Show progress updates while starting a debugging session
+- Hide build task output when the project compiles successfully
+
 ## [4.0.0] - 2024-11-09
 
 - Fixed the web extension.
@@ -34,4 +39,4 @@ All notable changes to the "Simbolik VSCode" extension will be documented in thi
 
 ## [2.0.0] - 2024-05-27
 
-- Public Beta release of the extension
+- Public Beta release of the extension##
