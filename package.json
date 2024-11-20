@@ -22,8 +22,10 @@
     "Testing"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onDebug",
-    "onLanguage:solidity"
+    "onLanguage:solidity",
+    "onFileSystem:buildbear"
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
@@ -204,7 +206,17 @@
           }
         }
       }
-    ]
+    ],
+		"resourceLabelFormatters": [
+			{
+				"authority": "",
+				"scheme": "buildbear",
+				"formatting": {
+					"workspaceSuffix": "Simbolik",
+					"label": "${path}"
+				}
+			}
+		]
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
@@ -242,6 +254,7 @@
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+		"vscode-uri": "^3.0.8"
   }
 }
