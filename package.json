@@ -209,11 +209,12 @@
     ],
 		"resourceLabelFormatters": [
 			{
-				"authority": "",
+				"authority": "*",
 				"scheme": "buildbear",
 				"formatting": {
 					"workspaceSuffix": "Simbolik",
-					"label": "${path}"
+					"label": "${scheme}://${authority}${path}",
+          "separator": "/"
 				}
 			}
 		]
