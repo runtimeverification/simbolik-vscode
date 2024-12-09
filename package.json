@@ -207,17 +207,17 @@
         }
       }
     ],
-		"resourceLabelFormatters": [
-			{
-				"authority": "*",
-				"scheme": "buildbear",
-				"formatting": {
-					"workspaceSuffix": "Simbolik",
-					"label": "${scheme}://${authority}${path}",
+    "resourceLabelFormatters": [
+      {
+        "authority": "*",
+        "scheme": "buildbear",
+        "formatting": {
+          "workspaceSuffix": "Simbolik",
+          "label": "${scheme}://${authority}${path}",
           "separator": "/"
-				}
-			}
-		]
+        }
+      }
+    ]
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
@@ -256,6 +256,6 @@
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
     "ws": "^8.16.0",
-		"vscode-uri": "^3.0.8"
+    "vscode-uri": "^3.0.8"
   }
 }
