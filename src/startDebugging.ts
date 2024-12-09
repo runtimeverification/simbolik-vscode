@@ -16,6 +16,37 @@ export async function startDebugging(
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
+
+    let email;
+    try {
+      const session = await vscode.authentication.getSession('github', ['user:email'])
+      if (!session) { throw new Error('Failed to login'); }
+
+      const response = await fetch('https://api.github.com/user/emails', {
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'Authorization': `Bearer ${session.accessToken}`,
+          'X-GitHub-Api-Version': '2022-11-28'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch public emails');
+      }
+
+      const emails = await response.json();
+      if (!Array.isArray(emails)) {
+        throw new Error('Unexpected response from GitHub');
+      }
+
+      email = emails.filter(entry => entry.primary)[0].email;
+      //
+      //
+    } catch (e) {
+      vscode.window.showErrorMessage('Please sign in to GitHub');
+      return;
+    }
+
     const activeTextEditor = vscode.window.activeTextEditor;
     if (!activeTextEditor) {
       throw new Error('No active text editor.');
@@ -87,7 +118,7 @@ export async function startDebugging(
     );
     console.log(myDebugConfig);
     progress.report({message: "Launching testnet"});
-    const session = await vscode.debug.startDebugging(
+    const debugSession = await vscode.debug.startDebugging(
       workspaceFolder,
       myDebugConfig
     );
