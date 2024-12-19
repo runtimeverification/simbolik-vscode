@@ -67,21 +67,17 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
   
-  const serverBackedRootDirectory = new EmptyDirectory('');
-  
-  const memFsProvider = new MemFileSystemProvider('buildbear', serverBackedRootDirectory, context.extensionUri);
+  const emptyDirectory = new EmptyDirectory('');
+  const memFsProvider = new MemFileSystemProvider('buildbear', emptyDirectory, context.extensionUri);
   disposable = vscode.workspace.registerFileSystemProvider('buildbear', memFsProvider);
   context.subscriptions.push(disposable);
-  
+
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-  
   if (workspaceFolder) {
     const path = workspaceFolder.uri.path;
     const sandboxName = workspaceFolder.uri.authority;
     const pattern = '/chain/{chainId}/tx/{txHash}';
-    console.log(`Matching path ${path} against pattern ${pattern}`);
-    const match = matchUri('/chain/{chainId}/tx/{txHash}', path);
-    console.dir({match});
+    const match = matchUri(pattern, path);
     if (match) {
       const chainId = match.chainId;
       const txHash = match.txHash;
@@ -95,7 +91,6 @@ export function activate(context: vscode.ExtensionContext) {
         "stopAtFirstOpcode": true,
         "chainId": chainId,
       }
-      console.dir({debugConfig});
       vscode.debug.startDebugging(
         workspaceFolder,
         debugConfig,

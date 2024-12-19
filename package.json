@@ -22,7 +22,6 @@
     "Testing"
   ],
   "activationEvents": [
-    "onStartupFinished",
     "onDebug",
     "onLanguage:solidity",
     "onFileSystem:buildbear"
@@ -72,7 +71,7 @@
         "simbolik.incremental-build": {
           "type": "boolean",
           "default": false,
-          "description": "If autobuild is eanbled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
+          "description": "If autobuild is enabled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
           "order": 4
         },
         "simbolik.stop-at-first-opcode": {
