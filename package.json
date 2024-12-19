@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -23,7 +23,8 @@
   ],
   "activationEvents": [
     "onDebug",
-    "onLanguage:solidity"
+    "onLanguage:solidity",
+    "onFileSystem:buildbear"
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
@@ -70,7 +71,7 @@
         "simbolik.incremental-build": {
           "type": "boolean",
           "default": false,
-          "description": "If autobuild is eanbled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
+          "description": "If autobuild is enabled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
           "order": 4
         },
         "simbolik.stop-at-first-opcode": {
@@ -204,6 +205,17 @@
           }
         }
       }
+    ],
+    "resourceLabelFormatters": [
+      {
+        "authority": "*",
+        "scheme": "buildbear",
+        "formatting": {
+          "workspaceSuffix": "Simbolik",
+          "label": "${scheme}://${authority}${path}",
+          "separator": "/"
+        }
+      }
     ]
   },
   "scripts": {
@@ -242,6 +254,7 @@
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "vscode-uri": "^3.0.8"
   }
 }
