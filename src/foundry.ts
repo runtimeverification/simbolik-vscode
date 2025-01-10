@@ -4,7 +4,6 @@ import {parse as parseToml} from 'smol-toml';
 
 export
 function forgeBuildTask(file: vscode.Uri) {
-  const incrementalBuild = getConfigValue('incremental-build', false);
   const forgePath = getConfigValue('forge-path', 'forge');
   const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
   const task = new vscode.Task(
@@ -23,7 +22,7 @@ function forgeBuildTask(file: vscode.Uri) {
         'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.legacyAssembly", "evm.deployedBytecode.immutableReferences"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_FORCE': incrementalBuild ? 'false' : 'true',
+        'FOUNDRY_FORCE': 'true',
       }
     })
   );
