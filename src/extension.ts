@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
-import {startDebugging} from './startDebugging';
+import {startAIDebugging, startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 import {getConfigValue} from './utils';
 
@@ -40,6 +40,11 @@ export function activate(context: vscode.ExtensionContext) {
     (contract, method) => startDebugging(contract, method),
   );
   context.subscriptions.push(disposable);
+
+  disposable = vscode.commands.registerCommand(
+    'simbolik.startAIDebugging',
+    (contract, method) => startAIDebugging(contract, method),
+  );
 
   disposable = vscode.commands.registerCommand('simbolik.viewKast', viewKast);
   context.subscriptions.push(disposable);
