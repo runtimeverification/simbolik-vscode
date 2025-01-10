@@ -83,6 +83,10 @@ export async function startDebugging(
     try {
       buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
     } catch (e) {
+      if (autobuild == 'never') {
+        vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
+        return;
+      }
       progress.report({ message: "Compiling" });
       const build = forgeBuildTask(activeTextEditor.document.uri);
       const buildExecution = await vscode.tasks.executeTask(build);
