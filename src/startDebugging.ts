@@ -7,10 +7,12 @@ import {
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
+import { WorkspaceWatcher } from './WorkspaceWatcher';
 
 export async function startDebugging(
   contract: ContractDefinition,
-  method: FunctionDefinition
+  method: FunctionDefinition,
+  workspaceWatcher: WorkspaceWatcher
 ) {
   return await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -59,20 +61,46 @@ export async function startDebugging(
     const debugConfigName = `${contractName}.${methodSignature}`;
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
     const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
-    const autobuild = getConfigValue('autobuild', true);
-    if (autobuild) {
+    const autobuild = getConfigValue<'always'|'on-change'|'never'>('autobuild', 'on-change');
+
+    // Auto build if needed
+    // Notice, that if autobuild is set to 'on-change' and the project is not built, the project will be built
+    // This case is handled after this block
+    if (autobuild == 'always' || (autobuild == 'on-change' && workspaceWatcher.hasChanges())) {
       progress.report({ message: "Compiling" });
       const build = forgeBuildTask(activeTextEditor.document.uri);
       const buildExecution = await vscode.tasks.executeTask(build);
       try {
         await completed(buildExecution);
+        workspaceWatcher.reset();
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project.');
         return;
       }
     }
+    
+    let buildInfo;
+    try {
+      buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+    } catch (e) {
+      if (autobuild == 'never') {
+        vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
+        return;
+      }
+      progress.report({ message: "Compiling" });
+      const build = forgeBuildTask(activeTextEditor.document.uri);
+      const buildExecution = await vscode.tasks.executeTask(build);
+      try {
+        await completed(buildExecution);
+        workspaceWatcher.reset();
+        buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+      } catch (e) {
+        vscode.window.showErrorMessage('Failed to build project.');
+        return;
+      }
+    }
+
     const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
-    const buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
     const myDebugConfig = debugConfig(
       debugConfigName,
       file,

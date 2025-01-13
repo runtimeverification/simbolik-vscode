@@ -6,6 +6,7 @@ import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 import {getConfigValue} from './utils';
+import { WorkspaceWatcher } from './WorkspaceWatcher';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -35,9 +36,11 @@ export function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(disposable);
 
+  const workspaceWatcher = new WorkspaceWatcher();
+
   disposable = vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    (contract, method) => startDebugging(contract, method),
+    (contract, method) => startDebugging(contract, method, workspaceWatcher),
   );
   context.subscriptions.push(disposable);
 
