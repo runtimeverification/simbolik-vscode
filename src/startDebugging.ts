@@ -12,7 +12,7 @@ import { WorkspaceWatcher } from './WorkspaceWatcher';
 export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition,
-  worksapceWatcher: WorkspaceWatcher
+  workspaceWatcher: WorkspaceWatcher
 ) {
   return await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -66,13 +66,13 @@ export async function startDebugging(
     // Auto build if needed
     // Notice, that if autobuild is set to 'on-change' and the project is not built, the project will be built
     // This case is handled after this block
-    if (autobuild == 'always' || (autobuild == 'on-change' && worksapceWatcher.hasChanges())) {
+    if (autobuild == 'always' || (autobuild == 'on-change' && workspaceWatcher.hasChanges())) {
       progress.report({ message: "Compiling" });
       const build = forgeBuildTask(activeTextEditor.document.uri);
       const buildExecution = await vscode.tasks.executeTask(build);
       try {
         await completed(buildExecution);
-        worksapceWatcher.reset();
+        workspaceWatcher.reset();
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project.');
         return;
@@ -92,7 +92,7 @@ export async function startDebugging(
       const buildExecution = await vscode.tasks.executeTask(build);
       try {
         await completed(buildExecution);
-        worksapceWatcher.reset();
+        workspaceWatcher.reset();
         buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project.');
