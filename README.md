@@ -18,6 +18,8 @@ Visit our Documentation: https://docs.runtimeverification.com/simbolik
 Join our Discord: https://discord.gg/jnvEeDxW
 Join our TG group: https://t.me/rv_simbolik
 
+<img src="https://github.com/runtimeverification/simbolik-vscode/raw/master/images/simbolik-screenshot-1.png?raw=true" width="800" />
+
 ## Features
 
 - **Step-by-step debugging**: Debug your Solidity smart contracts line by line.

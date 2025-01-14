@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [5.0.0] - 2025-01-13
+
+- Simbolik only recompiles the contracts if the source code has changed
+
 ## [4.1.0] - 2024-12-19
 
 - The web version now offers experimental support for debugging transactions from BuildBear sandboxes.

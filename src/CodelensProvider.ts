@@ -73,7 +73,6 @@ export class CodelensProvider implements vscode.CodeLensProvider {
   }
 
   private getDebuggableFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
-    const enableParameters = getConfigValue('enable-parameters', false);
     const results: [ContractDefinition, FunctionDefinition][] = [];
     parser.visit(ast, {
       ContractDefinition: contract => {
@@ -88,12 +87,12 @@ export class CodelensProvider implements vscode.CodeLensProvider {
             }
           },
         });
-        if (enableParameters || !hasConstructorArgs) {
+        if (!hasConstructorArgs) {
           parser.visit(contract, {
             FunctionDefinition: fn => {
               if (
                 this.isExecutable(fn) &&
-                (enableParameters || fn.parameters.length === 0)
+                fn.parameters.length === 0
               ) {
                 results.push([contract, fn]);
               }
