@@ -6,7 +6,7 @@ import {
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
-import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
+import { forgeStdInput, foundryRoot, CompilerInput } from './foundry';
 import { WorkspaceWatcher } from './WorkspaceWatcher';
 
 export async function startDebugging(
@@ -61,43 +61,17 @@ export async function startDebugging(
     const debugConfigName = `${contractName}.${methodSignature}`;
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
     const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
-    const autobuild = getConfigValue<'always'|'on-change'|'never'>('autobuild', 'on-change');
 
+    let compilerInput : CompilerInput;
     // Auto build if needed
     // Notice, that if autobuild is set to 'on-change' and the project is not built, the project will be built
     // This case is handled after this block
-    if (autobuild == 'always' || (autobuild == 'on-change' && workspaceWatcher.hasChanges())) {
-      progress.report({ message: "Compiling" });
-      const build = forgeBuildTask(activeTextEditor.document.uri);
-      const buildExecution = await vscode.tasks.executeTask(build);
-      try {
-        await completed(buildExecution);
-        workspaceWatcher.reset();
-      } catch (e) {
-        vscode.window.showErrorMessage('Failed to build project.');
-        return;
-      }
-    }
-    
-    let buildInfo;
+    progress.report({ message: "Compiling" });
     try {
-      buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+      compilerInput = await forgeStdInput(activeTextEditor.document.uri);
     } catch (e) {
-      if (autobuild == 'never') {
-        vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
-        return;
-      }
-      progress.report({ message: "Compiling" });
-      const build = forgeBuildTask(activeTextEditor.document.uri);
-      const buildExecution = await vscode.tasks.executeTask(build);
-      try {
-        await completed(buildExecution);
-        workspaceWatcher.reset();
-        buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
-      } catch (e) {
-        vscode.window.showErrorMessage('Failed to build project.');
-        return;
-      }
+      vscode.window.showErrorMessage('Failed to build project.');
+      return;
     }
 
     const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
@@ -110,10 +84,10 @@ export async function startDebugging(
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
-      buildInfo,
+      compilerInput.metadata,
+      compilerInput.stdin,
       myFoundryRoot
     );
-    console.log(myDebugConfig);
     progress.report({message: "Launching testnet"});
     const session = await vscode.debug.startDebugging(
       workspaceFolder,
@@ -145,7 +119,8 @@ function debugConfig(
   showSourcemaps: boolean,
   jsonRpcUrl: string,
   sourcifyUrl: string,
-  buildInfo: string,
+  metadata: string,
+  stdin: string,
   clientMount: vscode.Uri
 ) {
   return {
@@ -159,7 +134,8 @@ function debugConfig(
     showSourcemaps: showSourcemaps,
     jsonRpcUrl: jsonRpcUrl,
     sourcifyUrl: sourcifyUrl,
-    buildInfo: buildInfo,
+    metadata: metadata,
+    stdin: stdin,
     clientMount: clientMount,
     node: 'anvil'
   };
@@ -198,7 +174,12 @@ export async function startAIDebugging(contract: ContractDefinition, method: Fun
       ),
   ];
   try {
-    const [model] = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
+    const models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
+    if (models.length === 0) {
+      vscode.window.showErrorMessage('No chat models available');
+      return;
+    }
+    const model = models[0];
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
       title: "Generating Debug Scenario ✨",
