@@ -1,22 +1,26 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
+import { execSync } from 'child_process';
+
+const SOLC = __dirname + '/../bin/solc.js';
 
 export
-function forgeBuildTask(file: vscode.Uri) {
+type CompilerInput = {
+  metadata: string,
+  stdin: string,
+}
+
+export
+async function forgeStdInput(file: vscode.Uri) : Promise<CompilerInput> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
-  const task = new vscode.Task(
-    {
-      label: 'forge build',
-      type: 'shell',
-    },
-    vscode.TaskScope.Workspace,
-    'forge',
-    'simbolik',
-    new vscode.ShellExecution(forgePath, ['build'], {
-      cwd,
+  const cwd = await foundryRoot(file);
+  try {
+    execSync(`${forgePath} build --use ${SOLC}`,{
+      cwd: cwd.fsPath,
+      encoding: 'utf-8',
       env: {
+        ...process.env,
         'FOUNDRY_OPTIMIZER': 'false',
         'FOUNDRY_BUILD_INFO': 'true',
         'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.legacyAssembly", "evm.deployedBytecode.immutableReferences"]',
@@ -24,19 +28,28 @@ function forgeBuildTask(file: vscode.Uri) {
         'FOUNDRY_CBOR_METADATA': 'true',
         'FOUNDRY_FORCE': 'true',
       }
-    })
-  );
-  task.isBackground = true;
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
-  task.presentationOptions.clear = true;
-  return task;
+    });
+  } catch (e) {
+    // The build always fails, because we're intercepting the solc command
+    // We only need the solc version and standard input
+    if (e instanceof Error) {
+      if ('stderr' in e) {
+        if (e.stderr !== 'Error: expected value at line 1 column 1\n') {
+          vscode.window.showErrorMessage('Failed to compile contract');
+        }
+      }
+    } else {
+      vscode.window.showErrorMessage('Failed to compile contract');
+    }
+  }
+  const stdin = await readFile(vscode.Uri.joinPath(cwd, '.simbolik/stdin.json'));
+  const metadata = await readFile(vscode.Uri.joinPath(cwd, '.simbolik/metadata.json'));
+  return {stdin, metadata};
 }
 
-export
-async function loadBuildInfo(file: vscode.Uri): Promise<string> {
-  const root = await foundryRoot(file);
-  const buildInfo = await forgeBuildInfo(root);
-  return buildInfo;
+async function readFile(uri: vscode.Uri): Promise<string> {
+  const data = await vscode.workspace.fs.readFile(uri);
+  return new TextDecoder('utf-8').decode(data);
 }
 
 export
@@ -75,42 +88,4 @@ async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   const config = await vscode.workspace.fs.readFile(configPath);
   const text = new TextDecoder().decode(config);
   return parseToml(text);
-}
-
-async function forgeBuildInfo(root: vscode.Uri): Promise<string> {
-  const config = await foundryConfig(root);
-  const out = config?.profile?.default?.out ?? 'out';
-
-  // Get the contents of the youngest build-info file
-  const buildInfoDir = vscode.Uri.joinPath(root, out, 'build-info');
-
-  // Get list of build-info files
-  const files = await vscode.workspace.fs.readDirectory(buildInfoDir);
-  const buildInfoFiles = files.filter(([file, type]) => type === vscode.FileType.File && file.endsWith('.json'));
-
-  if (buildInfoFiles.length === 0) {
-    vscode.window.showErrorMessage('No build-info files found');
-    return '';
-  }
-
-  // Retrieve file stats and sort by creation timestamp
-  const sortedFiles = await getSortedFilesByCreationTime(buildInfoDir, buildInfoFiles);
-
-  // Read the youngest build-info file
-  const youngestBuildInfo = await vscode.workspace.fs.readFile(sortedFiles[0].uri);
-  const text = new TextDecoder().decode(youngestBuildInfo);
-  return text;
-}
-
-async function getSortedFilesByCreationTime(buildInfoDir: vscode.Uri, buildInfoFiles: [string, vscode.FileType][]): Promise<{ file: string, uri: vscode.Uri, ctime: number }[]> {
-  const filesWithStats = await Promise.all(
-    buildInfoFiles.map(async ([file]) => {
-      const fileUri = vscode.Uri.joinPath(buildInfoDir, file);
-      const fileStat = await vscode.workspace.fs.stat(fileUri);
-      return { file, uri: fileUri, ctime: fileStat.ctime };
-    })
-  );
-
-  // Sort files by creation time (ctime)
-  return filesWithStats.sort((a, b) => b.ctime - a.ctime);
 }

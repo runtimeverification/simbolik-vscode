@@ -29,19 +29,34 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     try {
       const content = document.getText();
       const ast = parser.parse(content, {loc: true});
-      const functions = this.getFunctions(ast);
+      const functions = this.getDebuggableFunctions(ast);
+      const allFunctions = this.getScenarioFunctions(ast);
       for (const [contract, f] of functions) {
         const loc = f.loc as Location;
         const range: vscode.Range = this.locToRange(loc);
         const debugCommand = {
           title: '▷ Debug',
-          tooltip: 'Start symbolic debugging',
+          tooltip: 'Start debugging',
           command: 'simbolik.startDebugging',
           arguments: [contract, f],
         };
         const debugLens = new vscode.CodeLens(range, debugCommand);
         codeLenses.push(debugLens);
       }
+      for (const [contract, f] of allFunctions) {
+        const loc = f.loc as Location;
+        const range: vscode.Range = this.locToRange(loc);
+        const debugCommand = {
+          title: '✦ Debug Fixture',
+          tooltip: 'Use AI to setup the execution context and start debugging',
+          command: 'simbolik.startAIDebugging',
+          arguments: [contract, f],
+        };
+        const debugLens = new vscode.CodeLens(range, debugCommand);
+        codeLenses.push(debugLens);
+      }
+
+
     } catch (e) {
       if (e instanceof parser.ParserError) {
         console.error(e.errors);
@@ -57,7 +72,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     return new vscode.Range(start, end);
   }
 
-  private getFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
+  private getDebuggableFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
     const results: [ContractDefinition, FunctionDefinition][] = [];
     parser.visit(ast, {
       ContractDefinition: contract => {
@@ -84,6 +99,22 @@ export class CodelensProvider implements vscode.CodeLensProvider {
             },
           });
         }
+      },
+    });
+    return results;
+  }
+
+  private getScenarioFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
+    const results: [ContractDefinition, FunctionDefinition][] = [];
+    parser.visit(ast, {
+      ContractDefinition: contract => {
+        parser.visit(contract, {
+          FunctionDefinition: fn => {
+            if (!this.isExecutable(fn) || fn.parameters.length > 0) {
+              results.push([contract, fn]);
+            }
+          },
+        });
       },
     });
     return results;
