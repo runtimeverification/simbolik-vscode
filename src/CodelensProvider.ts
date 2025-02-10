@@ -47,7 +47,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         const loc = f.loc as Location;
         const range: vscode.Range = this.locToRange(loc);
         const debugCommand = {
-          title: '▷ Debug Scenario',
+          title: '✦ Debug Fixture',
           tooltip: 'Use AI to setup the execution context and start debugging',
           command: 'simbolik.startAIDebugging',
           arguments: [contract, f],
@@ -108,9 +108,6 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     const results: [ContractDefinition, FunctionDefinition][] = [];
     parser.visit(ast, {
       ContractDefinition: contract => {
-        if (!this.canBeInstantiated(contract)) {
-          return;
-        }
         parser.visit(contract, {
           FunctionDefinition: fn => {
             if (!this.isExecutable(fn) || fn.parameters.length > 0) {

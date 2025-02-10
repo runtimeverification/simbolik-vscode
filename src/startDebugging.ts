@@ -151,11 +151,18 @@ export async function startAIDebugging(contract: ContractDefinition, method: Fun
       ...aiContext(),
       vscode.LanguageModelChatMessage.User(
         `Create a debugging smart contract to debug the ${method.name} function in the ${contract.name} contract.
-        The debugging contract MUST NOT have any constructor parameters.
+        The debugging contract MUST NOT have a construtor.
+        All initialization logic MUST happen in \`setUp\` function.
+        The setUp function MUST have the following signature: \`function setUp() external\`.
+        If a contract depends on other contracts, you MUST deploy them in the correct order.
+        Be intelligent about the contract you inject as dependencies.
+        First use an implementation candidate from the given code base.
+        If there is none, define and inject a mock contract.
+        Never inject hardcoded addresses as contracts dependencies.
         The debugging function MUST NOT have any parameters.
         Be intelligent about setting up the debugging contract properly.
         For example, when a user wants to debug a transfer function, you must ensure that the user has enough tokens to transfer, for example by calling the mint function if available.
-        A different example is debugging a swap oepration on a decentralized exchange. You must ensure that the exchange has enough liquidity to perform the swap.
+        A different example is debugging a swap oepration on a decentralized exchange. You must ensure that the exchange has sufficient liquidity to perform the swap.
         If you don't know how to perform these actions, put a code comment instead.
 
         You must import any necessary libraries and contracts, and you must not inline any code from the source file.
@@ -382,7 +389,7 @@ function aiContext() {
           ERC20 public token1;
           CPAMM public cpamm;
       
-          constructor() {
+          function setUp() external {
               token0 = new ERC20("token0", "TK0", 0);
               token1 = new ERC20("token1", "TK1", 0);
               cpamm = new CPAMM(address(token0), address(token1));
@@ -434,7 +441,7 @@ function aiContext() {
           LiquidityProvider public alice;
           Swapper public bob;
       
-          constructor() {
+          function setUp() external {
               token0 = new ERC20("token0", "TK0", 0);
               token1 = new ERC20("token1", "TK1", 0);
               cpamm = new CPAMM(address(token0), address(token1));
@@ -456,7 +463,7 @@ function aiContext() {
       
       ~~~solidity
       contract DebugCPAMM {
-          // ... constructor code ...
+          // ... setUp code ...
       
           function debugAddLiquidity() public {
               uint256 aliceShares = alice.addLiquidity(100, 100);
@@ -469,7 +476,7 @@ function aiContext() {
       
       ~~~solidity
       contract DebugCPAMM {
-          // ... constructor code ...
+          // ... setUp code ...
       
           function debugSwap() public {
               // Balances before operations
@@ -566,7 +573,7 @@ function aiContext() {
 
           MyContract myContract;
 
-          constructor() {
+          function setUp() external {
               myContract = new MyContract("Hello, World!");    
           }
 
@@ -589,12 +596,12 @@ function aiContext() {
           MyContractA myContractA;
           MyContractB myContractB;
 
-          constructor() {
+          function setUp() external {
               myContractA = new MyContractA();
               myContractB = new MyContractB(address(myContractA));    
           }
           
-          function debug_my_function() {
+          function debug_my_function() external {
               myContractB.my_function();
           }
 
