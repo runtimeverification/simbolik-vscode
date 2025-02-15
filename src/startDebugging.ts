@@ -145,7 +145,7 @@ function debugConfig(
   showSourcemaps: boolean,
   jsonRpcUrl: string,
   sourcifyUrl: string,
-  buildInfo: string,
+  buildInfos: string[],
   clientMount: vscode.Uri
 ) {
   return {
@@ -159,7 +159,7 @@ function debugConfig(
     showSourcemaps: showSourcemaps,
     jsonRpcUrl: jsonRpcUrl,
     sourcifyUrl: sourcifyUrl,
-    buildInfo: buildInfo,
+    buildInfos: buildInfos,
     clientMount: clientMount,
   };
 }
