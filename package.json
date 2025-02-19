@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "4.0.1",
+  "version": "5.0.0",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -23,7 +23,8 @@
   ],
   "activationEvents": [
     "onDebug",
-    "onLanguage:solidity"
+    "onLanguage:solidity",
+    "onFileSystem:buildbear"
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
@@ -69,28 +70,22 @@
           "order": 2
         },
         "simbolik.autobuild": {
-          "type": "boolean",
-          "default": true,
-          "description": "If set to true, the debugger will automatically build the project before starting the debugger.",
+          "type": "string",
+          "enum": ["never", "on-change", "always"],
+          "default": "on-change",
+          "markdownEnumDescriptions": [
+            "Never build the project automatically. This is useful when you're using `forge build --watch` to build the project.",
+            "Build the project when the source code changes.",
+            "Always build the project before every debugging session."
+          ],
+          "description": "Chose when Simbolik should build the project.",
           "order": 3
-        },
-        "simbolik.incremental-build": {
-          "type": "boolean",
-          "default": false,
-          "description": "If autobuild is eanbled and incremental-build is set to true, the debugger will use incremental builds. Notice, that the support for incremental builds is experimental and sometimes leads to unexpected behavior.",
-          "order": 4
         },
         "simbolik.stop-at-first-opcode": {
           "type": "boolean",
           "description": "If set to true, the debugger will stop at the first opcode. Otherwise it will stop at the function entry. Disabling this option is experimental and may lead to unexpected behavior.",
           "default": true,
           "order": 5
-        },
-        "simbolik.enable-parameters": {
-          "type": "boolean",
-          "default": false,
-          "description": "If set to true, the debugger will show a debug button above functions with parameters. Notice, that this requires a backend that supports parameter debugging. The default Foundry backend does not support parameter debugging.",
-          "order": 6
         },
         "simbolik.show-sourcemaps": {
           "type": "boolean",
@@ -217,6 +212,17 @@
         "command": "simbolik.debug",
         "title": "Debug"
       }
+    ],
+    "resourceLabelFormatters": [
+      {
+        "authority": "*",
+        "scheme": "buildbear",
+        "formatting": {
+          "workspaceSuffix": "Simbolik",
+          "label": "${scheme}://${authority}${path}",
+          "separator": "/"
+        }
+      }
     ]
   },
   "scripts": {
@@ -255,6 +261,7 @@
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "vscode-uri": "^3.0.8"
   }
 }
