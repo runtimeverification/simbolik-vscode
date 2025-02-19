@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {MessageEvent, WebSocket} from 'ws';
 import { foundryRoot } from './foundry';
+import { Credentials } from './startDebugging';
 
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
@@ -44,10 +45,10 @@ export class SolidityDebugAdapterDescriptorFactory
   }
 }
 
-type WithApiKey = { apiKey: string };
+type WithCredentias = { credentials: Credentials };
 type WithClientVersion = { clientVersion: string };
 
-type DebugProtocolMessage = vscode.DebugProtocolMessage & WithApiKey & WithClientVersion;
+type DebugProtocolMessage = vscode.DebugProtocolMessage & WithCredentias & WithClientVersion;
 
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -64,10 +65,12 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   onDidSendMessage = this._onDidSendMessage.event;
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    const apiKey = getConfigValue('api-key', '');
     const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
-    const messageWithApiKey : DebugProtocolMessage = Object.assign({}, message, {apiKey, clientVersion});
-    const messageWithRelativePaths = this.trimPaths(messageWithApiKey);
+    const messageWithCredientials : DebugProtocolMessage = Object.assign({}, message, {
+      credentials: this.configuration.credentials,
+      clientVersion
+    });
+    const messageWithRelativePaths = this.trimPaths(messageWithCredientials);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
 
