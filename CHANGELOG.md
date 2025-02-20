@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [6.0.1] - 2025-02-20
+
+- Fixed several spelling and grammar issues in the README file.
+
 ## [6.0.0] - 2025-02-20
 
 - Users can now authenticate via GitHub in addition to Simbolik API keys
