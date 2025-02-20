@@ -1,19 +1,19 @@
 # Solidity Debugger for Visual Studio Code
 
-Simbolik is Solidity debugger for **Foundry** projects.
+Simbolik is a Solidity debugger for **Foundry** projects.
 It allows you to step through your Solidity code line by line, set breakpoints and inspect variables.
 
 ## Quick Start
 
 On first use Simbolik may ask for GitHub access. Alternatively, you can provide a Simbolik API key, [read more](https://docs.runtimeverification.com/simbolik/overview/getting-started).
 
-Simbolik follows a **zero-configuration** approach where possible and falls back to **configuraiton-as-code** where needed.
+Simbolik follows a **zero-configuration** approach where possible and falls back to **configuration-as-code** where needed.
 For simple smart contracts, you can start debugging with just a single click on the `▷ Debug`-button.
 
 ![Zero Configuration](images/readme/zero-config.gif)
 
-For complex smart contracts, you setup your debugging session similarly to a Foundry unit tests:
-You first define a `setUp` function to initialize your contracts, and then provide test function that calls the function you want to debug.
+For complex smart contracts, you set up your debugging session similarly to a Foundry unit test:
+You first define a `setUp` function to initialize your contracts, and then provide a test function.
 If the test function is public and does not have parameters, the `▷ Debug`-button shows up, [read more](https://docs.runtimeverification.com/simbolik/overview/starting-the-debugger#debuggable-functions).
 
 ## Inspect Variables
