@@ -9,6 +9,15 @@ import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 import { WorkspaceWatcher } from './WorkspaceWatcher';
 
+export
+type Credentials = {
+  provider: 'github',
+  token: string
+} | {
+  provider: 'simbolik',
+  token: string
+}
+
 export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition,
@@ -18,6 +27,22 @@ export async function startDebugging(
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
+    const apiKey = getConfigValue('api-key', '')
+
+    let credentials: Credentials;
+    if (apiKey) {
+      credentials = { provider: 'simbolik', token: apiKey };
+    } else {
+      const session = await vscode.authentication.getSession('github', ['user:email'], {
+        createIfNone: true
+      });
+      if (!session) {
+        vscode.window.showErrorMessage('Please sign in to GitHub or provide a Simbolik API key.');
+        return;
+      }
+      credentials = { provider: 'github', token: session.accessToken };
+    }
+
     const activeTextEditor = vscode.window.activeTextEditor;
     if (!activeTextEditor) {
       throw new Error('No active text editor.');
@@ -111,11 +136,12 @@ export async function startDebugging(
       jsonRpcUrl,
       sourcifyUrl,
       buildInfo,
-      myFoundryRoot
+      myFoundryRoot,
+      credentials
     );
     console.log(myDebugConfig);
     progress.report({message: "Launching testnet"});
-    const session = await vscode.debug.startDebugging(
+    const debugSession = await vscode.debug.startDebugging(
       workspaceFolder,
       myDebugConfig
     );
@@ -146,7 +172,8 @@ function debugConfig(
   jsonRpcUrl: string,
   sourcifyUrl: string,
   buildInfo: string,
-  clientMount: vscode.Uri
+  clientMount: vscode.Uri,
+  credentials: Credentials,
 ) {
   return {
     name: name,
@@ -161,5 +188,6 @@ function debugConfig(
     sourcifyUrl: sourcifyUrl,
     buildInfo: buildInfo,
     clientMount: clientMount,
+    credentials: credentials
   };
 }
