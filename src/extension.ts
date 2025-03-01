@@ -66,6 +66,14 @@ export function activate(context: vscode.ExtensionContext) {
   disposable = vscode.commands.registerCommand('simbolik.viewKast', viewKast);
   context.subscriptions.push(disposable);
 
+  disposable = vscode.commands.registerCommand('simbolik.stepToNextPointOfInterest', () => {
+    const debugSession = vscode.debug.activeDebugSession;
+    const threadId = vscode.debug.activeStackItem?.threadId;
+    if (debugSession != null && threadId != null) {
+      debugSession.customRequest('simbolik/stepToNextPointOfInterest', { threadId });
+    }
+  });
+
   disposable = vscode.commands.registerCommand('simbolik.toNextJump', () => {
     const debugSession = vscode.debug.activeDebugSession;
     const threadId = vscode.debug.activeStackItem?.threadId;

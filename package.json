@@ -223,7 +223,23 @@
           "separator": "/"
         }
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "simbolik.stepToNextPointOfInterest",
+        "icon": "$(debug-coverage)",
+        "title": "Step to Next Point of Interest",
+        "shortTitle": "Step to POI"
+      }
+    ],
+    "menus": {
+      "debug/toolBar": [
+        {
+          "command": "simbolik.stepToNextPointOfInterest",
+          "when": "debugType == 'solidity'"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
