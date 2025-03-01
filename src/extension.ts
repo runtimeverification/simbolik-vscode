@@ -7,6 +7,7 @@ import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 import {getConfigValue} from './utils';
 import { WorkspaceWatcher } from './WorkspaceWatcher';
+import { Directory, MemFileSystemProvider } from './fsProvider';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -35,6 +36,24 @@ export function activate(context: vscode.ExtensionContext) {
     factory
   );
   context.subscriptions.push(disposable);
+
+  const root : Directory = { type: vscode.FileType.Directory, name: 'root', stats: newFileStat(vscode.FileType.Directory, 0), entries: Promise.resolve(new Map()) }
+  const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
+  disposable = vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider);
+  context.subscriptions.push(disposable);
+
+  factory.onDidCreateDebugAdapter(adapter => {
+    console.log("Debug adapter created");
+    adapter.onResponse(({request, response}) => {
+      const content = (response as any)?.body?.content;
+      const name = (request as any)?.arguments?.source?.name;
+      if (content !== undefined && name !== undefined) {
+        console.log("Received file: " + name);
+        const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, '.simbolik', name);
+        vscode.workspace.fs.writeFile(uri, new Uint8Array(Buffer.from(content)));
+      }
+    });
+  });
 
   const workspaceWatcher = new WorkspaceWatcher();
 
@@ -130,3 +149,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
+
+
+function newFileStat(type: vscode.FileType, size: number): Promise<vscode.FileStat> {
+	return Promise.resolve({ type, ctime: Date.now(), mtime: Date.now(), size });
+}
