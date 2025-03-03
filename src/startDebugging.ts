@@ -27,10 +27,10 @@ export async function startDebugging(
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
-    const apiKey = getConfigValue('api-key', '')
+    const apiKey = getConfigValue<string>('api-key', 'valid-api-key')
 
     let credentials: Credentials;
-    if (apiKey) {
+    if (apiKey !== 'valid-api-key' && apiKey !== '') {
       credentials = { provider: 'simbolik', token: apiKey };
     } else {
       const session = await vscode.authentication.getSession('github', ['user:email'], {
