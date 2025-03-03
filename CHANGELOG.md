@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [6.0.2] - 2025-03-03
+
+- Automatically prompts users without API keys to authenticate via GitHub
+
 ## [6.0.1] - 2025-02-20
 
 - Fixed several spelling and grammar issues in the README file.
