@@ -88,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
         "txHash": txHash,
         "jsonRpcUrl": `https://rpc.buildbear.io/${sandboxName}`,
         "sourcifyUrl": `https://rpc.buildbear.io/verify/sourcify/server/${sandboxName}`,
-        "stopAtFirstOpcode": true,
+        "stopAtFirstOpcode": false,
         "chainId": chainId,
       }
       vscode.debug.startDebugging(
