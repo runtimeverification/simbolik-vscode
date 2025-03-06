@@ -42,19 +42,6 @@ export function activate(context: vscode.ExtensionContext) {
   disposable = vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider);
   context.subscriptions.push(disposable);
 
-  factory.onDidCreateDebugAdapter(adapter => {
-    console.log("Debug adapter created");
-    adapter.onResponse(({request, response}) => {
-      const content = (response as any)?.body?.content;
-      const name = (request as any)?.arguments?.source?.name;
-      if (content !== undefined && name !== undefined) {
-        console.log("Received file: " + name);
-        const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, '.simbolik', name);
-        vscode.workspace.fs.writeFile(uri, new Uint8Array(Buffer.from(content)));
-      }
-    });
-  });
-
   const workspaceWatcher = new WorkspaceWatcher();
 
   disposable = vscode.commands.registerCommand(

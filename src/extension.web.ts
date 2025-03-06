@@ -44,19 +44,6 @@ export function activate(context: vscode.ExtensionContext) {
     factory
   );
   context.subscriptions.push(disposable);
-
-  factory.onDidCreateDebugAdapter(adapter => {
-    console.log("Debug adapter created");
-    adapter.onResponse(({request, response}) => {
-      const content = (response as any)?.body?.content;
-      const name = (request as any)?.arguments?.source?.name;
-      if (content !== undefined && name !== undefined) {
-        console.log("Received file: " + name);
-        const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, '.simbolik', name);
-        vscode.workspace.fs.writeFile(uri, new Uint8Array(Buffer.from(content)));
-      }
-    });
-  });
   
   const workspaceWatcher = new NullWorkspaceWatcher();
 
@@ -80,11 +67,11 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
 
-  // Wait 1 second for the filesystem to be ready before starting the debug session
+  // Wait 3 seconds for the filesystem to be ready before starting the debug session
+  // Is there a better way to do this?
   setTimeout(() => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (workspaceFolder) {
-      console.log('Workspace folder:', workspaceFolder.uri.path);
       const path = workspaceFolder.uri.path;
       const sandboxName = workspaceFolder.uri.authority;
       const traceTxPattern = '/chain/{chainId}/tx/{txHash}';
@@ -122,8 +109,8 @@ export function activate(context: vscode.ExtensionContext) {
           "to": to,
           "value": value,
           "data": data,
-          "jsonRpcUrl": `http://127.0.0.1:8545`,
-          "sourcifyUrl": `http://127.0.0.1:5555`,
+          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+          "sourcifyUrl": getConfigValue('sourcify-url', ''),
           "stopAtFirstOpcode": true,
           "chainId": chainId,
         }
