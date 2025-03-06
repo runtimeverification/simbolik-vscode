@@ -7,7 +7,7 @@ import {
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
-import { WorkspaceWatcher } from './WorkspaceWatcher';
+import { IWorkspaceWatcher } from './WorkspaceWatcher';
 
 export
 type Credentials = {
@@ -21,7 +21,7 @@ type Credentials = {
 export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition,
-  workspaceWatcher: WorkspaceWatcher
+  workspaceWatcher: IWorkspaceWatcher
 ) {
   return await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,

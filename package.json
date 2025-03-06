@@ -24,7 +24,7 @@
   "activationEvents": [
     "onDebug",
     "onLanguage:solidity",
-    "onFileSystem:buildbear"
+    "onFileSystem:simbolik"
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
@@ -216,7 +216,7 @@
     "resourceLabelFormatters": [
       {
         "authority": "*",
-        "scheme": "buildbear",
+        "scheme": "simbolik",
         "formatting": {
           "workspaceSuffix": "Simbolik",
           "label": "${scheme}://${authority}${path}",

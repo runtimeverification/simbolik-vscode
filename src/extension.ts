@@ -7,6 +7,7 @@ import {startDebugging} from './startDebugging';
 import {KastProvider, viewKast} from './KastProvider';
 import {getConfigValue} from './utils';
 import { WorkspaceWatcher } from './WorkspaceWatcher';
+import { Directory, MemFileSystemProvider } from './fsProvider';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -36,6 +37,11 @@ export function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(disposable);
 
+  const root : Directory = { type: vscode.FileType.Directory, name: 'root', stats: newFileStat(vscode.FileType.Directory, 0), entries: Promise.resolve(new Map()) }
+  const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
+  disposable = vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider);
+  context.subscriptions.push(disposable);
+
   const workspaceWatcher = new WorkspaceWatcher();
 
   disposable = vscode.commands.registerCommand(
@@ -46,6 +52,14 @@ export function activate(context: vscode.ExtensionContext) {
 
   disposable = vscode.commands.registerCommand('simbolik.viewKast', viewKast);
   context.subscriptions.push(disposable);
+
+  disposable = vscode.commands.registerCommand('simbolik.stepToNextPointOfInterest', () => {
+    const debugSession = vscode.debug.activeDebugSession;
+    const threadId = vscode.debug.activeStackItem?.threadId;
+    if (debugSession != null && threadId != null) {
+      debugSession.customRequest('simbolik/stepToNextPointOfInterest', { threadId });
+    }
+  });
 
   disposable = vscode.commands.registerCommand('simbolik.toNextJump', () => {
     const debugSession = vscode.debug.activeDebugSession;
@@ -130,3 +144,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
+
+
+function newFileStat(type: vscode.FileType, size: number): Promise<vscode.FileStat> {
+	return Promise.resolve({ type, ctime: Date.now(), mtime: Date.now(), size });
+}
