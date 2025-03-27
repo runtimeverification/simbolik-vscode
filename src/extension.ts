@@ -86,8 +86,3 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
-
-
-function newFileStat(type: vscode.FileType, size: number): Promise<vscode.FileStat> {
-	return Promise.resolve({ type, ctime: Date.now(), mtime: Date.now(), size });
-}
