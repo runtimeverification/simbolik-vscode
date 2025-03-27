@@ -27,10 +27,10 @@ export async function startDebugging(
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
-    const apiKey = getConfigValue('api-key', '')
+    const apiKey = getConfigValue<string>('api-key', 'valid-api-key')
 
     let credentials: Credentials;
-    if (apiKey) {
+    if (apiKey !== 'valid-api-key' && apiKey !== '') {
       credentials = { provider: 'simbolik', token: apiKey };
     } else {
       const session = await vscode.authentication.getSession('github', ['user:email'], {
@@ -81,7 +81,6 @@ export async function startDebugging(
     const file = activeTextEditor.document.uri.toString();
     const contractName = contract['name'];
     const methodSignature = `${method['name']}(${parameters.join(',')})`;
-    const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', true);
     const showSourcemaps = getConfigValue('show-sourcemaps', false);
     const debugConfigName = `${contractName}.${methodSignature}`;
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
@@ -131,7 +130,6 @@ export async function startDebugging(
       file,
       contractName,
       methodSignature,
-      stopAtFirstOpcode,
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
@@ -167,7 +165,6 @@ function debugConfig(
   file: string,
   contractName: string,
   methodSignature: string,
-  stopAtFirstOpcode: boolean,
   showSourcemaps: boolean,
   jsonRpcUrl: string,
   sourcifyUrl: string,
@@ -182,7 +179,7 @@ function debugConfig(
     file: file,
     contractName: contractName,
     methodSignature: methodSignature,
-    stopAtFirstOpcode: stopAtFirstOpcode,
+    stopAtFirstOpcode: false,
     showSourcemaps: showSourcemaps,
     jsonRpcUrl: jsonRpcUrl,
     sourcifyUrl: sourcifyUrl,

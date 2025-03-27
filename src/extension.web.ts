@@ -87,7 +87,7 @@ export function activate(context: vscode.ExtensionContext) {
           "txHash": txHash,
           "jsonRpcUrl": `https://${authority}/${sandboxName}`,
           "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
-          "stopAtFirstOpcode": true,
+          "stopAtFirstOpcode": false,
         }
         vscode.debug.startDebugging(
           workspaceFolder,
@@ -108,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
           "data": data,
           "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
           "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": true,
+          "stopAtFirstOpcode": false,
         }
         vscode.debug.startDebugging(
           workspaceFolder,

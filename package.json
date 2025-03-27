@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "6.0.1",
+  "version": "7.0.0",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -80,12 +80,6 @@
           ],
           "description": "Chose when Simbolik should build the project.",
           "order": 3
-        },
-        "simbolik.stop-at-first-opcode": {
-          "type": "boolean",
-          "description": "If set to true, the debugger will stop at the first opcode. Otherwise it will stop at the function entry. Disabling this option is experimental and may lead to unexpected behavior.",
-          "default": true,
-          "order": 5
         },
         "simbolik.show-sourcemaps": {
           "type": "boolean",
