@@ -4,10 +4,9 @@ import * as vscode from 'vscode';
 import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
-import {KastProvider, viewKast} from './KastProvider';
 import {getConfigValue} from './utils';
-import { Uri, FileStat, FileType, FileSystemError } from 'vscode';
-import { Entry, MemFileSystemProvider, File, Directory } from './fsProvider';
+import { FileStat, FileType } from 'vscode';
+import { MemFileSystemProvider, Directory } from './fsProvider';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
 
 console.log("Hello from Simbolik!");
