@@ -74,12 +74,11 @@ export function activate(context: vscode.ExtensionContext) {
     if (workspaceFolder) {
       const path = workspaceFolder.uri.path;
       const sandboxName = workspaceFolder.uri.authority;
-      const traceTxPattern = '/chain/{chainId}/tx/{txHash}';
-      const traceCallPattern = '/chain/{chainId}/from/{from}/to/{to}/value/{value}/data/{data}';
+      const traceTxPattern = '/tx/{txHash}';
+      const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
       const matchTraceTxPattern = matchUri(traceTxPattern, path);
       const matchTraceCallPattern = matchUri(traceCallPattern, path);
       if (matchTraceTxPattern) {
-        const chainId = matchTraceTxPattern.chainId;
         const txHash = matchTraceTxPattern.txHash;
         const debugConfig = {
           "name": "Debug Tx",
@@ -89,14 +88,12 @@ export function activate(context: vscode.ExtensionContext) {
           "jsonRpcUrl": `https://rpc.buildbear.io/${sandboxName}`,
           "sourcifyUrl": `https://rpc.buildbear.io/verify/sourcify/server/${sandboxName}`,
           "stopAtFirstOpcode": true,
-          "chainId": chainId,
         }
         vscode.debug.startDebugging(
           workspaceFolder,
           debugConfig,
         );
       } else if (matchTraceCallPattern) {
-        const chainId = matchTraceCallPattern.chainId;
         const from = matchTraceCallPattern.from;
         const to = matchTraceCallPattern.to;
         const value = matchTraceCallPattern.value;
@@ -112,7 +109,6 @@ export function activate(context: vscode.ExtensionContext) {
           "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
           "sourcifyUrl": getConfigValue('sourcify-url', ''),
           "stopAtFirstOpcode": true,
-          "chainId": chainId,
         }
         vscode.debug.startDebugging(
           workspaceFolder,
