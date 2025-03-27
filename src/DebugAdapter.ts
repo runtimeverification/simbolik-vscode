@@ -9,8 +9,6 @@ const CONNECTION_TIMEOUT = 3000;
 export class SolidityDebugAdapterDescriptorFactory
   implements vscode.DebugAdapterDescriptorFactory
 {
-  _onDidCreateDebugAdapter = new vscode.EventEmitter<WebsocketDebugAdapter>();
-  onDidCreateDebugAdapter = this._onDidCreateDebugAdapter.event;
 
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
@@ -23,7 +21,6 @@ export class SolidityDebugAdapterDescriptorFactory
         const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
         const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
         resolve(implementation);
-        this._onDidCreateDebugAdapter.fire(websocketAdapter);
       });
       websocket.once('error', () =>{
         if (websocket.readyState === WebSocket.OPEN) {
@@ -58,9 +55,6 @@ type ResponseEvent = { request: vscode.DebugProtocolMessage, response: vscode.De
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
   onDidSendMessage = this._onDidSendMessage.event;
-  _onResponse = new vscode.EventEmitter<ResponseEvent>();
-  onResponse = this._onResponse.event;
-  _pendingRequests: Map<number, vscode.DebugProtocolMessage> = new Map();
 
   constructor(private websocket: WebSocket, private configuration: vscode.DebugConfiguration) {
     websocket.onmessage = (message: MessageEvent) => {
@@ -68,13 +62,6 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
       const data = JSON.parse(payload);
       const dataWithAbsolutePaths = this.prependPaths(data);
       this._onDidSendMessage.fire(dataWithAbsolutePaths);
-      if (data.type === 'response') {
-        const request = this._pendingRequests.get(data.request_seq);
-        if (request) {
-          this._onResponse.fire({ request, response: dataWithAbsolutePaths });
-          this._pendingRequests.delete(data.request_seq);
-        }
-      }
     };
   }
 
@@ -86,9 +73,6 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
       clientVersion
     });
     const messageWithRelativePaths = this.trimPaths(messageWithCredientials);
-    if ('seq' in message && typeof message.seq === 'number') {
-      this._pendingRequests.set(message.seq, message);
-    }
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
 
