@@ -49,57 +49,6 @@ export function activate(context: vscode.ExtensionContext) {
     (contract, method) => startDebugging(contract, method, workspaceWatcher),
   );
   context.subscriptions.push(disposable);
-
-  disposable = vscode.commands.registerCommand('simbolik.viewKast', viewKast);
-  context.subscriptions.push(disposable);
-
-  disposable = vscode.commands.registerCommand('simbolik.stepToNextPointOfInterest', () => {
-    const debugSession = vscode.debug.activeDebugSession;
-    const threadId = vscode.debug.activeStackItem?.threadId;
-    if (debugSession != null && threadId != null) {
-      debugSession.customRequest('simbolik/stepToNextPointOfInterest', { threadId });
-    }
-  });
-
-  disposable = vscode.commands.registerCommand('simbolik.toNextJump', () => {
-    const debugSession = vscode.debug.activeDebugSession;
-    const threadId = vscode.debug.activeStackItem?.threadId;
-    if (debugSession != null && threadId != null) {
-      debugSession.customRequest('simbolik/stepToNextJumpdest', { threadId });
-    }
-  });
-  context.subscriptions.push(disposable);
-  disposable = vscode.commands.registerCommand('simbolik.toNextCall', () => {
-    const debugSession = vscode.debug.activeDebugSession;
-    const threadId = vscode.debug.activeStackItem?.threadId;
-    if (debugSession != null && threadId != null) {
-      debugSession.customRequest('simbolik/stepToNextCall', { threadId });
-    }
-  });
-  context.subscriptions.push(disposable);
-  disposable = vscode.commands.registerCommand('simbolik.outInternalCall', () => {
-    const debugSession = vscode.debug.activeDebugSession;
-    const threadId = vscode.debug.activeStackItem?.threadId;
-    if (debugSession != null && threadId != null) {
-      debugSession.customRequest('simbolik/stepOutInternalCall', { threadId });
-    }
-  });
-  context.subscriptions.push(disposable);
-  disposable = vscode.commands.registerCommand('simbolik.outExternalCall', () => {
-    const debugSession = vscode.debug.activeDebugSession;
-    const threadId = vscode.debug.activeStackItem?.threadId;
-    if (debugSession != null && threadId != null) {
-      debugSession.customRequest('simbolik/stepOutExterncallCall', { threadId });
-    }
-  });
-  context.subscriptions.push(disposable);
-
-  const kastProvider = new KastProvider();
-  disposable = vscode.workspace.registerTextDocumentContentProvider(
-    KastProvider.scheme,
-    kastProvider
-  );
-
   
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
