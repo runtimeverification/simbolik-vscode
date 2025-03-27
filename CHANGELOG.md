@@ -2,6 +2,11 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [8.0.0] - 2025-03-27
+
+- This is maintenance release that prepare the extension for online transaction debugging
+  against arbitrary Ethereum networks and for simulating transactions.
+
 ## [7.0.0] - 2025-03-06
 
 - Removed support for the `stop-at-first-opcode` option in the extension settings. \
