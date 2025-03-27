@@ -37,11 +37,6 @@ export function activate(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(disposable);
 
-  const root : Directory = { type: vscode.FileType.Directory, name: 'root', stats: newFileStat(vscode.FileType.Directory, 0), entries: Promise.resolve(new Map()) }
-  const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
-  disposable = vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider);
-  context.subscriptions.push(disposable);
-
   const workspaceWatcher = new WorkspaceWatcher();
 
   disposable = vscode.commands.registerCommand(
