@@ -79,6 +79,7 @@ export function activate(context: vscode.ExtensionContext) {
       const matchTraceCallPattern = matchUri(traceCallPattern, path);
       if (matchTraceTxPattern) {
         const txHash = matchTraceTxPattern.txHash;
+        const sandboxName = matchTraceTxPattern.sandboxName;
         const debugConfig = {
           "name": "Debug Tx",
           "type": "solidity",
