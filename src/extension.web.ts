@@ -72,8 +72,8 @@ export function activate(context: vscode.ExtensionContext) {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (workspaceFolder) {
       const path = workspaceFolder.uri.path;
-      const sandboxName = workspaceFolder.uri.authority;
-      const traceTxPattern = '/tx/{txHash}';
+      const authority = workspaceFolder.uri.authority;
+      const traceTxPattern = '/{sandboxName}/tx/{txHash}';
       const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
       const matchTraceTxPattern = matchUri(traceTxPattern, path);
       const matchTraceCallPattern = matchUri(traceCallPattern, path);
@@ -84,8 +84,8 @@ export function activate(context: vscode.ExtensionContext) {
           "type": "solidity",
           "request": "attach",
           "txHash": txHash,
-          "jsonRpcUrl": `https://rpc.buildbear.io/${sandboxName}`,
-          "sourcifyUrl": `https://rpc.buildbear.io/verify/sourcify/server/${sandboxName}`,
+          "jsonRpcUrl": `https://${authority}/${sandboxName}`,
+          "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
           "stopAtFirstOpcode": true,
         }
         vscode.debug.startDebugging(
