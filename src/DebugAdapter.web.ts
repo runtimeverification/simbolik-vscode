@@ -5,9 +5,8 @@ import {getConfigValue} from './utils';
 const CONNECTION_TIMEOUT = 3000;
 
 export class SolidityDebugAdapterDescriptorFactory
-  implements vscode.DebugAdapterDescriptorFactory
+implements vscode.DebugAdapterDescriptorFactory
 {
-
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
     executable: vscode.DebugAdapterExecutable | undefined
@@ -48,13 +47,10 @@ type WithClientVersion = { clientVersion: string };
 
 type DebugProtocolMessage = vscode.DebugProtocolMessage & WithApiKey & WithClientVersion;
 
-type ResponseEvent = { request: vscode.DebugProtocolMessage, response: vscode.DebugProtocolMessage };
-
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
   onDidSendMessage = this._onDidSendMessage.event;
-
-
+  
   constructor(private websocket: WebSocket, private configuration: vscode.DebugConfiguration) {
     websocket.onmessage = (message: MessageEvent) => {
       const data = JSON.parse(message.data);
@@ -62,8 +58,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
       this._onDidSendMessage.fire(dataWithAbsolutePaths);    
     };
   }
-
-
+  
   handleMessage(message: vscode.DebugProtocolMessage): void {
     const apiKey = getConfigValue('api-key', '');
     const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
@@ -71,11 +66,11 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     const messageWithRelativePaths = this.trimPaths(messageWithApiKey);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
-
+  
   dispose() {
     this.websocket.close();
   }
-
+  
   foundryRoot() : vscode.Uri {
     if (!this.configuration['clientMount']) {
       return vscode.Uri.parse('file:///');
@@ -83,12 +78,12 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     const uri = vscode.Uri.from(this.configuration['clientMount']);
     return uri;
   }
-
+  
   /**
-   * Recursively walk over all object properties and for each property
-   * named `path` and type `string`, remove the foundry root from the path.
-   * @param message
-   */
+  * Recursively walk over all object properties and for each property
+  * named `path` and type `string`, remove the foundry root from the path.
+  * @param message
+  */
   trimPaths(message: {[key: string]: any} | any[] ) : {[key: string]: any} | any[] {
     if (Array.isArray(message)) {
       return message.map((item) => this.trimPaths(item));
@@ -109,12 +104,12 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     }
     return message;
   }
-
+  
   /**
-   * Recursively walk over all object properties and for each property
-   * named `path` and type `string`, prepend the foundry root to the path.
-   * @param message
-   */
+  * Recursively walk over all object properties and for each property
+  * named `path` and type `string`, prepend the foundry root to the path.
+  * @param message
+  */
   prependPaths(message: {[key: string]: any} | any[]) : {[key: string]: any} | any[] {
     if (Array.isArray(message)) {
       return message.map((item) => this.prependPaths(item));
@@ -140,9 +135,6 @@ function relativeTo(uri: vscode.Uri, prefixUri: vscode.Uri): string {
   const prefix = prefixUri.path;
   const relative = stripPrefix(s, prefix);
   const result = stripPrefix(relative, '/');
-  console.log('uri', uri);
-  console.log('prefixUri', prefixUri);
-  console.log('result', result);
   return result;
 }
 
