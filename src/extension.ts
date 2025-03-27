@@ -4,10 +4,8 @@ import * as vscode from 'vscode';
 import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
-import {KastProvider, viewKast} from './KastProvider';
 import {getConfigValue} from './utils';
 import { WorkspaceWatcher } from './WorkspaceWatcher';
-import { Directory, MemFileSystemProvider } from './fsProvider';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
