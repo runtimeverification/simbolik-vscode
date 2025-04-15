@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {MessageEvent, WebSocket} from 'ws';
 import { Credentials } from './startDebugging';
+import { createReadStream } from 'fs';
 
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
@@ -16,8 +17,23 @@ implements vscode.DebugAdapterDescriptorFactory
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
       const server = getConfigValue('server', 'wss://beta.simbolik.runtimeverification.com');
-      const websocket = new WebSocket(server);
-      websocket.once('open', () => {
+      const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
+      const credentials = session.configuration.credentials;
+      const websocket = new WebSocket(server, {
+        headers: {
+          authorization: `Bearer ${credentials.provider}:${credentials.token}`,
+        }
+      });
+      websocket.once('open', async () => {
+        // Before the DAP communication starts we upload the build_info files
+        // to the server. This is needed for the server to be able to
+        // resolve the paths to the source files.
+        const buildInfoFiles = session.configuration.buildInfoFiles;
+        for (const buildInfoFile of buildInfoFiles) {
+          await uploadFile(websocket, buildInfoFile);
+        }
+        websocket.send(JSON.stringify({ command: 'simbolik:finish' }));
+
         const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
         const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
         resolve(implementation);
@@ -43,6 +59,25 @@ implements vscode.DebugAdapterDescriptorFactory
       }, CONNECTION_TIMEOUT);
     });
   }
+}
+
+function uploadFile(websocket: WebSocket, file: vscode.Uri) : Promise<true> {
+  websocket.send(JSON.stringify({command: 'simbolik:upload:start'}));
+  const readStream = createReadStream(file.path, 
+    { highWaterMark: 100 * 1024 * 1024 } // 100MB chunks
+  );
+  return new Promise((resolve, reject) => {
+    readStream.on('data', (chunk) => {
+      websocket.send(chunk);
+    });
+    readStream.once('end', () => {
+      websocket.send(JSON.stringify({command: 'simbolik:upload:finish'}));
+      resolve(true);
+    });
+    readStream.once('error', (err) => {
+      reject(err);
+    });
+  });
 }
 
 type WithCredentias = { credentials: Credentials };

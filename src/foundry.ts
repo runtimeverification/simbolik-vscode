@@ -33,7 +33,7 @@ function forgeBuildTask(file: vscode.Uri) {
 }
 
 export
-async function loadBuildInfo(file: vscode.Uri): Promise<string[]> {
+async function loadBuildInfo(file: vscode.Uri): Promise<vscode.Uri[]> {
   const root = await foundryRoot(file);
   const buildInfo = await forgeBuildInfo(root);
   return buildInfo;
@@ -77,7 +77,7 @@ async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   return parseToml(text);
 }
 
-async function forgeBuildInfo(root: vscode.Uri): Promise<string[]> {
+async function forgeBuildInfo(root: vscode.Uri): Promise<vscode.Uri[]> {
   const config = await foundryConfig(root);
   // Extract configuration values for build-info and output directory
   const defaultProfile = config?.profile?.default ?? {};
@@ -99,9 +99,7 @@ async function forgeBuildInfo(root: vscode.Uri): Promise<string[]> {
   // Read the contents of all build-info files
   const result = await Promise.all(buildInfoFiles.map(async ([file, type]) => {
     const fileUri = vscode.Uri.joinPath(buildInfoDir, file);
-    const youngestBuildInfo = await vscode.workspace.fs.readFile(fileUri);
-    const text = new TextDecoder().decode(youngestBuildInfo);
-    return text;
+    return fileUri
   }));
   return result;
 }

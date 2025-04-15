@@ -103,9 +103,9 @@ export async function startDebugging(
       }
     }
     
-    let buildInfo;
+    let buildInfoFiles;
     try {
-      buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+      buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
     } catch (e) {
       if (autobuild == 'never') {
         vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
@@ -117,7 +117,7 @@ export async function startDebugging(
       try {
         await completed(buildExecution);
         workspaceWatcher.reset();
-        buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+        buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project.');
         return;
@@ -133,12 +133,11 @@ export async function startDebugging(
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
-      buildInfo,
+      buildInfoFiles,
       myFoundryRoot,
       credentials
     );
-    console.log(myDebugConfig);
-    progress.report({message: "Launching testnet"});
+    progress.report({message: "Sending compililation artifacts"});
     const debugSession = await vscode.debug.startDebugging(
       workspaceFolder,
       myDebugConfig
@@ -168,7 +167,7 @@ function debugConfig(
   showSourcemaps: boolean,
   jsonRpcUrl: string,
   sourcifyUrl: string,
-  buildInfos: string[],
+  buildInfoFiles: vscode.Uri[],
   clientMount: vscode.Uri,
   credentials: Credentials
 ) {
@@ -183,7 +182,7 @@ function debugConfig(
     showSourcemaps: showSourcemaps,
     jsonRpcUrl: jsonRpcUrl,
     sourcifyUrl: sourcifyUrl,
-    buildInfos: buildInfos,
+    buildInfoFiles: buildInfoFiles,
     clientMount: clientMount,
     credentials: credentials
   };

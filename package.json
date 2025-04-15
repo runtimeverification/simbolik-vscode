@@ -253,7 +253,7 @@
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "smol-toml": "^1.2.0",
-    "ws": "^8.16.0",
+    "ws": "^8.18.1",
     "vscode-uri": "^3.0.8"
   }
 }
