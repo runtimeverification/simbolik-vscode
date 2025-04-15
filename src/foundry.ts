@@ -79,9 +79,13 @@ async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
 
 async function forgeBuildInfo(root: vscode.Uri): Promise<string[]> {
   const config = await foundryConfig(root);
-  const out = config?.profile?.default?.out ?? 'out';
+  // Extract configuration values for build-info and output directory
+  const defaultProfile = config?.profile?.default ?? {};
+  const outputDir = defaultProfile?.out || 'out';
+  const buildInfo = defaultProfile?.build_info_path || outputDir + '/build-info';
 
-  const buildInfoDir = vscode.Uri.joinPath(root, out, 'build-info');
+  // Determine the build-info directory based on configuration
+  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo)
 
   // Get list of build-info files
   const files = await vscode.workspace.fs.readDirectory(buildInfoDir);
