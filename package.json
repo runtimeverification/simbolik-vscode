@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "5.0.0",
+  "version": "8.0.1",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -22,13 +22,18 @@
     "Testing"
   ],
   "activationEvents": [
-    "onDebug",
-    "onLanguage:solidity",
-    "onFileSystem:buildbear"
+    "*"
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
   "contributes": {
+    "menus": {
+      "editor/title": [
+        {
+          "command": "simbolik.debug"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "solidity",
@@ -73,12 +78,6 @@
           ],
           "description": "Chose when Simbolik should build the project.",
           "order": 3
-        },
-        "simbolik.stop-at-first-opcode": {
-          "type": "boolean",
-          "description": "If set to true, the debugger will stop at the first opcode. Otherwise it will stop at the function entry. Disabling this option is experimental and may lead to unexpected behavior.",
-          "default": true,
-          "order": 5
         },
         "simbolik.show-sourcemaps": {
           "type": "boolean",
@@ -200,10 +199,16 @@
         }
       }
     ],
+    "commands": [
+      {
+        "command": "simbolik.debug",
+        "title": "Debug"
+      }
+    ],
     "resourceLabelFormatters": [
       {
         "authority": "*",
-        "scheme": "buildbear",
+        "scheme": "simbolik",
         "formatting": {
           "workspaceSuffix": "Simbolik",
           "label": "${scheme}://${authority}${path}",

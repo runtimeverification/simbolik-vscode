@@ -7,17 +7,42 @@ import {
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
-import { WorkspaceWatcher } from './WorkspaceWatcher';
+import { IWorkspaceWatcher } from './WorkspaceWatcher';
+
+export
+type Credentials = {
+  provider: 'github',
+  token: string
+} | {
+  provider: 'simbolik',
+  token: string
+}
 
 export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition,
-  workspaceWatcher: WorkspaceWatcher
+  workspaceWatcher: IWorkspaceWatcher
 ) {
   return await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
+    const apiKey = getConfigValue<string>('api-key', 'valid-api-key')
+
+    let credentials: Credentials;
+    if (apiKey !== 'valid-api-key' && apiKey !== '') {
+      credentials = { provider: 'simbolik', token: apiKey };
+    } else {
+      const session = await vscode.authentication.getSession('github', ['user:email'], {
+        createIfNone: true
+      });
+      if (!session) {
+        vscode.window.showErrorMessage('Please sign in to GitHub or provide a Simbolik API key.');
+        return;
+      }
+      credentials = { provider: 'github', token: session.accessToken };
+    }
+
     const activeTextEditor = vscode.window.activeTextEditor;
     if (!activeTextEditor) {
       throw new Error('No active text editor.');
@@ -56,7 +81,6 @@ export async function startDebugging(
     const file = activeTextEditor.document.uri.toString();
     const contractName = contract['name'];
     const methodSignature = `${method['name']}(${parameters.join(',')})`;
-    const stopAtFirstOpcode = getConfigValue('stop-at-first-opcode', true);
     const showSourcemaps = getConfigValue('show-sourcemaps', false);
     const debugConfigName = `${contractName}.${methodSignature}`;
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
@@ -106,16 +130,16 @@ export async function startDebugging(
       file,
       contractName,
       methodSignature,
-      stopAtFirstOpcode,
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
       buildInfo,
-      myFoundryRoot
+      myFoundryRoot,
+      credentials
     );
     console.log(myDebugConfig);
     progress.report({message: "Launching testnet"});
-    const session = await vscode.debug.startDebugging(
+    const debugSession = await vscode.debug.startDebugging(
       workspaceFolder,
       myDebugConfig
     );
@@ -141,12 +165,12 @@ function debugConfig(
   file: string,
   contractName: string,
   methodSignature: string,
-  stopAtFirstOpcode: boolean,
   showSourcemaps: boolean,
   jsonRpcUrl: string,
   sourcifyUrl: string,
   buildInfos: string[],
-  clientMount: vscode.Uri
+  clientMount: vscode.Uri,
+  credentials: Credentials
 ) {
   return {
     name: name,
@@ -155,11 +179,12 @@ function debugConfig(
     file: file,
     contractName: contractName,
     methodSignature: methodSignature,
-    stopAtFirstOpcode: stopAtFirstOpcode,
+    stopAtFirstOpcode: false,
     showSourcemaps: showSourcemaps,
     jsonRpcUrl: jsonRpcUrl,
     sourcifyUrl: sourcifyUrl,
     buildInfos: buildInfos,
     clientMount: clientMount,
+    credentials: credentials
   };
 }

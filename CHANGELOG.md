@@ -2,6 +2,32 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [8.0.1] - 2025-03-28
+
+- This realease ensures that the web extension is laoded with a higher priotity to ensure the virtual simbolik-file system is ready when a debugging session starts.
+
+## [8.0.0] - 2025-03-27
+
+- This is maintenance release that prepare the extension for online transaction debugging
+  against arbitrary Ethereum networks and for simulating transactions.
+
+## [7.0.0] - 2025-03-06
+
+- Removed support for the `stop-at-first-opcode` option in the extension settings. \
+  With time-travel debugging there is a simpler way to achieve the same effect.
+
+## [6.0.2] - 2025-03-03
+
+- Automatically prompts users without API keys to authenticate via GitHub
+
+## [6.0.1] - 2025-02-20
+
+- Fixed several spelling and grammar issues in the README file.
+
+## [6.0.0] - 2025-02-20
+
+- Users can now authenticate via GitHub in addition to Simbolik API keys
+
 ## [5.0.0] - 2025-01-13
 
 - Simbolik only recompiles the contracts if the source code has changed
