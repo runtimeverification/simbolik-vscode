@@ -19,11 +19,8 @@ implements vscode.DebugAdapterDescriptorFactory
       const server = getConfigValue('server', 'wss://beta.simbolik.runtimeverification.com');
       const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
       const credentials = session.configuration.credentials;
-      const websocket = new WebSocket(server, {
-        headers: {
-          authorization: `Bearer ${credentials.provider}:${credentials.token}`,
-        }
-      });
+      const url = `${server}?auth-provider=${credentials.provider}&auth-token=${credentials.token}`;
+      const websocket = new WebSocket(server);
       const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
       const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
       websocket.once('open', async () => {
@@ -35,14 +32,14 @@ implements vscode.DebugAdapterDescriptorFactory
         // Create progress bar
         vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
-          title: 'Uploading compilation artifacts',
+          title: 'Sending compilation data to the debugger…',
           cancellable: true,
 
         }, async (progress, token) => {
 
           token.onCancellationRequested(() => {
             websocket.close();
-            reject(new Error('Upload cancelled'));
+            reject(new Error('Session cancelled'));
           });
 
           progress.report({ increment: 0 });
@@ -93,10 +90,18 @@ implements vscode.DebugAdapterDescriptorFactory
 
 async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerator<number, void, void> {
   websocket.send(JSON.stringify({ command: 'simbolik:upload:start' }));
-  const readStream = createReadStream(file.path, { highWaterMark: 100 * 1024 }); // 100MB chunks
+  const readStream = createReadStream(file.path, { highWaterMark: 100 * 1024 * 1024 }); // 100MB chunks
   let bytesTransferred = 0;
   for await (const chunk of readStream) {
-    websocket.send(chunk);
+    await new Promise((resolve, reject) => {
+      websocket.send(chunk, err => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(true);
+        }
+      });
+    });
     bytesTransferred += chunk.length;
     yield bytesTransferred;
   }
