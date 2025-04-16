@@ -23,7 +23,7 @@ export async function startDebugging(
   method: FunctionDefinition,
   workspaceWatcher: IWorkspaceWatcher
 ) {
-  return await vscode.window.withProgress({
+  const result = await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
@@ -124,8 +124,10 @@ export async function startDebugging(
       }
     }
 
+    progress.report({ increment: 100 });
+
     const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
-    const myDebugConfig = debugConfig(
+    const debugConfig = createDebugConfig(
       debugConfigName,
       file,
       contractName,
@@ -137,12 +139,17 @@ export async function startDebugging(
       myFoundryRoot,
       credentials
     );
-    progress.report({message: "Sending compililation artifacts"});
-    const debugSession = await vscode.debug.startDebugging(
-      workspaceFolder,
-      myDebugConfig
-    );
+    return { workspaceFolder, debugConfig };
   });
+  if (!result) {
+    return;
+  }
+  const { workspaceFolder, debugConfig } = result;
+  const debugSession = await vscode.debug.startDebugging(
+    workspaceFolder,
+    debugConfig
+  );
+  return;
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
@@ -159,7 +166,7 @@ function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
   });
 }
 
-function debugConfig(
+function createDebugConfig(
   name: string,
   file: string,
   contractName: string,
