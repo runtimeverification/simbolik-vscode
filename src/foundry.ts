@@ -97,9 +97,9 @@ async function forgeBuildInfo(root: vscode.Uri): Promise<vscode.Uri[]> {
   }
 
   // Read the contents of all build-info files
-  const result = await Promise.all(buildInfoFiles.map(async ([file, type]) => {
+  const result = buildInfoFiles.map(([file, type]) => {
     const fileUri = vscode.Uri.joinPath(buildInfoDir, file);
-    return fileUri
-  }));
+    return fileUri;
+  });
   return result;
 }
