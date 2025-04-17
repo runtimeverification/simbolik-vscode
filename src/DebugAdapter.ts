@@ -39,7 +39,7 @@ implements vscode.DebugAdapterDescriptorFactory
 
           token.onCancellationRequested(() => {
             websocket.close();
-            reject(new Error('Session cancelled'));
+            reject(new Error('Debuggin session cancelled'));
           });
 
           progress.report({ increment: 0 });
@@ -52,7 +52,7 @@ implements vscode.DebugAdapterDescriptorFactory
           }
 
           for (const buildInfoFile of buildInfoFiles) {
-            const uploadProgress = uploadFile(websocket, buildInfoFile);
+            const uploadProgress = uploadFile(websocket, buildInfoFile, token);
             let totalTransferred = 0;
             for await (const bytesTransferred of uploadProgress) {
               const percentage = (bytesTransferred / totalFileSize) * 100;
@@ -88,7 +88,7 @@ implements vscode.DebugAdapterDescriptorFactory
   }
 }
 
-async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerator<number, void, void> {
+async function* uploadFile(websocket: WebSocket, file: vscode.Uri, token: vscode.CancellationToken): AsyncGenerator<number, void, void> {
   websocket.send(JSON.stringify({ command: 'simbolik:upload:start' }));
 
   const readStream = createReadStream(file.path, { highWaterMark: 10 * 1024 * 1024 }); // 10MB
@@ -112,6 +112,10 @@ async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerat
 
   let i = 0;
   for await (const chunk of readStream) {
+    if (token.isCancellationRequested) {
+      inflight.clear();
+      return;
+    }
     sendChunk(i++, chunk);
   }
 
