@@ -126,6 +126,7 @@ export async function startDebugging(
 
     progress.report({ increment: 100 });
 
+    const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
     const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
     const debugConfig = createDebugConfig(
       debugConfigName,
@@ -137,7 +138,8 @@ export async function startDebugging(
       sourcifyUrl,
       buildInfoFiles,
       myFoundryRoot,
-      credentials
+      credentials,
+      clientVersion
     );
     return { workspaceFolder, debugConfig };
   });
@@ -176,7 +178,8 @@ function createDebugConfig(
   sourcifyUrl: string,
   buildInfoFiles: vscode.Uri[],
   clientMount: vscode.Uri,
-  credentials: Credentials
+  credentials: Credentials,
+  clientVersion: string
 ) {
   return {
     name: name,
@@ -191,6 +194,7 @@ function createDebugConfig(
     sourcifyUrl: sourcifyUrl,
     buildInfoFiles: buildInfoFiles,
     clientMount: clientMount,
-    credentials: credentials
+    credentials: credentials,
+    clientVersion: clientVersion
   };
 }

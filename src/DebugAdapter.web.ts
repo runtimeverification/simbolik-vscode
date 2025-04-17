@@ -13,25 +13,24 @@ implements vscode.DebugAdapterDescriptorFactory
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
       const server = getConfigValue('server', 'wss://beta.simbolik.runtimeverification.com');
-      const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
       const credentials = session.configuration.credentials;
-      const url = `${server}?auth-provider=${credentials.provider}&auth-token=${credentials.token}`;
+      const encodedProvider = encodeURIComponent(credentials.provider);
+      const encodedToken = encodeURIComponent(credentials.token);
+      const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
       const websocket = new WebSocket(url);
       const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
       const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
       websocket.onopen = async () => {
-        // Before the DAP communication starts we upload the build_info files
-        // to the server. This is needed for the server to be able to
-        // resolve the paths to the source files.
-        const buildInfoFiles = session.configuration.buildInfoFiles;
-
         // Create progress bar
         vscode.window.withProgress({
           location: vscode.ProgressLocation.Notification,
           title: 'Sending compilation data to the debugger…',
-          cancellable: true,
-
+          cancellable: true
         }, async (progress, token) => {
+          // Before the DAP communication starts we upload the build_info files
+          // to the server. This is needed for the server to be able to
+          // resolve the paths to the source files.
+          const buildInfoFiles = session.configuration.buildInfoFiles;
 
           token.onCancellationRequested(() => {
             websocket.close();
