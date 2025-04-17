@@ -90,21 +90,38 @@ implements vscode.DebugAdapterDescriptorFactory
 
 async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerator<number, void, void> {
   websocket.send(JSON.stringify({ command: 'simbolik:upload:start' }));
-  const readStream = createReadStream(file.path, { highWaterMark: 100 * 1024 * 1024 }); // 100MB chunks
+
+  const readStream = createReadStream(file.path, { highWaterMark: 10 * 1024 * 1024 }); // 10MB
   let bytesTransferred = 0;
-  for await (const chunk of readStream) {
-    await new Promise((resolve, reject) => {
-      websocket.send(chunk, err => {
+  const inflight : Map<number, Promise<number>> = new Map();
+
+  // Helper to track and yield progress for each send
+  const sendChunk = (id: number, chunk: Buffer) : void => {
+    const promise = new Promise<number>((resolve, reject) => {
+      websocket.send(chunk, (err) => {
         if (err) {
           reject(err);
         } else {
-          resolve(true);
+          bytesTransferred += chunk.length;
+          resolve(id);
         }
       });
     });
-    bytesTransferred += chunk.length;
+    inflight.set(id, promise);
+  };
+
+  let i = 0;
+  for await (const chunk of readStream) {
+    sendChunk(i++, chunk);
+  }
+
+  // Wait for all inflight sends to finish and yield progress
+  while (inflight.size > 0) {
+    const id = await Promise.race(inflight.values());
+    inflight.delete(id);
     yield bytesTransferred;
   }
+
   websocket.send(JSON.stringify({ command: 'simbolik:upload:finish' }));
 }
 
