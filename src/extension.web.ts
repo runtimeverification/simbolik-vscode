@@ -84,7 +84,7 @@ export function activate(context: vscode.ExtensionContext) {
           "stopAtFirstOpcode": false,
           "credentials": {
             "provider": "simbolik",
-            "token": "junk"
+            "token":  getConfigValue('api-key', 'junk')
           },
         }
         vscode.debug.startDebugging(
@@ -104,7 +104,7 @@ export function activate(context: vscode.ExtensionContext) {
           "stopAtFirstOpcode": false,
           "credentials": {
             "provider": "simbolik",
-            "token": "junk"
+            "token": getConfigValue('api-key', 'junk'),
           },
         }
         vscode.debug.startDebugging(
