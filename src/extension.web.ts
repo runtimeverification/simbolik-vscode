@@ -82,6 +82,10 @@ export function activate(context: vscode.ExtensionContext) {
           "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
           "sourcifyUrl": getConfigValue('sourcify-url', ''),
           "stopAtFirstOpcode": false,
+          "credentials": {
+            "provider": "simbolik",
+            "token": "junk"
+          },
         }
         vscode.debug.startDebugging(
           workspaceFolder,
@@ -98,6 +102,10 @@ export function activate(context: vscode.ExtensionContext) {
           "jsonRpcUrl": `https://${authority}/${sandboxName}`,
           "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
           "stopAtFirstOpcode": false,
+          "credentials": {
+            "provider": "simbolik",
+            "token": "junk"
+          },
         }
         vscode.debug.startDebugging(
           workspaceFolder,
