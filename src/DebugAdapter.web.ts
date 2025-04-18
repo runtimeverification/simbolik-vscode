@@ -13,11 +13,52 @@ implements vscode.DebugAdapterDescriptorFactory
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
       const server = getConfigValue('server', 'wss://beta.simbolik.runtimeverification.com');
-      const websocket = new WebSocket(server);
-      websocket.onopen = () => {
-        const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
-        const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
-        resolve(implementation);
+      const credentials = session.configuration.credentials;
+      const encodedProvider = encodeURIComponent(credentials.provider);
+      const encodedToken = encodeURIComponent(credentials.token);
+      const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
+      const websocket = new WebSocket(url);
+      const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
+      const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
+      websocket.onopen = async () => {
+        // Create progress bar
+        vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: 'Sending compilation data to the debugger…',
+          cancellable: true
+        }, async (progress, token) => {
+          // Before the DAP communication starts we upload the build_info files
+          // to the server. This is needed for the server to be able to
+          // resolve the paths to the source files.
+          const buildInfoFiles = session.configuration.buildInfoFiles;
+
+          token.onCancellationRequested(() => {
+            websocket.close();
+            reject(new Error('Session cancelled'));
+          });
+
+          progress.report({ increment: 0 });
+          // Get total file size for progress bar
+          let totalFileSize = 0;
+          for (const buildInfoFile of buildInfoFiles) {
+            const uri = vscode.Uri.from(buildInfoFile);
+            const stats = await vscode.workspace.fs.stat(uri);
+            totalFileSize += stats.size;
+          }
+
+          for (const buildInfoFile of buildInfoFiles) {
+            const uploadProgress = uploadFile(websocket, buildInfoFile);
+            let totalTransferred = 0;
+            for await (const bytesTransferred of uploadProgress) {
+              const percentage = (bytesTransferred / totalFileSize) * 100;
+              const increment = percentage - totalTransferred;
+              totalTransferred = percentage;
+              progress.report({ increment });
+            }
+          }
+          websocket.send(JSON.stringify({ command: 'simbolik:finish' }));
+          resolve(implementation);
+        });
       };
       websocket.onerror = () => {
         if (websocket.readyState === WebSocket.OPEN) {
@@ -42,10 +83,31 @@ implements vscode.DebugAdapterDescriptorFactory
   }
 }
 
-type WithApiKey = { apiKey: string };
-type WithClientVersion = { clientVersion: string };
-
-type DebugProtocolMessage = vscode.DebugProtocolMessage & WithApiKey & WithClientVersion;
+async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerator<number, void, void> {
+  websocket.send(JSON.stringify({ command: 'simbolik:upload:start' }));
+  const contents = await vscode.workspace.fs.readFile(file);
+  const fileSize = contents.length;
+  const chunkSize = 10 * 1024 * 1024; // 10MB
+  let bytesTransferred = 0;
+  for (let i = 0; i < fileSize; i += chunkSize) {
+    const chunk = contents.slice(i, i + chunkSize);
+    bytesTransferred += chunk.length;
+    // Wait until the buffer is drained before sending the next chunk
+    await new Promise((resolve) => {
+      let t = setTimeout(function check () {
+        if (websocket.bufferedAmount === 0) {
+          clearTimeout(t);
+          resolve(true);
+        } else {
+          t = setTimeout(check, 100);
+        }
+      }, 100);
+    });
+    websocket.send(chunk);
+    yield bytesTransferred;
+  }
+  websocket.send(JSON.stringify({ command: 'simbolik:upload:finish' }));
+}
 
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -60,10 +122,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   }
   
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    const apiKey = getConfigValue('api-key', '');
-    const clientVersion = vscode.extensions.getExtension('simbolik.simbolik')?.packageJSON.version;
-    const messageWithApiKey : DebugProtocolMessage = Object.assign({}, message, {apiKey, clientVersion});
-    const messageWithRelativePaths = this.trimPaths(messageWithApiKey);
+    const messageWithRelativePaths = this.trimPaths(message);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
   

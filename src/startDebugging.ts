@@ -23,7 +23,7 @@ export async function startDebugging(
   method: FunctionDefinition,
   workspaceWatcher: IWorkspaceWatcher
 ) {
-  return await vscode.window.withProgress({
+  const result = await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
     title: "Simbolik"
   }, async (progress) => {
@@ -103,9 +103,9 @@ export async function startDebugging(
       }
     }
     
-    let buildInfo;
+    let buildInfoFiles;
     try {
-      buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+      buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
     } catch (e) {
       if (autobuild == 'never') {
         vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
@@ -117,15 +117,18 @@ export async function startDebugging(
       try {
         await completed(buildExecution);
         workspaceWatcher.reset();
-        buildInfo = await loadBuildInfo(activeTextEditor.document.uri);
+        buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project.');
         return;
       }
     }
 
+    progress.report({ increment: 100 });
+
+    const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
     const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
-    const myDebugConfig = debugConfig(
+    const debugConfig = createDebugConfig(
       debugConfigName,
       file,
       contractName,
@@ -133,17 +136,22 @@ export async function startDebugging(
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
-      buildInfo,
+      buildInfoFiles,
       myFoundryRoot,
-      credentials
+      credentials,
+      clientVersion
     );
-    console.log(myDebugConfig);
-    progress.report({message: "Launching testnet"});
-    const debugSession = await vscode.debug.startDebugging(
-      workspaceFolder,
-      myDebugConfig
-    );
+    return { workspaceFolder, debugConfig };
   });
+  if (!result) {
+    return;
+  }
+  const { workspaceFolder, debugConfig } = result;
+  const debugSession = await vscode.debug.startDebugging(
+    workspaceFolder,
+    debugConfig
+  );
+  return;
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
@@ -160,7 +168,7 @@ function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
   });
 }
 
-function debugConfig(
+function createDebugConfig(
   name: string,
   file: string,
   contractName: string,
@@ -168,9 +176,10 @@ function debugConfig(
   showSourcemaps: boolean,
   jsonRpcUrl: string,
   sourcifyUrl: string,
-  buildInfo: string,
+  buildInfoFiles: vscode.Uri[],
   clientMount: vscode.Uri,
   credentials: Credentials,
+  clientVersion: string
 ) {
   return {
     name: name,
@@ -183,8 +192,9 @@ function debugConfig(
     showSourcemaps: showSourcemaps,
     jsonRpcUrl: jsonRpcUrl,
     sourcifyUrl: sourcifyUrl,
-    buildInfo: buildInfo,
+    buildInfoFiles: buildInfoFiles,
     clientMount: clientMount,
-    credentials: credentials
+    credentials: credentials,
+    clientVersion: clientVersion
   };
 }

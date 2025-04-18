@@ -2,6 +2,14 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [9.0.0] - 2025-04-17
+
+- Added support for projects that require multiple compilation passes with different solc versions.
+- Experimental support for incremental compilation.
+- Improved memory footprint for large projects.
+- Added option to abort a debugging session early.
+- Added progress indicator when sending large compitation units.
+
 ## [8.0.1] - 2025-03-28
 
 - This realease ensures that the web extension is laoded with a higher priotity to ensure the virtual simbolik-file system is ready when a debugging session starts.

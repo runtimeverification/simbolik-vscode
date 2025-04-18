@@ -19,7 +19,7 @@ function forgeBuildTask(file: vscode.Uri) {
       env: {
         'FOUNDRY_OPTIMIZER': 'false',
         'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.legacyAssembly", "evm.deployedBytecode.immutableReferences"]',
+        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.legacyAssembly", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
         'FOUNDRY_FORCE': 'true',
@@ -33,7 +33,7 @@ function forgeBuildTask(file: vscode.Uri) {
 }
 
 export
-async function loadBuildInfo(file: vscode.Uri): Promise<string> {
+async function loadBuildInfo(file: vscode.Uri): Promise<vscode.Uri[]> {
   const root = await foundryRoot(file);
   const buildInfo = await forgeBuildInfo(root);
   return buildInfo;
@@ -77,12 +77,15 @@ async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   return parseToml(text);
 }
 
-async function forgeBuildInfo(root: vscode.Uri): Promise<string> {
+async function forgeBuildInfo(root: vscode.Uri): Promise<vscode.Uri[]> {
   const config = await foundryConfig(root);
-  const out = config?.profile?.default?.out ?? 'out';
+  // Extract configuration values for build-info and output directory
+  const defaultProfile = config?.profile?.default ?? {};
+  const outputDir = defaultProfile?.out || 'out';
+  const buildInfo = defaultProfile?.build_info_path || outputDir + '/build-info';
 
-  // Get the contents of the youngest build-info file
-  const buildInfoDir = vscode.Uri.joinPath(root, out, 'build-info');
+  // Determine the build-info directory based on configuration
+  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo)
 
   // Get list of build-info files
   const files = await vscode.workspace.fs.readDirectory(buildInfoDir);
@@ -90,27 +93,13 @@ async function forgeBuildInfo(root: vscode.Uri): Promise<string> {
 
   if (buildInfoFiles.length === 0) {
     vscode.window.showErrorMessage('No build-info files found');
-    return '';
+    return [];
   }
 
-  // Retrieve file stats and sort by creation timestamp
-  const sortedFiles = await getSortedFilesByCreationTime(buildInfoDir, buildInfoFiles);
-
-  // Read the youngest build-info file
-  const youngestBuildInfo = await vscode.workspace.fs.readFile(sortedFiles[0].uri);
-  const text = new TextDecoder().decode(youngestBuildInfo);
-  return text;
-}
-
-async function getSortedFilesByCreationTime(buildInfoDir: vscode.Uri, buildInfoFiles: [string, vscode.FileType][]): Promise<{ file: string, uri: vscode.Uri, ctime: number }[]> {
-  const filesWithStats = await Promise.all(
-    buildInfoFiles.map(async ([file]) => {
-      const fileUri = vscode.Uri.joinPath(buildInfoDir, file);
-      const fileStat = await vscode.workspace.fs.stat(fileUri);
-      return { file, uri: fileUri, ctime: fileStat.ctime };
-    })
-  );
-
-  // Sort files by creation time (ctime)
-  return filesWithStats.sort((a, b) => b.ctime - a.ctime);
+  // Read the contents of all build-info files
+  const result = buildInfoFiles.map(([file, type]) => {
+    const fileUri = vscode.Uri.joinPath(buildInfoDir, file);
+    return fileUri;
+  });
+  return result;
 }
