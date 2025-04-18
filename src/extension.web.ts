@@ -67,11 +67,27 @@ export function activate(context: vscode.ExtensionContext) {
     if (workspaceFolder) {
       const path = workspaceFolder.uri.path;
       const authority = workspaceFolder.uri.authority;
+      const ethereumPattern = '/tx/{txHash}';
       const traceTxPattern = '/{sandboxName}/tx/{txHash}';
       const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
+      const matchEthereumPattern = matchUri(ethereumPattern, path);
       const matchTraceTxPattern = matchUri(traceTxPattern, path);
       const matchTraceCallPattern = matchUri(traceCallPattern, path);
-      if (matchTraceTxPattern) {
+      if (matchEthereumPattern) {
+        const debugConfig = {
+          "name": "Debug Tx",
+          "type": "solidity",
+          "request": "attach",
+          "txHash": matchEthereumPattern.txHash,
+          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+          "sourcifyUrl": getConfigValue('sourcify-url', ''),
+          "stopAtFirstOpcode": false,
+        }
+        vscode.debug.startDebugging(
+          workspaceFolder,
+          debugConfig,
+        );
+      } else if (matchTraceTxPattern) {
         const txHash = matchTraceTxPattern.txHash;
         const sandboxName = matchTraceTxPattern.sandboxName;
         const debugConfig = {
