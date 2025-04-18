@@ -22,35 +22,29 @@ export function activate(context: vscode.ExtensionContext) {
   // Use the console to output diagnostic information (console.log) and errors (console.error)
   // This line of code will only be executed once when your extension is activated
   console.log('Congratulations, your extension "simbolik" is now active!');
-  
-  let disposable: vscode.Disposable;
-  
+    
   const codelensProvider = new CodelensProvider();
-  disposable = vscode.languages.registerCodeLensProvider(
+  context.subscriptions.push(vscode.languages.registerCodeLensProvider(
     'solidity',
     codelensProvider
-  );
-  context.subscriptions.push(disposable);
+  ));
   
   const root : Directory = { type: FileType.Directory, name: 'root', stats: newFileStat(FileType.Directory, 0), entries: Promise.resolve(new Map()) }
   const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
-  disposable = vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider);
-  context.subscriptions.push(disposable);
-
+  context.subscriptions.push( vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider));
+  
   const factory = new SolidityDebugAdapterDescriptorFactory();
-  disposable = vscode.debug.registerDebugAdapterDescriptorFactory(
+  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
     'solidity',
     factory
-  );
-  context.subscriptions.push(disposable);
-  
+  ));
+
   const workspaceWatcher = new NullWorkspaceWatcher();
 
-  disposable = vscode.commands.registerCommand(
+  context.subscriptions.push(vscode.commands.registerCommand(
     'simbolik.startDebugging',
     (contract, method) => startDebugging(contract, method, workspaceWatcher),
-  );
-  context.subscriptions.push(disposable);
+  ));
   
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
