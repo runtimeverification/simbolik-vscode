@@ -6,7 +6,7 @@ All notable changes to the "Simbolik VSCode" extension will be documented in thi
 
 - This introduces an experimental new URL pattern to the in-browser version of Simbolik that allows users \
   to debug transactions against the configured JSON RPC node and Sourcify server.
-- Fixes a bug introduces in v9.0.0 that made compilation artifacts mandatory for debugging transactions.
+- Fixes a bug introduced in v9.0.0 that made compilation artifacts mandatory for debugging transactions.
 
 ## [9.0.0] - 2025-04-17
 
