@@ -22,35 +22,29 @@ export function activate(context: vscode.ExtensionContext) {
   // Use the console to output diagnostic information (console.log) and errors (console.error)
   // This line of code will only be executed once when your extension is activated
   console.log('Congratulations, your extension "simbolik" is now active!');
-  
-  let disposable: vscode.Disposable;
-  
+    
   const codelensProvider = new CodelensProvider();
-  disposable = vscode.languages.registerCodeLensProvider(
+  context.subscriptions.push(vscode.languages.registerCodeLensProvider(
     'solidity',
     codelensProvider
-  );
-  context.subscriptions.push(disposable);
+  ));
   
   const root : Directory = { type: FileType.Directory, name: 'root', stats: newFileStat(FileType.Directory, 0), entries: Promise.resolve(new Map()) }
   const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
-  disposable = vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider);
-  context.subscriptions.push(disposable);
-
+  context.subscriptions.push( vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider));
+  
   const factory = new SolidityDebugAdapterDescriptorFactory();
-  disposable = vscode.debug.registerDebugAdapterDescriptorFactory(
+  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
     'solidity',
     factory
-  );
-  context.subscriptions.push(disposable);
-  
+  ));
+
   const workspaceWatcher = new NullWorkspaceWatcher();
 
-  disposable = vscode.commands.registerCommand(
+  context.subscriptions.push(vscode.commands.registerCommand(
     'simbolik.startDebugging',
     (contract, method) => startDebugging(contract, method, workspaceWatcher),
-  );
-  context.subscriptions.push(disposable);
+  ));
   
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
@@ -73,11 +67,31 @@ export function activate(context: vscode.ExtensionContext) {
     if (workspaceFolder) {
       const path = workspaceFolder.uri.path;
       const authority = workspaceFolder.uri.authority;
+      const ethereumPattern = '/tx/{txHash}';
       const traceTxPattern = '/{sandboxName}/tx/{txHash}';
       const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
+      const matchEthereumPattern = matchUri(ethereumPattern, path);
       const matchTraceTxPattern = matchUri(traceTxPattern, path);
       const matchTraceCallPattern = matchUri(traceCallPattern, path);
-      if (matchTraceTxPattern) {
+      if (matchEthereumPattern) {
+        const debugConfig = {
+          "name": "Debug Tx",
+          "type": "solidity",
+          "request": "attach",
+          "txHash": matchEthereumPattern.txHash,
+          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+          "sourcifyUrl": getConfigValue('sourcify-url', ''),
+          "stopAtFirstOpcode": false,
+          "credentials": {
+            "provider": "simbolik",
+            "token":  getConfigValue('api-key', 'junk')
+          },
+        }
+        vscode.debug.startDebugging(
+          workspaceFolder,
+          debugConfig,
+        );
+      } else if (matchTraceTxPattern) {
         const txHash = matchTraceTxPattern.txHash;
         const sandboxName = matchTraceTxPattern.sandboxName;
         const debugConfig = {
@@ -88,6 +102,10 @@ export function activate(context: vscode.ExtensionContext) {
           "jsonRpcUrl": `https://${authority}/${sandboxName}`,
           "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
           "stopAtFirstOpcode": false,
+          "credentials": {
+            "provider": "simbolik",
+            "token": getConfigValue('api-key', 'junk'),
+          },
         }
         vscode.debug.startDebugging(
           workspaceFolder,
