@@ -34,7 +34,7 @@ implements vscode.DebugAdapterDescriptorFactory
           // Before the DAP communication starts we upload the build_info files
           // to the server. This is needed for the server to be able to
           // resolve the paths to the source files.
-          const buildInfoFiles = session.configuration.buildInfoFiles;
+          const buildInfoFiles = session.configuration.buildInfoFiles ?? [];
 
           token.onCancellationRequested(() => {
             websocket.close();

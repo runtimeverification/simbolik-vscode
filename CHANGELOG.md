@@ -2,10 +2,16 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
-## [9.0.1] - 2025-05-07
+## [10.0.1] - 2025-05-07
 
 - This update drastically improves the start-up performance of the debugger for large projects.
   This is archived by reducing the compilation time and the size of the compilation units.
+
+## [10.0.0] - 2025-04-18
+
+- This introduces an experimental new URL pattern to the in-browser version of Simbolik that allows users \
+  to debug transactions against the configured JSON RPC node and Sourcify server.
+- Fixes a bug introduced in v9.0.0 that made compilation artifacts mandatory for debugging transactions.
 
 ## [9.0.0] - 2025-04-17
 
