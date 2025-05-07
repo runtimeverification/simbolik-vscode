@@ -2,6 +2,11 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [9.0.1] - 2025-05-07
+
+- This update drastically improves the start-up performance of the debugger for large projects.
+  This is archived by reducing the compilation time and the size of the compilation units.
+
 ## [9.0.0] - 2025-04-17
 
 - Added support for projects that require multiple compilation passes with different solc versions.
