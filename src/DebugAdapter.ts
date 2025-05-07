@@ -92,10 +92,10 @@ async function* uploadFile(websocket: WebSocket, file: vscode.Uri, token: vscode
 
   const readStream = createReadStream(file.path, { highWaterMark: 10 * 1024 * 1024 }); // 10MB
   let bytesTransferred = 0;
-  const inflight : Map<number, Promise<number>> = new Map();
+  const inflight: Map<number, Promise<number>> = new Map();
 
   // Helper to track and yield progress for each send
-  const sendChunk = (id: number, chunk: Buffer) : void => {
+  const sendChunk = (id: number, chunk: Buffer): void => {
     const promise = new Promise<number>((resolve, reject) => {
       websocket.send(chunk, (err) => {
         if (err) {
@@ -115,7 +115,15 @@ async function* uploadFile(websocket: WebSocket, file: vscode.Uri, token: vscode
       inflight.clear();
       return;
     }
+
     sendChunk(i++, chunk);
+
+    // Ensure at most 3 chunks are in flight
+    while (inflight.size >= 3) {
+      const id = await Promise.race(inflight.values());
+      inflight.delete(id);
+      yield bytesTransferred;
+    }
   }
 
   // Wait for all inflight sends to finish and yield progress

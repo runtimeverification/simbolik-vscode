@@ -2,6 +2,11 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [10.0.1] - 2025-05-07
+
+- This update drastically improves the start-up performance of the debugger for large projects.
+  This is archived by reducing the compilation time and the size of the compilation units.
+
 ## [10.0.0] - 2025-04-18
 
 - This introduces an experimental new URL pattern to the in-browser version of Simbolik that allows users \

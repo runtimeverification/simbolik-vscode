@@ -19,10 +19,11 @@ function forgeBuildTask(file: vscode.Uri) {
       env: {
         'FOUNDRY_OPTIMIZER': 'false',
         'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.legacyAssembly", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
+        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
         'FOUNDRY_FORCE': 'true',
+        'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
       }
     })
   );
