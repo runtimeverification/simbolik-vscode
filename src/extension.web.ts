@@ -94,13 +94,17 @@ export function activate(context: vscode.ExtensionContext) {
       } else if (matchTraceTxPattern) {
         const txHash = matchTraceTxPattern.txHash;
         const sandboxName = matchTraceTxPattern.sandboxName;
+        const sourcifyUrl = {
+          'rpc.dev.buildbear.io': `https://api.buildbear.io/v1/sourcify/${sandboxName}`,
+          'rpc.buildbear.io': `https://rpc.buildbear.io/verify/sourcify/server/${sandboxName}`,
+        }[authority];
         const debugConfig = {
           "name": "Debug Tx",
           "type": "solidity",
           "request": "attach",
           "txHash": txHash,
           "jsonRpcUrl": `https://${authority}/${sandboxName}`,
-          "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
+          "sourcifyUrl": sourcifyUrl,
           "stopAtFirstOpcode": false,
           "credentials": {
             "provider": "simbolik",
