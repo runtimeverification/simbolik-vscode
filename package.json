@@ -230,7 +230,10 @@
     "test": "node ./out/test/runTest.js",
     "clean": "gts clean",
     "fix": "gts fix",
-    "posttest": "npm run lint"
+    "posttest": "npm run lint",
+    "version:patch": "npm version patch --no-git-tag-version",
+    "version:minor": "npm version minor --no-git-tag-version",
+    "version:major": "npm version major --no-git-tag-version"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
