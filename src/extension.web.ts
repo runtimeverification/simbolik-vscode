@@ -8,6 +8,7 @@ import {getConfigValue} from './utils';
 import { FileStat, FileType } from 'vscode';
 import { MemFileSystemProvider, Directory } from './fsProvider';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
+import { cloneStaticTree } from './clone';
 
 console.log("Hello from Simbolik!");
 
@@ -60,81 +61,87 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
 
-  // Wait 3 seconds for the filesystem to be ready before starting the debug session
-  // Is there a better way to do this?
-  setTimeout(() => {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (workspaceFolder) {
-      const path = workspaceFolder.uri.path;
-      const authority = workspaceFolder.uri.authority;
-      const ethereumPattern = '/tx/{txHash}';
-      const traceTxPattern = '/{sandboxName}/tx/{txHash}';
-      const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
-      const matchEthereumPattern = matchUri(ethereumPattern, path);
-      const matchTraceTxPattern = matchUri(traceTxPattern, path);
-      const matchTraceCallPattern = matchUri(traceCallPattern, path);
-      if (matchEthereumPattern) {
-        const debugConfig = {
-          "name": "Debug Tx",
-          "type": "solidity",
-          "request": "attach",
-          "txHash": matchEthereumPattern.txHash,
-          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
-          "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": false,
-          "credentials": {
-            "provider": "simbolik",
-            "token":  getConfigValue('api-key', 'junk')
-          },
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
-      } else if (matchTraceTxPattern) {
-        const txHash = matchTraceTxPattern.txHash;
-        const sandboxName = matchTraceTxPattern.sandboxName;
-        const debugConfig = {
-          "name": "Debug Tx",
-          "type": "solidity",
-          "request": "attach",
-          "txHash": txHash,
-          "jsonRpcUrl": `https://${authority}/${sandboxName}`,
-          "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
-          "stopAtFirstOpcode": false,
-          "credentials": {
-            "provider": "simbolik",
-            "token": getConfigValue('api-key', 'junk'),
-          },
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
-      } else if (matchTraceCallPattern) {
-        const from = matchTraceCallPattern.from;
-        const to = matchTraceCallPattern.to;
-        const value = matchTraceCallPattern.value;
-        const data = matchTraceCallPattern.data;
-        const debugConfig = {
-          "name": "Debug Call",
-          "type": "solidity",
-          "request": "attach",
-          "from_": from,
-          "to": to,
-          "value": value,
-          "data": data,
-          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
-          "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": false,
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (workspaceFolder) {
+    const path = workspaceFolder.uri.path;
+    const authority = workspaceFolder.uri.authority;
+    const ethereumPattern = '/tx/{txHash}';
+    const traceTxPattern = '/{sandboxName}/tx/{txHash}';
+    const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
+    const matchEthereumPattern = matchUri(ethereumPattern, path);
+    const matchTraceTxPattern = matchUri(traceTxPattern, path);
+    const matchTraceCallPattern = matchUri(traceCallPattern, path);
+    if (matchEthereumPattern) {
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": matchEthereumPattern.txHash,
+        "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+        "sourcifyUrl": getConfigValue('sourcify-url', ''),
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token":  getConfigValue('api-key', 'junk')
+        },
       }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceTxPattern) {
+      const txHash = matchTraceTxPattern.txHash;
+      const sandboxName = matchTraceTxPattern.sandboxName;
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": txHash,
+        "jsonRpcUrl": `https://${authority}/${sandboxName}`,
+        "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token": getConfigValue('api-key', 'junk'),
+        },
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceCallPattern) {
+      const from = matchTraceCallPattern.from;
+      const to = matchTraceCallPattern.to;
+      const value = matchTraceCallPattern.value;
+      const data = matchTraceCallPattern.data;
+      const debugConfig = {
+        "name": "Debug Call",
+        "type": "solidity",
+        "request": "attach",
+        "from_": from,
+        "to": to,
+        "value": value,
+        "data": data,
+        "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+        "sourcifyUrl": getConfigValue('sourcify-url', ''),
+        "stopAtFirstOpcode": false,
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (workspaceFolder.uri.scheme === 'tmp') {
+      // The browser url is attached as query parameter to the workspace folder URI.
+      // For example, if the browser URL is: https://simbolik.dev
+      // Then the workspace folder URI will be: tmp:///?location=https://simbolik.dev
+      const queryParams = new URLSearchParams(workspaceFolder.uri.query);
+      const location = queryParams.get('location');
+      const uri = vscode.Uri.parse(location ?? '').with({ path: '/simbolik-examples/'});
+      cloneStaticTree(uri, workspaceFolder.uri).then(() => {
+        console.log(`Cloned static tree from ${uri.toString()} to ${workspaceFolder.uri.toString()}`);
+      });
     }
-  }, 3000);
+  }
 }
 
 // This method is called when your extension is deactivated
