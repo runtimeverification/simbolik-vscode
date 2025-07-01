@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "10.0.2",
+  "version": "10.0.3",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -69,7 +69,11 @@
         },
         "simbolik.autobuild": {
           "type": "string",
-          "enum": ["never", "on-change", "always"],
+          "enum": [
+            "never",
+            "on-change",
+            "always"
+          ],
           "default": "on-change",
           "markdownEnumDescriptions": [
             "Never build the project automatically. This is useful when you're using `forge build --watch` to build the project.",

@@ -185,26 +185,28 @@ npm run version:major
 
 ### Release Checklist
 
-1. **Create Release Branch:**
-   ```bash
-   git checkout -b release/x.y.z
-   ```
-
-2. **Update Version:**
+1. **Update Version:**
+   On your feature branch, or as an admin on master:
    ```bash
    npm run version:patch  # or minor/major
    ```
 
-3. **Update Changelog:**
+2. **Update Changelog:**
    - Add entry to `CHANGELOG.md`
    - Follow existing format: `## [x.y.z] - YYYY-MM-DD`
 
-4. **Test & Commit:**
+3. **Test & Commit:**
    ```bash
    npm run build
    npm test
    git add package.json CHANGELOG.md
    git commit -m "Version bump to x.y.z"
+   ```
+
+4. **Push Changes to Master:**
+   ```bash
+   git push origin master
+   ```
    ```
 
 5. **Create PR & Merge**
