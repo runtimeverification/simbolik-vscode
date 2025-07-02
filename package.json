@@ -69,7 +69,11 @@
         },
         "simbolik.autobuild": {
           "type": "string",
-          "enum": ["never", "on-change", "always"],
+          "enum": [
+            "never",
+            "on-change",
+            "always"
+          ],
           "default": "on-change",
           "markdownEnumDescriptions": [
             "Never build the project automatically. This is useful when you're using `forge build --watch` to build the project.",
@@ -252,8 +256,9 @@
   "dependencies": {
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
+    "path": "^0.12.7",
     "smol-toml": "^1.2.0",
-    "ws": "^8.18.1",
-    "vscode-uri": "^3.0.8"
+    "vscode-uri": "^3.0.8",
+    "ws": "^8.18.1"
   }
 }

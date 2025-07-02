@@ -63,6 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (workspaceFolder) {
+    console.log(`Workspace folder: ${workspaceFolder.uri.toString()}`);
     const path = workspaceFolder.uri.path;
     const authority = workspaceFolder.uri.authority;
     const ethereumPattern = '/tx/{txHash}';
@@ -135,8 +136,14 @@ export function activate(context: vscode.ExtensionContext) {
       // For example, if the browser URL is: https://simbolik.dev
       // Then the workspace folder URI will be: tmp:///?location=https://simbolik.dev
       const queryParams = new URLSearchParams(workspaceFolder.uri.query);
+      console.log('queryParams');
+      console.dir(queryParams);
       const location = queryParams.get('location');
+      console.log('location');
+      console.dir(location);
       const uri = vscode.Uri.parse(location ?? '').with({ path: '/simbolik-examples/'});
+      console.log('uri');
+      console.dir(uri);
       cloneStaticTree(uri, workspaceFolder.uri).then(() => {
         console.log(`Cloned static tree from ${uri.toString()} to ${workspaceFolder.uri.toString()}`);
       });
