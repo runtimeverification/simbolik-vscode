@@ -142,6 +142,7 @@ export function activate(context: vscode.ExtensionContext) {
       console.dir(url);
       downloadAndExtract(url.toString()).then(() => {
         console.log('Initialized example project');
+        vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
       });
     }
   }
