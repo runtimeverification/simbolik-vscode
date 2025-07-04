@@ -8,7 +8,7 @@ import {getConfigValue} from './utils';
 import { FileStat, FileType } from 'vscode';
 import { MemFileSystemProvider, Directory } from './fsProvider';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
-import { cloneStaticTree } from './clone';
+import { cloneStaticTree, downloadAndExtract } from './clone';
 
 console.log("Hello from Simbolik!");
 
@@ -137,14 +137,11 @@ export function activate(context: vscode.ExtensionContext) {
       // For example, if the browser URL is: https://simbolik.dev
       // Then the workspace folder URI will be: tmp:///?https://simbolik.dev
       const url = new URL(workspaceFolder.uri.query);
+      url.pathname = 'simbolik-examples';
       console.log('url');
       console.dir(url);
-      url.pathname = 'simbolik-examples/';
-      const uri = vscode.Uri.parse(url.toString());
-      console.log('uri');
-      console.dir(uri);
-      cloneStaticTree(uri, workspaceFolder.uri).then(() => {
-        console.log(`Cloned static tree from ${url.toString()} to ${workspaceFolder.uri.toString()}`);
+      downloadAndExtract(url.toString()).then(() => {
+        console.log('Initialized example project');
       });
     }
   }
