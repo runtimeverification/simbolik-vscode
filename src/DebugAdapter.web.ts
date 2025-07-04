@@ -4,6 +4,15 @@ import {getConfigValue} from './utils';
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
 
+function getWssUrl() : string {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder || !workspaceFolder.uri.query) {
+    return getConfigValue('server', 'wss://www.simbolik.dev');
+  }
+  const browserUrl = new URL(workspaceFolder.uri.query);
+  return `wss://${browserUrl.host}`;
+}
+
 export class SolidityDebugAdapterDescriptorFactory
 implements vscode.DebugAdapterDescriptorFactory
 {
@@ -12,7 +21,7 @@ implements vscode.DebugAdapterDescriptorFactory
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
-      const server = getConfigValue('server', 'wss://www.simbolik.dev');
+      const server = getWssUrl();
       const credentials = session.configuration.credentials;
       const encodedProvider = encodeURIComponent(credentials.provider);
       const encodedToken = encodeURIComponent(credentials.token);
