@@ -60,12 +60,13 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
 
-
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (workspaceFolder) {
     console.log(`Workspace folder: ${workspaceFolder.uri.toString()}`);
-    const path = workspaceFolder.uri.path;
-    const authority = workspaceFolder.uri.authority;
+    const url = new URL(workspaceFolder.uri.query);
+    console.log(`Parsed URL: ${url.toString()}`);
+    const path = url.pathname;
+    const authority = url.host;
     const ethereumPattern = '/tx/{txHash}';
     const traceTxPattern = '/{sandboxName}/tx/{txHash}';
     const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';

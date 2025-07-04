@@ -2,6 +2,9 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [10.0.2] - 2025-07-01
+- Modifying the websocket target from beta.simbolik.runtimeverification.com > simbolik.dev
+
 ## [10.0.1] - 2025-05-07
 
 - This update drastically improves the start-up performance of the debugger for large projects.

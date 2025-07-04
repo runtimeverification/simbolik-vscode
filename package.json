@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "10.0.1",
+  "version": "10.0.3",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -57,7 +57,7 @@
         },
         "simbolik.server": {
           "type": "string",
-          "default": "wss://beta.simbolik.runtimeverification.com",
+          "default": "wss://www.simbolik.dev",
           "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
           "order": 1
         },
@@ -212,7 +212,7 @@
     "resourceLabelFormatters": [
       {
         "authority": "*",
-        "scheme": "simbolik",
+        "scheme": "tmp",
         "formatting": {
           "workspaceSuffix": "Simbolik",
           "label": "${scheme}://${authority}${path}",
@@ -234,7 +234,10 @@
     "test": "node ./out/test/runTest.js",
     "clean": "gts clean",
     "fix": "gts fix",
-    "posttest": "npm run lint"
+    "posttest": "npm run lint",
+    "version:patch": "npm version patch --no-git-tag-version",
+    "version:minor": "npm version minor --no-git-tag-version",
+    "version:major": "npm version major --no-git-tag-version"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
