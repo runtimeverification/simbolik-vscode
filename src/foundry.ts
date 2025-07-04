@@ -43,7 +43,7 @@ async function loadBuildInfo(file: vscode.Uri): Promise<vscode.Uri[]> {
 export
 async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
   // Find the root of the project, which is the directory containing the foundry.toml file
-  let base = file.with({'path': '/'})
+  let base = file.with({'path': '/', 'query': '', 'authority': ''});
   let pathSegments = file.path.split('/');
   let stat;
   try {
@@ -64,7 +64,8 @@ async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
       stat = false;
     }
   }
-  return vscode.Uri.joinPath(base, ...pathSegments);
+  const result = vscode.Uri.joinPath(base, ...pathSegments);
+  return result;
 }
 
 export

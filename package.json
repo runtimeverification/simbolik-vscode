@@ -211,12 +211,12 @@
     ],
     "resourceLabelFormatters": [
       {
-        "authority": "*",
         "scheme": "tmp",
         "formatting": {
           "workspaceSuffix": "Simbolik",
           "label": "${scheme}://${authority}${path}",
-          "separator": "/"
+          "separator": "/",
+          "stripPathStartingSeparator": false
         }
       }
     ]
