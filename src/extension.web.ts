@@ -8,7 +8,7 @@ import {getConfigValue} from './utils';
 import { FileStat, FileType } from 'vscode';
 import { MemFileSystemProvider, Directory } from './fsProvider';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
-import { cloneStaticTree, downloadAndExtract } from './clone';
+import { downloadAndExtract } from './clone';
 
 console.log("Hello from Simbolik!");
 
