@@ -133,20 +133,18 @@ export function activate(context: vscode.ExtensionContext) {
         debugConfig,
       );
     } else if (workspaceFolder.uri.scheme === 'tmp') {
-      // The browser url is attached as query parameter to the workspace folder URI.
+      // The browser url is attached as a query string to the workspace folder URI.
       // For example, if the browser URL is: https://simbolik.dev
-      // Then the workspace folder URI will be: tmp:///?location=https://simbolik.dev
-      const queryParams = new URLSearchParams(workspaceFolder.uri.query);
-      console.log('queryParams');
-      console.dir(queryParams);
-      const location = queryParams.get('location');
-      console.log('location');
-      console.dir(location);
-      const uri = vscode.Uri.parse(location ?? '').with({ path: '/simbolik-examples/'});
+      // Then the workspace folder URI will be: tmp:///?https://simbolik.dev
+      const url = new URL(workspaceFolder.uri.query);
+      console.log('url');
+      console.dir(url);
+      url.pathname = 'simbolik-examples/';
+      const uri = vscode.Uri.parse(url.toString());
       console.log('uri');
       console.dir(uri);
       cloneStaticTree(uri, workspaceFolder.uri).then(() => {
-        console.log(`Cloned static tree from ${uri.toString()} to ${workspaceFolder.uri.toString()}`);
+        console.log(`Cloned static tree from ${url.toString()} to ${workspaceFolder.uri.toString()}`);
       });
     }
   }
