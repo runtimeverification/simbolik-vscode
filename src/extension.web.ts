@@ -59,82 +59,78 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
 
-
-  // Wait 3 seconds for the filesystem to be ready before starting the debug session
-  // Is there a better way to do this?
-  setTimeout(() => {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (workspaceFolder) {
-      const path = workspaceFolder.uri.path;
-      const authority = workspaceFolder.uri.authority;
-      const ethereumPattern = '/tx/{txHash}';
-      const traceTxPattern = '/{sandboxName}/tx/{txHash}';
-      const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
-      const matchEthereumPattern = matchUri(ethereumPattern, path);
-      const matchTraceTxPattern = matchUri(traceTxPattern, path);
-      const matchTraceCallPattern = matchUri(traceCallPattern, path);
-      if (matchEthereumPattern) {
-        const debugConfig = {
-          "name": "Debug Tx",
-          "type": "solidity",
-          "request": "attach",
-          "txHash": matchEthereumPattern.txHash,
-          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
-          "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": false,
-          "credentials": {
-            "provider": "simbolik",
-            "token":  getConfigValue('api-key', 'junk')
-          },
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
-      } else if (matchTraceTxPattern) {
-        const txHash = matchTraceTxPattern.txHash;
-        const sandboxName = matchTraceTxPattern.sandboxName;
-        const debugConfig = {
-          "name": "Debug Tx",
-          "type": "solidity",
-          "request": "attach",
-          "txHash": txHash,
-          "jsonRpcUrl": `https://${authority}/${sandboxName}`,
-          "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
-          "stopAtFirstOpcode": false,
-          "credentials": {
-            "provider": "simbolik",
-            "token": getConfigValue('api-key', 'junk'),
-          },
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
-      } else if (matchTraceCallPattern) {
-        const from = matchTraceCallPattern.from;
-        const to = matchTraceCallPattern.to;
-        const value = matchTraceCallPattern.value;
-        const data = matchTraceCallPattern.data;
-        const debugConfig = {
-          "name": "Debug Call",
-          "type": "solidity",
-          "request": "attach",
-          "from_": from,
-          "to": to,
-          "value": value,
-          "data": data,
-          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
-          "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": false,
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (workspaceFolder) {
+    const url = new URL(workspaceFolder.uri.query);
+    const path = url.pathname;
+    const authority = url.host;
+    const ethereumPattern = '/tx/{txHash}';
+    const traceTxPattern = '/{sandboxName}/tx/{txHash}';
+    const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
+    const matchEthereumPattern = matchUri(ethereumPattern, path);
+    const matchTraceTxPattern = matchUri(traceTxPattern, path);
+    const matchTraceCallPattern = matchUri(traceCallPattern, path);
+    if (matchEthereumPattern) {
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": matchEthereumPattern.txHash,
+        "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+        "sourcifyUrl": getConfigValue('sourcify-url', ''),
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token":  getConfigValue('api-key', 'junk')
+        },
       }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceTxPattern) {
+      const txHash = matchTraceTxPattern.txHash;
+      const sandboxName = matchTraceTxPattern.sandboxName;
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": txHash,
+        "jsonRpcUrl": `https://${authority}/${sandboxName}`,
+        "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token": getConfigValue('api-key', 'junk'),
+        },
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceCallPattern) {
+      const from = matchTraceCallPattern.from;
+      const to = matchTraceCallPattern.to;
+      const value = matchTraceCallPattern.value;
+      const data = matchTraceCallPattern.data;
+      const debugConfig = {
+        "name": "Debug Call",
+        "type": "solidity",
+        "request": "attach",
+        "from_": from,
+        "to": to,
+        "value": value,
+        "data": data,
+        "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+        "sourcifyUrl": getConfigValue('sourcify-url', ''),
+        "stopAtFirstOpcode": false,
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
     }
-  }, 3000);
+  }
 }
 
 // This method is called when your extension is deactivated

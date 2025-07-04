@@ -212,7 +212,7 @@
     "resourceLabelFormatters": [
       {
         "authority": "*",
-        "scheme": "simbolik",
+        "scheme": "tmp",
         "formatting": {
           "workspaceSuffix": "Simbolik",
           "label": "${scheme}://${authority}${path}",
