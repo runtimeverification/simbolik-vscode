@@ -6,7 +6,6 @@ import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
 import { FileStat, FileType } from 'vscode';
-import { MemFileSystemProvider, Directory } from './fsProvider';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
 import { downloadAndExtract } from './clone';
 
@@ -29,11 +28,7 @@ export function activate(context: vscode.ExtensionContext) {
     'solidity',
     codelensProvider
   ));
-  
-  const root : Directory = { type: FileType.Directory, name: 'root', stats: newFileStat(FileType.Directory, 0), entries: Promise.resolve(new Map()) }
-  const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
-  context.subscriptions.push( vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider));
-  
+   
   const factory = new SolidityDebugAdapterDescriptorFactory();
   context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
     'solidity',
@@ -66,7 +61,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Fallback for old URL format:
     // Example: simbolik.dev/?workspaceFolder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
     if (url.searchParams.has('workspaceFolder')) {
-      url = new URL(url.searchParams['workspaceFolder']);
+      url = new URL(url.searchParams.get('workspaceFolder') || '');
     }
 
     const path = url.pathname;
