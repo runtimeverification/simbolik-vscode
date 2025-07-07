@@ -56,9 +56,9 @@ export function activate(context: vscode.ExtensionContext) {
   if (workspaceFolder) {
     let url = new URL(workspaceFolder.uri.query);
     // Fallback for old URL format:
-    // Example: simbolik.dev/?workspaceFolder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
-    if (url.searchParams.has('workspaceFolder')) {
-      url = new URL(url.searchParams.get('workspaceFolder') || '');
+    // Example: simbolik.dev/?folder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
+    if (url.searchParams.has('folder')) {
+      url = new URL(url.searchParams.get('folder') || '');
     }
 
     const path = url.pathname;
@@ -91,8 +91,8 @@ export function activate(context: vscode.ExtensionContext) {
     } else if (matchTraceTxPattern) {
       // Handles the following URL patterns:
       // https://simbolik.dev/{sandboxName}/tx/{txHash}
-      // https://simbolik.dev/?workspaceFolder=simbolik://rpc.buildbear.io/{sandboxName}/tx/{txHash}
-      // https://simbolik.dev/?workspaceFolder=simbolik://dev.rpc.buildbear.io/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?folder=simbolik://rpc.buildbear.io/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?folder=simbolik://dev.rpc.buildbear.io/{sandboxName}/tx/{txHash}
       const sandboxName = matchTraceTxPattern.sandboxName;
       const sourcifyUrl = (url.host.endsWith('simbolik.dev'))
         ? `https://api.buildbear.io/v1/sourcify/${sandboxName}`
