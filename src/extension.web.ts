@@ -5,11 +5,8 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import { FileStat, FileType } from 'vscode';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
 import { downloadAndExtract } from './clone';
-
-console.log("Hello from Simbolik!");
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -94,20 +91,23 @@ export function activate(context: vscode.ExtensionContext) {
     } else if (matchTraceTxPattern) {
       // Handles the following URL patterns:
       // https://simbolik.dev/{sandboxName}/tx/{txHash}
-      // https://simbolik.dev/?workspaceFolder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
-      // https://simbolik.dev/?workspaceFolder=simbolik://dev.buildbear.io/{sandboxName}/tx/{txHash}
-      const host = (url.host.endsWith('simbolik.dev') )
-        ? 'api.buildbear.io'
-        : 'api.' + url.host;
-      const txHash = matchTraceTxPattern.txHash;
+      // https://simbolik.dev/?workspaceFolder=simbolik://rpc.buildbear.io/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?workspaceFolder=simbolik://dev.rpc.buildbear.io/{sandboxName}/tx/{txHash}
       const sandboxName = matchTraceTxPattern.sandboxName;
+      const sourcifyUrl = (url.host.endsWith('simbolik.dev'))
+        ? `https://api.buildbear.io/v1/sourcify/${sandboxName}`
+        : `https://${url.host.replace(/^rpc/, 'api').replace(/^dev\.rpc/, 'api.dev')}/v1/sourcify/${sandboxName}`;
+      const rpcUrl = (url.host.endsWith('simbolik.dev'))
+        ? `https://rpc.buildbear.io/${sandboxName}`
+        : `https://${url.host}/${sandboxName}`;
+      const txHash = matchTraceTxPattern.txHash;
       const debugConfig = {
         "name": "Debug Tx",
         "type": "solidity",
         "request": "attach",
         "txHash": txHash,
-        "jsonRpcUrl": `https://${host}/${sandboxName}`,
-        "sourcifyUrl": `https://${host}/v1/sourcify/${sandboxName}`,
+        "jsonRpcUrl": rpcUrl,
+        "sourcifyUrl": sourcifyUrl,
         "stopAtFirstOpcode": false,
         "credentials": {
           "provider": "simbolik",
@@ -119,17 +119,19 @@ export function activate(context: vscode.ExtensionContext) {
         debugConfig,
       );
     } else if (matchTraceTxPatternDev) {
+      // Handles the following URL patterns:
       // https://simbolik.dev/dev/{sandboxName}/tx/{txHash}
-      const host = 'api.dev.buildbear.io';
       const txHash = matchTraceTxPatternDev.txHash;
       const sandboxName = matchTraceTxPatternDev.sandboxName;
+      const sourcifyUrl = `https://api.dev.buildbear.io/v1/sourcify/${sandboxName}`;
+      const rpcUrl = `https://dev.rpc.buildbear.io/${sandboxName}`;
       const debugConfig = {
         "name": "Debug Tx",
         "type": "solidity",
         "request": "attach",
         "txHash": txHash,
-        "jsonRpcUrl": `https://${host}/${sandboxName}`,
-        "sourcifyUrl": `https://${host}/v1/sourcify/${sandboxName}`,
+        "jsonRpcUrl": rpcUrl,
+        "sourcifyUrl": sourcifyUrl,
         "stopAtFirstOpcode": false,
         "credentials": {
           "provider": "simbolik",
@@ -167,10 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Then the workspace folder URI will be: tmp:///?https://simbolik.dev
       const url = new URL(workspaceFolder.uri.query);
       url.pathname = 'simbolik-examples';
-      console.log('url');
-      console.dir(url);
       downloadAndExtract(url.toString()).then(() => {
-        console.log('Initialized example project');
         vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
       });
     }
@@ -207,8 +206,4 @@ function matchUri(pattern: string, path: string): { [key: string]: string } | nu
     }
   }
   return result;
-}
-
-function newFileStat(type: FileType, size: number): Promise<FileStat> {
-	return Promise.resolve({ type, ctime: Date.now(), mtime: Date.now(), size });
 }
