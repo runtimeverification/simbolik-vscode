@@ -62,16 +62,21 @@ export function activate(context: vscode.ExtensionContext) {
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (workspaceFolder) {
-    console.log(`Workspace folder: ${workspaceFolder.uri.toString()}`);
-    const url = new URL(workspaceFolder.uri.query);
-    console.log(`Parsed URL: ${url.toString()}`);
+    let url = new URL(workspaceFolder.uri.query);
+    // Fallback for old URL format:
+    // Example: simbolik.dev/?workspaceFolder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
+    if (url.searchParams.has('workspaceFolder')) {
+      url = new URL(url.searchParams['workspaceFolder']);
+    }
+
     const path = url.pathname;
-    const authority = url.host;
     const ethereumPattern = '/tx/{txHash}';
     const traceTxPattern = '/{sandboxName}/tx/{txHash}';
+    const traceTxPatternDev = '/dev/{sandboxName}/tx/{txHash}';
     const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
     const matchEthereumPattern = matchUri(ethereumPattern, path);
     const matchTraceTxPattern = matchUri(traceTxPattern, path);
+    const matchTraceTxPatternDev = matchUri(traceTxPatternDev, path);
     const matchTraceCallPattern = matchUri(traceCallPattern, path);
     if (matchEthereumPattern) {
       const debugConfig = {
@@ -92,6 +97,13 @@ export function activate(context: vscode.ExtensionContext) {
         debugConfig,
       );
     } else if (matchTraceTxPattern) {
+      // Handles the following URL patterns:
+      // https://simbolik.dev/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?workspaceFolder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?workspaceFolder=simbolik://dev.buildbear.io/{sandboxName}/tx/{txHash}
+      const host = (url.host.endsWith('simbolik.dev') )
+        ? 'api.buildbear.io'
+        : 'api.' + url.host;
       const txHash = matchTraceTxPattern.txHash;
       const sandboxName = matchTraceTxPattern.sandboxName;
       const debugConfig = {
@@ -99,8 +111,30 @@ export function activate(context: vscode.ExtensionContext) {
         "type": "solidity",
         "request": "attach",
         "txHash": txHash,
-        "jsonRpcUrl": `https://${authority}/${sandboxName}`,
-        "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
+        "jsonRpcUrl": `https://${host}/${sandboxName}`,
+        "sourcifyUrl": `https://${host}/v1/sourcify/${sandboxName}`,
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token": getConfigValue('api-key', 'junk'),
+        },
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceTxPatternDev) {
+      // https://simbolik.dev/dev/{sandboxName}/tx/{txHash}
+      const host = 'api.dev.buildbear.io';
+      const txHash = matchTraceTxPatternDev.txHash;
+      const sandboxName = matchTraceTxPatternDev.sandboxName;
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": txHash,
+        "jsonRpcUrl": `https://${host}/${sandboxName}`,
+        "sourcifyUrl": `https://${host}/v1/sourcify/${sandboxName}`,
         "stopAtFirstOpcode": false,
         "credentials": {
           "provider": "simbolik",
