@@ -86,6 +86,7 @@ export async function startDebugging(
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
     const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
     const autobuild = getConfigValue<'always'|'on-change'|'never'>('autobuild', 'on-change');
+    const rpcNodeType = getConfigValue<'anvil'|'kontrol-node'>('rpc-node-type', 'anvil');
 
     // Auto build if needed
     // Notice, that if autobuild is set to 'on-change' and the project is not built, the project will be built
@@ -139,7 +140,8 @@ export async function startDebugging(
       buildInfoFiles,
       myFoundryRoot,
       credentials,
-      clientVersion
+      clientVersion,
+      rpcNodeType
     );
     return { workspaceFolder, debugConfig };
   });
@@ -179,7 +181,8 @@ function createDebugConfig(
   buildInfoFiles: vscode.Uri[],
   clientMount: vscode.Uri,
   credentials: Credentials,
-  clientVersion: string
+  clientVersion: string,
+  rpcNodeType: string
 ) {
   return {
     name: name,
@@ -195,6 +198,7 @@ function createDebugConfig(
     buildInfoFiles: buildInfoFiles,
     clientMount: clientMount,
     credentials: credentials,
-    clientVersion: clientVersion
+    clientVersion: clientVersion,
+    rpcNodeType: rpcNodeType
   };
 }
