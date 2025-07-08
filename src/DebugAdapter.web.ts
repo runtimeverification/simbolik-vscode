@@ -7,7 +7,7 @@ const CONNECTION_TIMEOUT = 3000;
 function getWssUrl() : string {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder || !workspaceFolder.uri.query) {
-    return getConfigValue('server', 'wss://www.simbolik.dev');
+    return getConfigValue('server', 'wss://code.simbolik.dev');
   }
   const browserUrl = new URL(workspaceFolder.uri.query);
   const ws = browserUrl.protocol === 'https:' ? 'wss' : 'ws';
