@@ -16,7 +16,7 @@ implements vscode.DebugAdapterDescriptorFactory
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
-      const server = getConfigValue('server', 'wss://www.simbolik.dev');
+      const server = getConfigValue('server', 'wss://code.simbolik.dev');
       const credentials = session.configuration.credentials;
       const encodedProvider = encodeURIComponent(credentials.provider);
       const encodedToken = encodeURIComponent(credentials.token);
