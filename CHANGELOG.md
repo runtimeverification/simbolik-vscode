@@ -2,6 +2,12 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [10.0.4] - 2025-07-08
+- Modifying the websocket target from www.simbolik.dev > code.simbolik.dev
+
+## [10.0.3] - 2025-07-01
+- Updated contributor docs
+
 ## [10.0.2] - 2025-07-01
 - Modifying the websocket target from beta.simbolik.runtimeverification.com > simbolik.dev
 
