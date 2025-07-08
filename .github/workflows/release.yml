@@ -73,6 +73,7 @@ jobs:
           skipDuplicate: true
       - name: Attach vsix to release
         uses: actions/upload-release-asset@v1
+        if: steps.get_release.outputs.exists == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
