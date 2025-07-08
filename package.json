@@ -57,7 +57,7 @@
         },
         "simbolik.server": {
           "type": "string",
-          "default": "wss://www.simbolik.dev",
+          "default": "wss://code.simbolik.dev",
           "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
           "order": 1
         },
