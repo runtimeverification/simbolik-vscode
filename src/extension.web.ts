@@ -54,11 +54,23 @@ export function activate(context: vscode.ExtensionContext) {
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (workspaceFolder) {
-    let url = new URL(workspaceFolder.uri.query);
+    let url;
+    try {
+      url = new URL(workspaceFolder.uri.query);
+    } catch (error) {
+      // If the workspace folder URI query is not a valid URL, we
+      vscode.window.showErrorMessage('Failed to initialize workspace folder.');
+      return;
+    }
     // Fallback for old URL format:
     // Example: simbolik.dev/?folder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
     if (url.searchParams.has('folder')) {
-      url = new URL(url.searchParams.get('folder') || '');
+      try {
+        url = new URL(url.searchParams.get('folder') || '');
+      } catch (error) {
+        vscode.window.showErrorMessage('Failed to initialize workspace folder.');
+        return;
+      }
     }
 
     const path = url.pathname;
@@ -167,7 +179,13 @@ export function activate(context: vscode.ExtensionContext) {
       // The browser url is attached as a query string to the workspace folder URI.
       // For example, if the browser URL is: https://simbolik.dev
       // Then the workspace folder URI will be: tmp:///?https://simbolik.dev
-      const url = new URL(workspaceFolder.uri.query);
+      let url;
+      try {
+        url = new URL(workspaceFolder.uri.query);
+      } catch (error) {
+        vscode.window.showErrorMessage('Failed to initialize demo project');
+        return;
+      }
       url.pathname = 'simbolik-examples';
       downloadAndExtract(url.toString()).then(() => {
         vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
