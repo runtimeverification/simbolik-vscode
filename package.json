@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "10.0.3",
+  "version": "10.0.4",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -57,7 +57,7 @@
         },
         "simbolik.server": {
           "type": "string",
-          "default": "wss://www.simbolik.dev",
+          "default": "wss://code.simbolik.dev",
           "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
           "order": 1
         },
