@@ -5,11 +5,8 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import { FileStat, FileType } from 'vscode';
-import { MemFileSystemProvider, Directory } from './fsProvider';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
-
-console.log("Hello from Simbolik!");
+import { downloadAndExtract } from './clone';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -28,11 +25,7 @@ export function activate(context: vscode.ExtensionContext) {
     'solidity',
     codelensProvider
   ));
-  
-  const root : Directory = { type: FileType.Directory, name: 'root', stats: newFileStat(FileType.Directory, 0), entries: Promise.resolve(new Map()) }
-  const memFsProvider = new MemFileSystemProvider('simbolik', root, context.extensionUri);
-  context.subscriptions.push( vscode.workspace.registerFileSystemProvider('simbolik', memFsProvider));
-  
+   
   const factory = new SolidityDebugAdapterDescriptorFactory();
   context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
     'solidity',
@@ -59,82 +52,146 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
 
-
-  // Wait 3 seconds for the filesystem to be ready before starting the debug session
-  // Is there a better way to do this?
-  setTimeout(() => {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (workspaceFolder) {
-      const path = workspaceFolder.uri.path;
-      const authority = workspaceFolder.uri.authority;
-      const ethereumPattern = '/tx/{txHash}';
-      const traceTxPattern = '/{sandboxName}/tx/{txHash}';
-      const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
-      const matchEthereumPattern = matchUri(ethereumPattern, path);
-      const matchTraceTxPattern = matchUri(traceTxPattern, path);
-      const matchTraceCallPattern = matchUri(traceCallPattern, path);
-      if (matchEthereumPattern) {
-        const debugConfig = {
-          "name": "Debug Tx",
-          "type": "solidity",
-          "request": "attach",
-          "txHash": matchEthereumPattern.txHash,
-          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
-          "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": false,
-          "credentials": {
-            "provider": "simbolik",
-            "token":  getConfigValue('api-key', 'junk')
-          },
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
-      } else if (matchTraceTxPattern) {
-        const txHash = matchTraceTxPattern.txHash;
-        const sandboxName = matchTraceTxPattern.sandboxName;
-        const debugConfig = {
-          "name": "Debug Tx",
-          "type": "solidity",
-          "request": "attach",
-          "txHash": txHash,
-          "jsonRpcUrl": `https://${authority}/${sandboxName}`,
-          "sourcifyUrl": `https://${authority}/verify/sourcify/server/${sandboxName}`,
-          "stopAtFirstOpcode": false,
-          "credentials": {
-            "provider": "simbolik",
-            "token": getConfigValue('api-key', 'junk'),
-          },
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
-      } else if (matchTraceCallPattern) {
-        const from = matchTraceCallPattern.from;
-        const to = matchTraceCallPattern.to;
-        const value = matchTraceCallPattern.value;
-        const data = matchTraceCallPattern.data;
-        const debugConfig = {
-          "name": "Debug Call",
-          "type": "solidity",
-          "request": "attach",
-          "from_": from,
-          "to": to,
-          "value": value,
-          "data": data,
-          "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
-          "sourcifyUrl": getConfigValue('sourcify-url', ''),
-          "stopAtFirstOpcode": false,
-        }
-        vscode.debug.startDebugging(
-          workspaceFolder,
-          debugConfig,
-        );
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (workspaceFolder) {
+    let url;
+    try {
+      url = new URL(workspaceFolder.uri.query);
+    } catch (error) {
+      // If the workspace folder URI query is not a valid URL, we
+      vscode.window.showErrorMessage('Failed to initialize workspace folder.');
+      return;
+    }
+    // Fallback for old URL format:
+    // Example: simbolik.dev/?folder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
+    if (url.searchParams.has('folder')) {
+      try {
+        url = new URL(url.searchParams.get('folder') || '');
+      } catch (error) {
+        vscode.window.showErrorMessage('Failed to initialize workspace folder.');
+        return;
       }
     }
-  }, 3000);
+
+    const path = url.pathname;
+    const ethereumPattern = '/tx/{txHash}';
+    const traceTxPattern = '/{sandboxName}/tx/{txHash}';
+    const traceTxPatternDev = '/dev/{sandboxName}/tx/{txHash}';
+    const traceCallPattern = '/from/{from}/to/{to}/value/{value}/data/{data}';
+    const matchEthereumPattern = matchUri(ethereumPattern, path);
+    const matchTraceTxPattern = matchUri(traceTxPattern, path);
+    const matchTraceTxPatternDev = matchUri(traceTxPatternDev, path);
+    const matchTraceCallPattern = matchUri(traceCallPattern, path);
+    if (matchEthereumPattern) {
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": matchEthereumPattern.txHash,
+        "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+        "sourcifyUrl": getConfigValue('sourcify-url', ''),
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token":  getConfigValue('api-key', 'junk')
+        },
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceTxPattern) {
+      // Handles the following URL patterns:
+      // https://simbolik.dev/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?folder=simbolik://rpc.buildbear.io/{sandboxName}/tx/{txHash}
+      // https://simbolik.dev/?folder=simbolik://dev.rpc.buildbear.io/{sandboxName}/tx/{txHash}
+      const sandboxName = matchTraceTxPattern.sandboxName;
+      const sourcifyUrl = (url.host.endsWith('simbolik.dev'))
+        ? `https://api.buildbear.io/v1/sourcify/${sandboxName}`
+        : `https://${url.host.replace(/^rpc/, 'api').replace(/^dev\.rpc/, 'api.dev')}/v1/sourcify/${sandboxName}`;
+      const rpcUrl = (url.host.endsWith('simbolik.dev'))
+        ? `https://rpc.buildbear.io/${sandboxName}`
+        : `https://${url.host}/${sandboxName}`;
+      const txHash = matchTraceTxPattern.txHash;
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": txHash,
+        "jsonRpcUrl": rpcUrl,
+        "sourcifyUrl": sourcifyUrl,
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token": getConfigValue('api-key', 'junk'),
+        },
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceTxPatternDev) {
+      // Handles the following URL patterns:
+      // https://simbolik.dev/dev/{sandboxName}/tx/{txHash}
+      const txHash = matchTraceTxPatternDev.txHash;
+      const sandboxName = matchTraceTxPatternDev.sandboxName;
+      const sourcifyUrl = `https://api.dev.buildbear.io/v1/sourcify/${sandboxName}`;
+      const rpcUrl = `https://dev.rpc.buildbear.io/${sandboxName}`;
+      const debugConfig = {
+        "name": "Debug Tx",
+        "type": "solidity",
+        "request": "attach",
+        "txHash": txHash,
+        "jsonRpcUrl": rpcUrl,
+        "sourcifyUrl": sourcifyUrl,
+        "stopAtFirstOpcode": false,
+        "credentials": {
+          "provider": "simbolik",
+          "token": getConfigValue('api-key', 'junk'),
+        },
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (matchTraceCallPattern) {
+      const from = matchTraceCallPattern.from;
+      const to = matchTraceCallPattern.to;
+      const value = matchTraceCallPattern.value;
+      const data = matchTraceCallPattern.data;
+      const debugConfig = {
+        "name": "Debug Call",
+        "type": "solidity",
+        "request": "attach",
+        "from_": from,
+        "to": to,
+        "value": value,
+        "data": data,
+        "jsonRpcUrl": getConfigValue('json-rpc-url', ''),
+        "sourcifyUrl": getConfigValue('sourcify-url', ''),
+        "stopAtFirstOpcode": false,
+      }
+      vscode.debug.startDebugging(
+        workspaceFolder,
+        debugConfig,
+      );
+    } else if (workspaceFolder.uri.scheme === 'tmp') {
+      // The browser url is attached as a query string to the workspace folder URI.
+      // For example, if the browser URL is: https://simbolik.dev
+      // Then the workspace folder URI will be: tmp:///?https://simbolik.dev
+      let url;
+      try {
+        url = new URL(workspaceFolder.uri.query);
+      } catch (error) {
+        vscode.window.showErrorMessage('Failed to initialize demo project');
+        return;
+      }
+      url.pathname = 'simbolik-examples';
+      downloadAndExtract(url.toString()).then(() => {
+        vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
+      });
+    }
+  }
 }
 
 // This method is called when your extension is deactivated
@@ -167,8 +224,4 @@ function matchUri(pattern: string, path: string): { [key: string]: string } | nu
     }
   }
   return result;
-}
-
-function newFileStat(type: FileType, size: number): Promise<FileStat> {
-	return Promise.resolve({ type, ctime: Date.now(), mtime: Date.now(), size });
 }
