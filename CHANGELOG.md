@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [11.0.0] - 2025-07-09
+- This version replaces the custom in-memory file system with VSCode's native tmp file system provider.
+- We now allow downloading and debugging tarballs of Solidity projects.
+
 ## [10.0.4] - 2025-07-08
 - Modifying the websocket target from www.simbolik.dev > code.simbolik.dev
 
