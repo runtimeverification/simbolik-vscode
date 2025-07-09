@@ -4,6 +4,16 @@ import {getConfigValue} from './utils';
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
 
+function getWssUrl() : string {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder || !workspaceFolder.uri.query) {
+    return getConfigValue('server', 'wss://code.simbolik.dev');
+  }
+  const browserUrl = new URL(workspaceFolder.uri.query);
+  const ws = browserUrl.protocol === 'https:' ? 'wss' : 'ws';
+  return `${ws}://${browserUrl.host}`;
+}
+
 export class SolidityDebugAdapterDescriptorFactory
 implements vscode.DebugAdapterDescriptorFactory
 {
@@ -12,7 +22,7 @@ implements vscode.DebugAdapterDescriptorFactory
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
-      const server = getConfigValue('server', 'wss://beta.simbolik.runtimeverification.com');
+      const server = getWssUrl();
       const credentials = session.configuration.credentials;
       const encodedProvider = encodeURIComponent(credentials.provider);
       const encodedToken = encodeURIComponent(credentials.token);
@@ -132,7 +142,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   
   foundryRoot() : vscode.Uri {
     if (!this.configuration['clientMount']) {
-      return vscode.Uri.parse('file:///');
+      return vscode.Uri.parse('tmp:///');
     }
     const uri = vscode.Uri.from(this.configuration['clientMount']);
     return uri;
@@ -173,12 +183,17 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     if (Array.isArray(message)) {
       return message.map((item) => this.prependPaths(item));
     } else if (message instanceof Object) {
+      const foundryRoot = this.foundryRoot();
+      let prefix = foundryRoot.toString();
+      if (prefix === 'tmp:/') {
+        prefix = 'tmp://';
+      }
       const result = Object.assign({}, message);
       for (const key in message) {
         if (['path', 'symbolFilePath', 'file'].includes(key) && typeof message[key] === 'string') {
-          result[key] = `${this.foundryRoot()}/${message[key]}`;
+          result[key] = `${prefix}/${message[key]}`;
         } else if (key == 'file' && typeof message[key] === 'string') {
-          result[key] = `${this.foundryRoot()}/${message[key]}`;
+          result[key] = `${prefix}/${message[key]}`;
         } else if (typeof message[key] === 'object') {
           result[key] = this.prependPaths(message[key]);
         }

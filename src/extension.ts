@@ -66,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (action === 'Learn More') {
         vscode.env.openExternal(
-          vscode.Uri.parse('https://simbolik.runtimeverification.com')
+          vscode.Uri.parse('https://www.simbolik.dev')
         );
       }
     }
