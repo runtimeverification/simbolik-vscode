@@ -2,6 +2,9 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [11.0.1] - 2025-07-16
+- This version enables experimental cheatcode support for debugging Foundry tests
+
 ## [11.0.0] - 2025-07-09
 - This version replaces the custom in-memory file system with VSCode's native tmp file system provider.
 - We now allow downloading and debugging tarballs of Solidity projects.
