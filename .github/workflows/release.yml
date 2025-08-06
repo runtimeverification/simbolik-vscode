@@ -67,6 +67,7 @@ jobs:
           tag_name: ${{ steps.package_version.outputs.current-version }}
           release_name: ${{ steps.package_version.outputs.current-version }}
           body: Publish ${{ steps.package_version.outputs.current-version }}
+          draft: true
 
       - name: Install vsce
         run: npm install -g @vscode/vsce
@@ -101,6 +102,7 @@ jobs:
           registryUrl: https://marketplace.visualstudio.com
           extensionFile: ${{ needs.build.outputs.vsix }}
           skipDuplicate: true
+          dryRun: true
 
       - name: Attach VSIX to release
         if: needs.build.outputs.release_exists == 'false'
@@ -129,4 +131,4 @@ jobs:
           pat: ${{ secrets.OPEN_VSX_TOKEN }}
           extensionFile: ${{ needs.build.outputs.vsix }}
           skipDuplicate: true
-
+          dryRun: true
