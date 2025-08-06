@@ -2,6 +2,13 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [11.0.2](https://github.com/runtimeverification/simbolik-vscode/compare/11.0.1...v11.0.2) (2025-08-06)
+
+
+### Miscellaneous Chores
+
+* version bump ([59cc750](https://github.com/runtimeverification/simbolik-vscode/commit/59cc7500f75b0527575a90ccbd0d9e1234e65ea6))
+
 ## [11.0.1] - 2025-07-16
 - This version enables experimental cheatcode support for debugging Foundry tests
 

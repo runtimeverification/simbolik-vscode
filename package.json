@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "11.0.1",
+  "version": "11.0.2",
   "engines": {
     "vscode": "^1.79.0"
   },
@@ -109,7 +109,10 @@
         },
         "simbolik.rpc-node-type": {
           "type": "string",
-          "enum": ["anvil", "kontrol-node"],
+          "enum": [
+            "anvil",
+            "kontrol-node"
+          ],
           "default": "anvil",
           "description": "The type of the JSON-RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta.",
           "order": 11
@@ -168,7 +171,10 @@
               },
               "rpcNodeType": {
                 "type": "string",
-                "enum": ["anvil", "kontrol-node"],
+                "enum": [
+                  "anvil",
+                  "kontrol-node"
+                ],
                 "description": "The type of the RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta."
               }
             }
