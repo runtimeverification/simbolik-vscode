@@ -56,7 +56,10 @@ jobs:
             }
         env:
           VERSION: ${{ steps.package_version.outputs.current-version }}
-
+      - uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+          target-branch: master
       - name: Create a Release
         id: create_release
         if: steps.get_release.outputs.exists == 'false'
