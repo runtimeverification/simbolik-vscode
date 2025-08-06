@@ -1,6 +1,9 @@
 on: workflow_dispatch
 
 name: Publish VS Code Extension to Microsoft Marketplace and Open VSX
+permissions:
+  contents: write
+  pull-requests: write
 jobs:
   build:
     runs-on: ubuntu-latest
