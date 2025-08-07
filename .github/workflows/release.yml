@@ -16,6 +16,9 @@ jobs:
         run: |
           corepack enable
           yarn install
+      # Run linter
+      - name: Lint
+        run: yarn run lint
       # Run tests
       - name: Build
         run: yarn run build
