@@ -258,7 +258,8 @@
     "posttest": "npm run lint",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
-    "version:major": "npm version major --no-git-tag-version"
+    "version:major": "npm version major --no-git-tag-version",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
@@ -270,6 +271,7 @@
     "eslint": "^9.33.0",
     "eslint-config-rv-web-nestjs": "github:runtimeverification/eslint-config-rv-web-nestjs#a906dc1e429b54558a7196e1ddf0ffdaa3250268",
     "glob": "^8.1.0",
+    "husky": "^9.1.7",
     "mocha": "^10.2.0",
     "prettier": "^3.6.2",
     "process": "^0.11.10",
@@ -284,5 +286,16 @@
     "smol-toml": "^1.2.0",
     "vscode-uri": "^3.0.8",
     "ws": "^8.18.1"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx,js,jsx}": [
+      "prettier --write --config ./.prettierrc",
+      "eslint --fix"
+    ]
   }
 }
