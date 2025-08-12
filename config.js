@@ -1,4 +1,3 @@
-// config.js (your shared preset, flat config - ESM)
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import unicorn from 'eslint-plugin-unicorn';
@@ -17,7 +16,30 @@ export default tseslint.config(
   prettierRecommended,
   prettierCompat,
 
-  // ⬇️ TS-only, so JS files (e.g., config.js) won't trigger typed rules
+  // global overrides
+  {
+    rules: {
+      'unicorn/no-null': 'off',
+      'unicorn/prefer-module': 'off',
+      'unicorn/prefer-top-level-await': 'off',
+      'unicorn/prevent-abbreviations': [
+        'error',
+        {
+          replacements: {
+            e: { event: false },
+            res: false,
+            req: false,
+            obj: false,
+            env: false,
+            cmd: { command: true },
+          },
+        },
+      ],
+      quotes: ['error', 'single', { avoidEscape: true }],
+    },
+  },
+
+  // TS-only: type-aware rules
   {
     files: ['**/*.{ts,tsx}'],
     rules: {
