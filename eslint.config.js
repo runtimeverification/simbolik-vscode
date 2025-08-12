@@ -1,30 +1,41 @@
 // eslint.config.js
-import {defineConfig} from "eslint/config";
-import globals from "globals";
-import tsParser from "@typescript-eslint/parser";
-import tsPlugin from "@typescript-eslint/eslint-plugin";
-import {fileURLToPath} from "node:url";
-import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
-import rv from "./config.js";
-import path from "node:path";
+import { defineConfig } from 'eslint/config';
+import globals from 'globals';
+import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+import { fileURLToPath } from 'node:url';
+import eslintComments from '@eslint-community/eslint-plugin-eslint-comments';
+import rv from 'eslint-config-rv-web-nestjs';
+import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig([
-  {ignores: ["**/.eslintrc.js", "src/@generated/**", "build/**", "build-web/**"]},
-  {plugins: {"@eslint-community/eslint-comments": eslintComments}},
+  {
+    ignores: [
+      '**/.eslintrc.js',
+      'src/@generated/**',
+      'build/**',
+      'build-web/**',
+    ],
+  },
+  { plugins: { '@eslint-community/eslint-comments': eslintComments } },
 
   // ⬇️ flatten the shared config (no nested `extends`)
   ...rv,
 
   {
-    files: ["**/*.{ts,tsx}"],
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parser: tsParser,
-      parserOptions: {project: "tsconfig.json", tsconfigRootDir: __dirname, sourceType: "module"},
-      globals: {...globals.node, ...globals.jest},
+      parserOptions: {
+        project: 'tsconfig.json',
+        tsconfigRootDir: __dirname,
+        sourceType: 'module',
+      },
+      globals: { ...globals.node, ...globals.jest },
     },
-    plugins: {"@typescript-eslint": tsPlugin},
-    rules: {"unicorn/prevent-abbreviations": "off"},
+    plugins: { '@typescript-eslint': tsPlugin },
+    rules: { 'unicorn/prevent-abbreviations': 'off' },
   },
 ]);
