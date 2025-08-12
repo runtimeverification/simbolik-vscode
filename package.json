@@ -1,6 +1,7 @@
 {
   "name": "simbolik",
   "displayName": "Simbolik: Solidity Debugger",
+  "type": "module",
   "repository": {
     "type": "github",
     "url": "https://github.com/runtimeverification/simbolik-vscode"
@@ -250,8 +251,8 @@
     "compile-web": "tsc -p ./tsconfig.web.json",
     "pretest": "npm run compile && npm run lint",
     "format": "prettier --config .prettierrc --write .",
-    "lint": "eslint -c .eslintrc.js .",
-    "fix": "eslint -c .eslintrc.js . --fix",
+    "lint": "eslint",
+    "fix": "eslint -c .eslint.config.js . --fix",
     "test": "node ./out/test/runTest.js",
     "clean": "gts clean",
     "posttest": "npm run lint",
@@ -260,6 +261,7 @@
     "version:major": "npm version major --no-git-tag-version"
   },
   "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "^4.5.0",
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.1",
     "@types/node": "20.11.5",
@@ -270,7 +272,7 @@
     "esbuild": "^0.20.2",
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-config-rv-web-nestjs": "github:runtimeverification/eslint-config-rv-web-nestjs#2855718280b17a83c93e578b1f63c99bfa0f3712",
+    "eslint-config-rv-web-nestjs": "github:runtimeverification/eslint-config-rv-web-nestjs#eab88164df8bd112fcf9f6b5826dff030bf3b720",
     "eslint-plugin-eslint-comments": "^3.2.0",
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-unicorn": "^60.0.0",
@@ -279,7 +281,8 @@
     "prettier": "^3.6.2",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
-    "typescript": "^5.2.0"
+    "typescript": "^5.2.0",
+    "typescript-eslint": "^8.39.1"
   },
   "dependencies": {
     "@andrewbranch/untar.js": "^1.0.3",
