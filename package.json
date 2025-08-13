@@ -1,6 +1,7 @@
 {
   "name": "simbolik",
   "displayName": "Simbolik: Solidity Debugger",
+  "type": "module",
   "repository": {
     "type": "github",
     "url": "https://github.com/runtimeverification/simbolik-vscode"
@@ -109,7 +110,10 @@
         },
         "simbolik.rpc-node-type": {
           "type": "string",
-          "enum": ["anvil", "kontrol-node"],
+          "enum": [
+            "anvil",
+            "kontrol-node"
+          ],
           "default": "anvil",
           "description": "The type of the JSON-RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta.",
           "order": 11
@@ -168,7 +172,10 @@
               },
               "rpcNodeType": {
                 "type": "string",
-                "enum": ["anvil", "kontrol-node"],
+                "enum": [
+                  "anvil",
+                  "kontrol-node"
+                ],
                 "description": "The type of the RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta."
               }
             }
@@ -243,28 +250,32 @@
     "compile": "tsc -p ./tsconfig.json",
     "compile-web": "tsc -p ./tsconfig.web.json",
     "pretest": "npm run compile && npm run lint",
-    "lint": "gts lint",
+    "format": "prettier --config .prettierrc --write .",
+    "lint": "eslint",
+    "fix": "eslint --fix",
     "test": "node ./out/test/runTest.js",
     "clean": "gts clean",
-    "fix": "gts fix",
     "posttest": "npm run lint",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
-    "version:major": "npm version major --no-git-tag-version"
+    "version:major": "npm version major --no-git-tag-version",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "^4.5.0",
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.1",
     "@types/node": "20.11.5",
     "@types/vscode": "^1.79.0",
-    "@typescript-eslint/eslint-plugin": "^5.59.8",
-    "@typescript-eslint/parser": "^5.59.8",
     "@vscode/test-electron": "^2.3.2",
     "esbuild": "^0.20.2",
-    "eslint": "^8.41.0",
+    "eslint": "^9.33.0",
+    "eslint-config-rv-web-nestjs": "github:runtimeverification/eslint-config-rv-web-nestjs#a906dc1e429b54558a7196e1ddf0ffdaa3250268",
     "glob": "^8.1.0",
-    "gts": "^5.3.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.5",
     "mocha": "^10.2.0",
+    "prettier": "^3.6.2",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
     "typescript": "^5.2.0"
@@ -277,5 +288,16 @@
     "smol-toml": "^1.2.0",
     "vscode-uri": "^3.0.8",
     "ws": "^8.18.1"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx,js,jsx}": [
+      "prettier --write --config ./.prettierrc",
+      "eslint --fix"
+    ]
   }
 }
