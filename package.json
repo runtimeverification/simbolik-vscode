@@ -295,8 +295,8 @@
   },
   "lint-staged": {
     "src/**/*.{ts,tsx,js,jsx}": [
-      "prettier --write --config ./.prettierrc .",
-      "eslint --fix ."
+      "prettier --write --config ./.prettierrc",
+      "eslint --fix"
     ]
   }
 }
