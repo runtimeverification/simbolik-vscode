@@ -277,5 +277,8 @@
     "smol-toml": "^1.2.0",
     "vscode-uri": "^3.0.8",
     "ws": "^8.18.1"
-  }
+  },
+  "extensionDependencies": [
+    "runtimeverification.kaas-vscode"
+  ]
 }
