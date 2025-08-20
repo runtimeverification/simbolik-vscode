@@ -6,7 +6,9 @@
     "target": "ES2022",
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "module": "ESNext",
+    "strictNullChecks": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": [
