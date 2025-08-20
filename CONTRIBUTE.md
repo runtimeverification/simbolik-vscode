@@ -70,7 +70,7 @@ simbolik-vscode/
 ├── src/
 │   ├── extension.ts          # Main extension entry point
 │   ├── extension.web.ts      # Web extension entry point
-│   ├── DebugAdapter.ts       # Desktop debug adapter
+│   ├── debugAdapter.ts       # Desktop debug adapter
 │   ├── debugAdapter.web.ts   # Web debug adapter
 │   ├── CodelensProvider.ts   # Provides "Debug" buttons
 │   ├── startDebugging.ts     # Debug session logic
@@ -135,7 +135,7 @@ npm run compile-web
 
 #### 2. Debug Adapters
 
-- **Desktop:** `DebugAdapter.ts` - Full Node.js environment
+- **Desktop:** `debugAdapter.ts` - Full Node.js environment
 - **Web:** `debugAdapter.web.ts` - Browser-compatible version
 
 #### 3. Foundry Integration (`foundry.ts`)

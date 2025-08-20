@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { MessageEvent, WebSocket } from 'ws';
-import { Credentials } from './startDebugging';
 import { createReadStream } from 'node:fs';
 
 // How long to wait for the server to respond before giving up
@@ -12,7 +11,7 @@ export class SolidityDebugAdapterDescriptorFactory
 {
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
-    executable: vscode.DebugAdapterExecutable | undefined,
+    _executable: vscode.DebugAdapterExecutable | undefined,
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
       const server = getConfigValue('server', 'wss://code.simbolik.dev');
@@ -161,12 +160,14 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     private websocket: WebSocket,
     private configuration: vscode.DebugConfiguration,
   ) {
-    websocket.onmessage = (message: MessageEvent) => {
+    websocket.addEventListener('message', (message: MessageEvent) => {
       const payload = message.data.toString();
       const data = JSON.parse(payload);
       const dataWithAbsolutePaths = this.prependPaths(data);
-      this._onDidSendMessage.fire(dataWithAbsolutePaths);
-    };
+      this._onDidSendMessage.fire(
+        dataWithAbsolutePaths as vscode.DebugProtocolMessage,
+      );
+    });
   }
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
@@ -192,8 +193,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
    * @param message
    */
   trimPaths(
-    message: { [key: string]: any } | any[],
-  ): { [key: string]: any } | any[] {
+    message: { [key: string]: unknown } | unknown[] | unknown,
+  ): { [key: string]: unknown } | unknown[] | unknown {
     if (Array.isArray(message)) {
       return message.map((item) => this.trimPaths(item));
     } else if (message instanceof Object) {
@@ -223,8 +224,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
    * @param message
    */
   prependPaths(
-    message: { [key: string]: any } | any[],
-  ): { [key: string]: any } | any[] {
+    message: { [key: string]: unknown } | unknown[] | unknown,
+  ): { [key: string]: unknown } | unknown[] | unknown {
     if (Array.isArray(message)) {
       return message.map((item) => this.prependPaths(item));
     } else if (message instanceof Object) {

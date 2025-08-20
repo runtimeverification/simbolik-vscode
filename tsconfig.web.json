@@ -15,7 +15,7 @@
   "exclude": [
     "src/react-app",
     "src/extension.ts",
-    "src/DebugAdapter.ts",
+    "src/debugAdapter.ts",
     "sampleWorkspace"
   ]
 }
