@@ -23,9 +23,31 @@ export default defineConfig([
 
   // ⬇️ flatten the shared config (no nested `extends`)
   ...rv,
-
   {
-    files: ['**/*.{ts,tsx}'],
+    rules: {
+      'unicorn/prevent-abbreviations': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      'unicorn/filename-case': [
+        'error',
+        {
+          cases: {
+            kebabCase: false,
+            pascalCase: false,
+            camelCase: true,
+          },
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/**/*.ts', 'src/**/*.web.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -36,6 +58,18 @@ export default defineConfig([
       globals: { ...globals.node, ...globals.jest },
     },
     plugins: { '@typescript-eslint': tsPlugin },
-    rules: { 'unicorn/prevent-abbreviations': 'off' },
+  },
+  {
+    files: ['src/**/*.web.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        project: 'tsconfig.web.json',
+        tsconfigRootDir: __dirname,
+        sourceType: 'module',
+      },
+      globals: { ...globals.browser, ...globals.jest },
+    },
+    plugins: { '@typescript-eslint': tsPlugin },
   },
 ]);

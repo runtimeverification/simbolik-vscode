@@ -15,17 +15,20 @@ Welcome! This guide will help you set up your development environment and unders
 ### Development Setup
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/runtimeverification/simbolik-vscode.git
    cd simbolik-vscode
    ```
 
 2. **Install dependencies:**
+
    ```bash
    npm install
    ```
 
 3. **Build the extension:**
+
    ```bash
    npm run build
    ```
@@ -46,6 +49,7 @@ The extension has two build targets:
 ### Running & Debugging
 
 #### Clone Test Code: simbolike-examples
+
 Clone to the same directory as simbolik-vscode
 `git clone git@github.com:runtimeverification/simbolik-examples.git`
 [launch.json](.vscode/launch.json) References `$workspace/../simbolik-examples`
@@ -66,13 +70,13 @@ simbolik-vscode/
 ├── src/
 │   ├── extension.ts          # Main extension entry point
 │   ├── extension.web.ts      # Web extension entry point
-│   ├── DebugAdapter.ts       # Desktop debug adapter
-│   ├── DebugAdapter.web.ts   # Web debug adapter
-│   ├── CodelensProvider.ts   # Provides "Debug" buttons
+│   ├── debugAdapter.ts       # Desktop debug adapter
+│   ├── debugAdapter.web.ts   # Web debug adapter
+│   ├── codelensProvider.ts   # Provides "Debug" buttons
 │   ├── startDebugging.ts     # Debug session logic
 │   ├── foundry.ts           # Foundry/Forge integration
 │   ├── utils.ts             # Utility functions
-│   └── WorkspaceWatcher.ts   # File change detection
+│   └── workspaceWatcher.ts   # File change detection
 ├── build/                   # Compiled extension (desktop)
 ├── build-web/              # Compiled web extension
 ├── .vscode/
@@ -123,21 +127,25 @@ npm run compile-web
 
 ### Key Components
 
-#### 1. CodelensProvider (`CodelensProvider.ts`)
+#### 1. CodelensProvider (`codelensProvider.ts`)
+
 - Analyzes Solidity files
 - Provides "Debug" buttons above debuggable functions
 - Identifies contracts and public functions
 
 #### 2. Debug Adapters
-- **Desktop:** `DebugAdapter.ts` - Full Node.js environment
-- **Web:** `DebugAdapter.web.ts` - Browser-compatible version
+
+- **Desktop:** `debugAdapter.ts` - Full Node.js environment
+- **Web:** `debugAdapter.web.ts` - Browser-compatible version
 
 #### 3. Foundry Integration (`foundry.ts`)
+
 - Handles `forge build` compilation
 - Loads build artifacts and metadata
 - Configures compilation environment
 
 #### 4. WebSocket Communication
+
 - Connects to Simbolik server: `wss://www.simbolik.dev`
 - Handles authentication (GitHub OAuth or API key)
 - Sends debug requests and receives responses
@@ -176,7 +184,7 @@ Use the provided npm scripts:
 # Patch release (10.0.2 → 10.0.3)
 npm run version:patch
 
-# Minor release (10.0.2 → 10.1.0)  
+# Minor release (10.0.2 → 10.1.0)
 npm run version:minor
 
 # Major release (10.0.2 → 11.0.0)
@@ -187,6 +195,7 @@ npm run version:major
 
 1. **Update Version:**
    On your feature branch, or as an admin on master:
+
    ```bash
    npm run version:patch  # or minor/major
    ```
@@ -196,6 +205,7 @@ npm run version:major
    - Follow existing format: `## [x.y.z] - YYYY-MM-DD`
 
 3. **Test & Commit:**
+
    ```bash
    npm run build
    npm test
@@ -204,9 +214,13 @@ npm run version:major
    ```
 
 4. **Push Changes to Master:**
+
    ```bash
    git push origin master
    ```
+
+   ```
+
    ```
 
 5. **Create PR & Merge**
@@ -244,6 +258,7 @@ test-project/
 ```
 
 The extension expects:
+
 - `foundry.toml` configuration file
 - Contracts in `src/` directory
 - Build artifacts in `out/` directory (created by `forge build`)
@@ -260,6 +275,7 @@ The extension expects:
 ### Pull Request Process
 
 1. **Fork & Branch:**
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -288,6 +304,7 @@ The extension expects:
 ### Issue Reporting
 
 When reporting bugs, please include:
+
 - VS Code version
 - Extension version
 - Operating system
@@ -309,4 +326,4 @@ When reporting bugs, please include:
 
 ---
 
-Thank you for contributing to Simbolik! 🎉 
+Thank you for contributing to Simbolik! 🎉

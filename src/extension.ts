@@ -1,15 +1,15 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import {CodelensProvider} from './CodelensProvider';
-import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
-import {startDebugging} from './startDebugging';
-import {getConfigValue} from './utils';
-import { WorkspaceWatcher } from './WorkspaceWatcher';
+import { CodelensProvider } from './codelensProvider';
+import { SolidityDebugAdapterDescriptorFactory } from './debugAdapter';
+import { startDebugging } from './startDebugging';
+import { getConfigValue } from './utils';
+import { WorkspaceWatcher } from './workspaceWatcher';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
-  {log: true}
+  { log: true },
 );
 
 // This method is called when your extension is activated
@@ -20,59 +20,58 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, your extension "simbolik" is now active!');
 
   const codelensProvider = new CodelensProvider();
-  context.subscriptions.push(vscode.languages.registerCodeLensProvider(
-    'solidity',
-    codelensProvider
-  ));
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider('solidity', codelensProvider),
+  );
 
   const factory = new SolidityDebugAdapterDescriptorFactory();
-  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
-    'solidity',
-    factory
-  ));
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory),
+  );
 
   const workspaceWatcher = new WorkspaceWatcher();
 
-  context.subscriptions.push(vscode.commands.registerCommand(
-    'simbolik.startDebugging',
-    (contract, method) => startDebugging(contract, method, workspaceWatcher),
-  ));
-  
-  vscode.debug.onDidStartDebugSession(session => {
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'simbolik.startDebugging',
+      (contract, method) => startDebugging(contract, method, workspaceWatcher),
+    ),
+  );
+
+  vscode.debug.onDidStartDebugSession((session) => {
     outputChannel.info(`Debug session started: ${session.id}`);
-    if (session.type === 'solidity') {
-      if (getConfigValue('auto-open-disassembly-view', false)) {
-        vscode.commands.executeCommand('debug.action.openDisassemblyView');
-      }
+    if (
+      session.type === 'solidity' &&
+      getConfigValue('auto-open-disassembly-view', false)
+    ) {
+      vscode.commands.executeCommand('debug.action.openDisassemblyView');
     }
   });
 
-  vscode.debug.onDidTerminateDebugSession(session => {
+  vscode.debug.onDidTerminateDebugSession((session) => {
     outputChannel.info(`Debug session ended: ${session.id}`);
   });
 
-  vscode.debug.onDidReceiveDebugSessionCustomEvent(async event => {
+  vscode.debug.onDidReceiveDebugSessionCustomEvent(async (event) => {
     if (event.event === 'api-key-validation-failed') {
       const action = await vscode.window.showErrorMessage(
         'API key validation failed',
         'Open Settings',
-        'Learn More'
+        'Learn More',
       );
       if (action === 'Open Settings') {
         vscode.commands.executeCommand(
           'workbench.action.openSettings',
-          'simbolik.api-key'
+          'simbolik.api-key',
         );
       }
       if (action === 'Learn More') {
-        vscode.env.openExternal(
-          vscode.Uri.parse('https://www.simbolik.dev')
-        );
+        vscode.env.openExternal(vscode.Uri.parse('https://www.simbolik.dev'));
       }
     }
     if (event.event === 'api-key-sessions-limit-exceeded') {
-      const action = await vscode.window.showErrorMessage(
-        'Too many debugging sessions running in parallel'
+      await vscode.window.showErrorMessage(
+        'Too many debugging sessions running in parallel',
       );
     }
     console.log(event);

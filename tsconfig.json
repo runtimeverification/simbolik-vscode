@@ -4,7 +4,11 @@
     "outDir": "build",
     "lib": ["ES2022"],
     "target": "ES2022",
-    "esModuleInterop": true
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "strictNullChecks": true,
+    "downlevelIteration": true
   },
   "include": [
     "src/**/*.ts",
@@ -13,9 +17,11 @@
   "exclude": [
     "src/react-app",
     "src/extension.web.ts",
-    "src/DebugAdapter.web.ts",
+    "src/debugAdapter.web.ts",
     "sampleWorkspace",
     "node_modules",
     "vendor",
+    "src/**/*.web.ts",
+    "test/**/*.web.ts"
   ]
 }

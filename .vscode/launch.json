@@ -1,39 +1,39 @@
 {
-	"version": "0.2.0",
-	"configurations": [
-		{
-			"name": "Simbolik: Client",
-			"type": "extensionHost",
-			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}",
-				"${workspaceFolder}/../simbolik-examples"
-			],
-			"outFiles": [
-				"${workspaceFolder}/build/*.js",
-				"${workspaceFolder}/build/**/*.js",
-				"${workspaceFolder}/build-web/*.js",
-				"${workspaceFolder}/build-web/**/*.js",
-			],
-			"preLaunchTask": "${defaultBuildTask}",
-			"debugWebviews": true,
-		},
-		{
-			"name": "Simbolik: Client (Tests)",
-			"type": "extensionHost",
-			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}",
-				"${workspaceFolder}/../simbolik/src/tests/data/foundry"
-			],
-			"outFiles": [
-				"${workspaceFolder}/build/*.js",
-				"${workspaceFolder}/build/**/*.js",
-				"${workspaceFolder}/build-web/*.js",
-				"${workspaceFolder}/build-web/**/*.js",
-			],
-			"preLaunchTask": "${defaultBuildTask}",
-			"debugWebviews": true,
-		}
-	]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Simbolik: Client",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/../simbolik-examples"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/build/*.js",
+        "${workspaceFolder}/build/**/*.js",
+        "${workspaceFolder}/build-web/*.js",
+        "${workspaceFolder}/build-web/**/*.js"
+      ],
+      "preLaunchTask": "${defaultBuildTask}",
+      "debugWebviews": true
+    },
+    {
+      "name": "Simbolik: Client (Tests)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/../simbolik/src/tests/data/foundry"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/build/*.js",
+        "${workspaceFolder}/build/**/*.js",
+        "${workspaceFolder}/build-web/*.js",
+        "${workspaceFolder}/build-web/**/*.js"
+      ],
+      "preLaunchTask": "${defaultBuildTask}",
+      "debugWebviews": true
+    }
+  ]
 }

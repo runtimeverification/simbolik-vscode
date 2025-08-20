@@ -35,5 +35,3 @@ Do you have questions, or need help?
 Visit our Documentation: https://docs.runtimeverification.com/simbolik \
 Join our Discord: https://discord.gg/jnvEeDxW \
 Join our TG group: https://t.me/rv_simbolik
-
-
