@@ -47,7 +47,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/**/*.ts', '!src/**/*.web.ts'],
+    files: ['src/**/*.ts', 'src/**/*.web.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {

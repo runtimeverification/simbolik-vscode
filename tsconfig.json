@@ -12,9 +12,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "test/**/*.ts",
-    "!src/**/*.web.ts",
-    "!test/**/*.web.ts"
+    "test/**/*.ts"
   ],
   "exclude": [
     "src/react-app",
@@ -22,6 +20,8 @@
     "src/debugAdapter.web.ts",
     "sampleWorkspace",
     "node_modules",
-    "vendor"
+    "vendor",
+    "src/**/*.web.ts",
+    "test/**/*.web.ts"
   ]
 }
