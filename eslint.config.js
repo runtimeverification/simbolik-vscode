@@ -47,6 +47,7 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/**/*.ts', '!src/**/*.web.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -59,6 +60,7 @@ export default defineConfig([
     plugins: { '@typescript-eslint': tsPlugin },
   },
   {
+    files: ['src/**/*.web.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
