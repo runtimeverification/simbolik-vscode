@@ -2,7 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import { CodelensProvider } from './CodelensProvider';
-import { SolidityDebugAdapterDescriptorFactory } from './DebugAdapter.web';
+import { SolidityDebugAdapterDescriptorFactory } from './debugAdapter.web';
 import { startDebugging } from './startDebugging';
 import { getConfigValue } from './utils';
 import { NullWorkspaceWatcher } from './WorkspaceWatcher';
@@ -41,10 +41,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidStartDebugSession((session) => {
     outputChannel.info(`Debug session started: ${session.id}`);
-    if (session.type === 'solidity') {
-      if (getConfigValue('auto-open-disassembly-view', false)) {
-        vscode.commands.executeCommand('debug.action.openDisassemblyView');
-      }
+    if (
+      session.type === 'solidity' &&
+      getConfigValue('auto-open-disassembly-view', false)
+    ) {
+      vscode.commands.executeCommand('debug.action.openDisassemblyView');
     }
   });
 
@@ -57,7 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
     let url;
     try {
       url = new URL(workspaceFolder.uri.query);
-    } catch (error) {
+    } catch {
       // If the workspace folder URI query is not a valid URL, we
       vscode.window.showErrorMessage('Failed to initialize workspace folder.');
       return;
@@ -66,8 +67,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Example: simbolik.dev/?folder=simbolik://buildbear.io/{sandboxName}/tx/{txHash}
     if (url.searchParams.has('folder')) {
       try {
-        url = new URL(url.searchParams.get('folder') || '');
-      } catch (error) {
+        url = new URL(url.searchParams.get('folder') ?? '');
+      } catch {
         vscode.window.showErrorMessage(
           'Failed to initialize workspace folder.',
         );
@@ -172,7 +173,7 @@ export function activate(context: vscode.ExtensionContext) {
       let url;
       try {
         url = new URL(workspaceFolder.uri.query);
-      } catch (error) {
+      } catch {
         vscode.window.showErrorMessage('Failed to initialize demo project');
         return;
       }
@@ -207,8 +208,7 @@ function matchUri(
     return null;
   }
   const result: { [key: string]: string } = {};
-  for (let i = 0; i < patternParts.length; i++) {
-    const patternPart = patternParts[i];
+  for (const [i, patternPart] of patternParts.entries()) {
     const uriPart = uriParts[i];
     if (patternPart.startsWith('{') && patternPart.endsWith('}')) {
       const key = patternPart.slice(1, -1);

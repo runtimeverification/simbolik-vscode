@@ -8,9 +8,10 @@
     "esModuleInterop": true,
     "sourceMap": true,
     "module": "ESNext",
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "downlevelIteration": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.web.ts", "test/**/*.web.ts"],
   "exclude": [
     "src/react-app",
     "src/extension.ts",

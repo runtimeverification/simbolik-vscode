@@ -19,7 +19,7 @@ export class SolidityDebugAdapterDescriptorFactory
 {
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
-    executable: vscode.DebugAdapterExecutable | undefined,
+    _executable: vscode.DebugAdapterExecutable | undefined,
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
       const server = getWssUrl();
@@ -35,7 +35,7 @@ export class SolidityDebugAdapterDescriptorFactory
       const implementation = new vscode.DebugAdapterInlineImplementation(
         websocketAdapter,
       );
-      websocket.onopen = async () => {
+      websocket.addEventListener('open', async () => {
         // Create progress bar
         vscode.window.withProgress(
           {
@@ -77,8 +77,8 @@ export class SolidityDebugAdapterDescriptorFactory
             resolve(implementation);
           },
         );
-      };
-      websocket.onerror = () => {
+      });
+      websocket.addEventListener('error', () => {
         if (websocket.readyState === WebSocket.OPEN) {
           return;
         }
@@ -86,7 +86,7 @@ export class SolidityDebugAdapterDescriptorFactory
         vscode.window.showWarningMessage(
           "Oops! Simbolik's servers are currently experiencing technical difficulties. We apologize for the inconvenience, but we'll be back online shortly.",
         );
-      };
+      });
       setTimeout(() => {
         if (websocket.readyState === WebSocket.OPEN) {
           return;
@@ -138,11 +138,11 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     private websocket: WebSocket,
     private configuration: vscode.DebugConfiguration,
   ) {
-    websocket.onmessage = (message: MessageEvent) => {
+    websocket.addEventListener('message', (message: MessageEvent) => {
       const data = JSON.parse(message.data);
       const dataWithAbsolutePaths = this.prependPaths(data);
       this._onDidSendMessage.fire(dataWithAbsolutePaths);
-    };
+    });
   }
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
@@ -168,8 +168,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
    * @param message
    */
   trimPaths(
-    message: { [key: string]: any } | any[],
-  ): { [key: string]: any } | any[] {
+    message: { [key: string]: unknown } | unknown[] | unknown,
+  ): { [key: string]: unknown } | unknown[] | unknown {
     if (Array.isArray(message)) {
       return message.map((item) => this.trimPaths(item));
     } else if (message instanceof Object) {
@@ -199,8 +199,8 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
    * @param message
    */
   prependPaths(
-    message: { [key: string]: any } | any[],
-  ): { [key: string]: any } | any[] {
+    message: { [key: string]: unknown } | unknown[] | unknown,
+  ): { [key: string]: unknown } | unknown[] | unknown {
     if (Array.isArray(message)) {
       return message.map((item) => this.prependPaths(item));
     } else if (message instanceof Object) {

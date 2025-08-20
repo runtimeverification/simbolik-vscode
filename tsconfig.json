@@ -7,13 +7,19 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "downlevelIteration": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "!src/**/*.web.ts",
+    "!test/**/*.web.ts"
+  ],
   "exclude": [
     "src/react-app",
     "src/extension.web.ts",
-    "src/DebugAdapter.web.ts",
+    "src/debugAdapter.web.ts",
     "sampleWorkspace",
     "node_modules",
     "vendor"
