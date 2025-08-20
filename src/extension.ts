@@ -1,7 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import { CodelensProvider } from './CodelensProvider';
+import { CodelensProvider } from './codelensProvider';
 import { SolidityDebugAdapterDescriptorFactory } from './debugAdapter';
 import { startDebugging } from './startDebugging';
 import { getConfigValue } from './utils';

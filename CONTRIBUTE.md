@@ -72,7 +72,7 @@ simbolik-vscode/
 │   ├── extension.web.ts      # Web extension entry point
 │   ├── debugAdapter.ts       # Desktop debug adapter
 │   ├── debugAdapter.web.ts   # Web debug adapter
-│   ├── CodelensProvider.ts   # Provides "Debug" buttons
+│   ├── codelensProvider.ts   # Provides "Debug" buttons
 │   ├── startDebugging.ts     # Debug session logic
 │   ├── foundry.ts           # Foundry/Forge integration
 │   ├── utils.ts             # Utility functions
@@ -127,7 +127,7 @@ npm run compile-web
 
 ### Key Components
 
-#### 1. CodelensProvider (`CodelensProvider.ts`)
+#### 1. CodelensProvider (`codelensProvider.ts`)
 
 - Analyzes Solidity files
 - Provides "Debug" buttons above debuggable functions
