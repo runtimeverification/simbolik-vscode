@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
-import {getConfigValue} from './utils';
-import {parse as parseToml} from 'smol-toml';
+import { getConfigValue } from './utils';
+import { parse as parseToml } from 'smol-toml';
 
-export
-function forgeBuildTask(file: vscode.Uri) {
+export function forgeBuildTask(file: vscode.Uri) {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
+  const cwd = file.with({
+    path: file.path.split('/').slice(0, -1).join('/'),
+  }).fsPath;
   const task = new vscode.Task(
     {
       label: 'forge build',
@@ -17,15 +18,16 @@ function forgeBuildTask(file: vscode.Uri) {
     new vscode.ShellExecution(forgePath, ['build'], {
       cwd,
       env: {
-        'FOUNDRY_OPTIMIZER': 'false',
-        'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
-        'FOUNDRY_BYTECODE_HASH': 'ipfs',
-        'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_FORCE': 'true',
-        'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
-      }
-    })
+        FOUNDRY_OPTIMIZER: 'false',
+        FOUNDRY_BUILD_INFO: 'true',
+        FOUNDRY_EXTRA_OUTPUT:
+          '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
+        FOUNDRY_BYTECODE_HASH: 'ipfs',
+        FOUNDRY_CBOR_METADATA: 'true',
+        FOUNDRY_FORCE: 'true',
+        FOUNDRY_USE_LITERAL_CONTENT: 'false', // Literal content blows up the size of the build-info
+      },
+    }),
   );
   task.isBackground = true;
   task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
@@ -33,23 +35,21 @@ function forgeBuildTask(file: vscode.Uri) {
   return task;
 }
 
-export
-async function loadBuildInfo(file: vscode.Uri): Promise<vscode.Uri[]> {
+export async function loadBuildInfo(file: vscode.Uri): Promise<vscode.Uri[]> {
   const root = await foundryRoot(file);
   const buildInfo = await forgeBuildInfo(root);
   return buildInfo;
 }
 
-export
-async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
+export async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
   // Find the root of the project, which is the directory containing the foundry.toml file
-  let base = file.with({'path': '/', 'query': '', 'authority': ''});
-  let pathSegments = file.path.split('/');
+  const base = file.with({ path: '/', query: '', authority: '' });
+  const pathSegments = file.path.split('/');
   let stat;
   try {
     const uri = vscode.Uri.joinPath(base, ...pathSegments, 'foundry.toml');
     stat = await vscode.workspace.fs.stat(uri);
-  } catch (e) {
+  } catch {
     stat = false;
   }
   while (!stat) {
@@ -60,7 +60,7 @@ async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
     try {
       const uri = vscode.Uri.joinPath(base, ...pathSegments, 'foundry.toml');
       stat = await vscode.workspace.fs.stat(uri);
-    } catch (e) {
+    } catch {
       stat = false;
     }
   }
@@ -68,11 +68,11 @@ async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
   return result;
 }
 
-export
-type FoundryConfig = { 'profile'?: { [profile: string]: { [key: string]: string } } };
+export type FoundryConfig = {
+  profile?: { [profile: string]: { [key: string]: string } };
+};
 
-export
-async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
+export async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   const configPath = vscode.Uri.joinPath(root, 'foundry.toml');
   const config = await vscode.workspace.fs.readFile(configPath);
   const text = new TextDecoder().decode(config);
@@ -84,14 +84,17 @@ async function forgeBuildInfo(root: vscode.Uri): Promise<vscode.Uri[]> {
   // Extract configuration values for build-info and output directory
   const defaultProfile = config?.profile?.default ?? {};
   const outputDir = defaultProfile?.out || 'out';
-  const buildInfo = defaultProfile?.build_info_path || outputDir + '/build-info';
+  const buildInfo =
+    defaultProfile?.build_info_path || outputDir + '/build-info';
 
   // Determine the build-info directory based on configuration
-  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo)
+  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo);
 
   // Get list of build-info files
   const files = await vscode.workspace.fs.readDirectory(buildInfoDir);
-  const buildInfoFiles = files.filter(([file, type]) => type === vscode.FileType.File && file.endsWith('.json'));
+  const buildInfoFiles = files.filter(
+    ([file, type]) => type === vscode.FileType.File && file.endsWith('.json'),
+  );
 
   if (buildInfoFiles.length === 0) {
     vscode.window.showErrorMessage('No build-info files found');

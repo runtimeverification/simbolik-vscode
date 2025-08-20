@@ -6,16 +6,13 @@
     "target": "ES2022",
     "esModuleInterop": true
   },
-  "include": [
-    "src/**/*.ts",
-    "test/**/*.ts"
-  ],
+  "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": [
     "src/react-app",
     "src/extension.web.ts",
     "src/DebugAdapter.web.ts",
     "sampleWorkspace",
     "node_modules",
-    "vendor",
+    "vendor"
   ]
 }

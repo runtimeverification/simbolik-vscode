@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as parser from '@solidity-parser/parser';
-import {getConfigValue} from './utils';
+import { getConfigValue } from './utils';
 
 type Location = any;
 type ContractDefinition = any;
@@ -23,12 +23,12 @@ export class CodelensProvider implements vscode.CodeLensProvider {
 
   public async provideCodeLenses(
     document: vscode.TextDocument,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
   ): Promise<vscode.CodeLens[]> {
     const codeLenses = [];
     try {
       const content = document.getText();
-      const ast = parser.parse(content, {loc: true});
+      const ast = parser.parse(content, { loc: true });
       const functions = this.getFunctions(ast);
       for (const [contract, f] of functions) {
         const loc = f.loc as Location;
@@ -42,9 +42,9 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         const debugLens = new vscode.CodeLens(range, debugCommand);
         codeLenses.push(debugLens);
       }
-    } catch (e) {
-      if (e instanceof parser.ParserError) {
-        console.error(e.errors);
+    } catch (error) {
+      if (error instanceof parser.ParserError) {
+        console.error(error.errors);
       }
       return [];
     }
@@ -60,13 +60,13 @@ export class CodelensProvider implements vscode.CodeLensProvider {
   private getFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
     const results: [ContractDefinition, FunctionDefinition][] = [];
     parser.visit(ast, {
-      ContractDefinition: contract => {
+      ContractDefinition: (contract) => {
         if (!this.canBeInstantiated(contract)) {
           return;
         }
         let hasConstructorArgs = false;
         parser.visit(contract, {
-          FunctionDefinition: fn => {
+          FunctionDefinition: (fn) => {
             if (fn.isConstructor && fn.parameters.length > 0) {
               hasConstructorArgs = true;
             }
@@ -74,11 +74,8 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         });
         if (!hasConstructorArgs) {
           parser.visit(contract, {
-            FunctionDefinition: fn => {
-              if (
-                this.isExecutable(fn) &&
-                fn.parameters.length === 0
-              ) {
+            FunctionDefinition: (fn) => {
+              if (this.isExecutable(fn) && fn.parameters.length === 0) {
                 results.push([contract, fn]);
               }
             },
@@ -102,7 +99,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
 
   public resolveCodeLens(
     codeLens: vscode.CodeLens,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
   ) {
     return codeLens;
   }
