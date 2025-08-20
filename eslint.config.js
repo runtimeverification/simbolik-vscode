@@ -23,19 +23,7 @@ export default defineConfig([
 
   // ⬇️ flatten the shared config (no nested `extends`)
   ...rv,
-
   {
-    files: ['**/*.{ts,tsx}'],
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        project: 'tsconfig.json',
-        tsconfigRootDir: __dirname,
-        sourceType: 'module',
-      },
-      globals: { ...globals.node, ...globals.jest },
-    },
-    plugins: { '@typescript-eslint': tsPlugin },
     rules: {
       'unicorn/prevent-abbreviations': 'off',
       '@typescript-eslint/no-unused-vars': [
@@ -57,5 +45,29 @@ export default defineConfig([
         },
       ],
     },
+  },
+  {
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        project: 'tsconfig.json',
+        tsconfigRootDir: __dirname,
+        sourceType: 'module',
+      },
+      globals: { ...globals.node, ...globals.jest },
+    },
+    plugins: { '@typescript-eslint': tsPlugin },
+  },
+  {
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        project: 'tsconfig.web.json',
+        tsconfigRootDir: __dirname,
+        sourceType: 'module',
+      },
+      globals: { ...globals.browser, ...globals.jest },
+    },
+    plugins: { '@typescript-eslint': tsPlugin },
   },
 ]);
