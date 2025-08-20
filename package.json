@@ -270,7 +270,7 @@
     "@vscode/test-electron": "^2.3.2",
     "esbuild": "^0.20.2",
     "eslint": "^9.33.0",
-    "eslint-config-rv-web-nestjs": "github:runtimeverification/eslint-config-rv-web-nestjs#a906dc1e429b54558a7196e1ddf0ffdaa3250268",
+    "eslint-config-rv-web-nestjs": "github:runtimeverification/eslint-config-rv-web-nestjs#master",
     "glob": "^8.1.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.1.5",
