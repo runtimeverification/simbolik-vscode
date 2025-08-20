@@ -4,7 +4,8 @@
     "outDir": "build",
     "lib": ["ES2022"],
     "target": "ES2022",
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "strictNullChecks": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": [
