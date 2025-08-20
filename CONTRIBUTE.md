@@ -76,7 +76,7 @@ simbolik-vscode/
 │   ├── startDebugging.ts     # Debug session logic
 │   ├── foundry.ts           # Foundry/Forge integration
 │   ├── utils.ts             # Utility functions
-│   └── WorkspaceWatcher.ts   # File change detection
+│   └── workspaceWatcher.ts   # File change detection
 ├── build/                   # Compiled extension (desktop)
 ├── build-web/              # Compiled web extension
 ├── .vscode/

@@ -7,7 +7,7 @@ import {
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
-import { IWorkspaceWatcher } from './WorkspaceWatcher';
+import { IWorkspaceWatcher } from './workspaceWatcher';
 
 export type Credentials =
   | {

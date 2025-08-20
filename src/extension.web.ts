@@ -5,7 +5,7 @@ import { CodelensProvider } from './CodelensProvider';
 import { SolidityDebugAdapterDescriptorFactory } from './debugAdapter.web';
 import { startDebugging } from './startDebugging';
 import { getConfigValue } from './utils';
-import { NullWorkspaceWatcher } from './WorkspaceWatcher';
+import { NullWorkspaceWatcher } from './workspaceWatcher';
 import { downloadAndExtract } from './clone';
 
 const outputChannel = vscode.window.createOutputChannel(

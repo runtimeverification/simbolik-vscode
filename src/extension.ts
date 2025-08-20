@@ -5,7 +5,7 @@ import { CodelensProvider } from './CodelensProvider';
 import { SolidityDebugAdapterDescriptorFactory } from './DebugAdapter';
 import { startDebugging } from './startDebugging';
 import { getConfigValue } from './utils';
-import { WorkspaceWatcher } from './WorkspaceWatcher';
+import { WorkspaceWatcher } from './workspaceWatcher';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -70,7 +70,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
     if (event.event === 'api-key-sessions-limit-exceeded') {
-      const action = await vscode.window.showErrorMessage(
+      await vscode.window.showErrorMessage(
         'Too many debugging sessions running in parallel',
       );
     }
