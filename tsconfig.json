@@ -4,6 +4,8 @@
     "outDir": "build",
     "lib": ["ES2022"],
     "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "esModuleInterop": true,
     "strictNullChecks": true
   },
