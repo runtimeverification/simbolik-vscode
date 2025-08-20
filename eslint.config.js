@@ -23,6 +23,21 @@ export default defineConfig([
 
   // ⬇️ flatten the shared config (no nested `extends`)
   ...rv,
+  {
+    // unicorn/filename-case
+    rules: {
+      'unicorn/filename-case': [
+        'error',
+        {
+          cases: {
+            kebabCase: false,
+            pascalCase: false,
+            camelCase: true,
+          },
+        },
+      ],
+    },
+  },
 
   {
     files: ['**/*.{ts,tsx}'],

@@ -17,7 +17,7 @@ export async function downloadAndExtract(url: string): Promise<void> {
   const tarBuf = gunzipSync(gzBuf); // ← new
 
   // 3. Untar in-memory
-  const files: TarLocalFile[] = await untar(tarBuf);
+  const files: TarLocalFile[] = await untar(tarBuf as unknown as ArrayBuffer);
 
   // 4. Persist into tmp://
   for (const entry of files) {
