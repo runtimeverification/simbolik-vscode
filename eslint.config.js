@@ -23,21 +23,6 @@ export default defineConfig([
 
   // ⬇️ flatten the shared config (no nested `extends`)
   ...rv,
-  {
-    // unicorn/filename-case
-    rules: {
-      'unicorn/filename-case': [
-        'error',
-        {
-          cases: {
-            kebabCase: false,
-            pascalCase: false,
-            camelCase: true,
-          },
-        },
-      ],
-    },
-  },
 
   {
     files: ['**/*.{ts,tsx}'],
@@ -51,6 +36,26 @@ export default defineConfig([
       globals: { ...globals.node, ...globals.jest },
     },
     plugins: { '@typescript-eslint': tsPlugin },
-    rules: { 'unicorn/prevent-abbreviations': 'off' },
+    rules: {
+      'unicorn/prevent-abbreviations': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      'unicorn/filename-case': [
+        'error',
+        {
+          cases: {
+            kebabCase: false,
+            pascalCase: false,
+            camelCase: true,
+          },
+        },
+      ],
+    },
   },
 ]);
