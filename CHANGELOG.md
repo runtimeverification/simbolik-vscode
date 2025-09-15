@@ -2,6 +2,9 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [11.1.0] - 2025-09-15
+- Added remote test runner for Foundry and Kontrol
+
 ## [11.0.1] - 2025-07-16
 - This version enables experimental cheatcode support for debugging Foundry tests
 
