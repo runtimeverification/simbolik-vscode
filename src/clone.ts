@@ -15,10 +15,12 @@ async function downloadAndExtract(url: string): Promise<void> {
   const gzBuf = new Uint8Array(await res.arrayBuffer());
 
   // 2. Gunzip → get raw .tar bytes
-  const tarBuf = gunzipSync(gzBuf);           // ← new
+  const tarBuf = gunzipSync(gzBuf);
+
+  const tarAB = toArrayBuffer(tarBuf);
 
   // 3. Untar in-memory
-  const files : TarLocalFile[] = await untar(tarBuf);
+  const files : TarLocalFile[] = await untar(tarAB);
 
   // 4. Persist into tmp://
   for (const entry of files) {
@@ -30,4 +32,18 @@ async function downloadAndExtract(url: string): Promise<void> {
       await vscode.workspace.fs.writeFile(uri, entry.fileData);
     }
   }
+}
+
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+  // Fast path: view already spans an ArrayBuffer
+  if (
+    u8.byteOffset === 0 &&
+    u8.byteLength === u8.buffer.byteLength &&
+    u8.buffer instanceof ArrayBuffer
+  ) {
+    return u8.buffer;
+  }
+  // Safe copy into a fresh ArrayBuffer
+  const copy = u8.slice();
+  return copy.buffer;
 }

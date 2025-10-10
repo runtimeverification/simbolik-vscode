@@ -87,54 +87,59 @@ implements vscode.DebugAdapterDescriptorFactory
   }
 }
 
-async function* uploadFile(websocket: WebSocket, file: vscode.Uri, token: vscode.CancellationToken): AsyncGenerator<number, void, void> {
-  websocket.send(JSON.stringify({ command: 'simbolik:upload:start' }));
-
-  const readStream = createReadStream(file.path, { highWaterMark: 10 * 1024 * 1024 }); // 10MB
-  let bytesTransferred = 0;
-  const inflight: Map<number, Promise<number>> = new Map();
-
-  // Helper to track and yield progress for each send
-  const sendChunk = (id: number, chunk: Buffer): void => {
-    const promise = new Promise<number>((resolve, reject) => {
-      websocket.send(chunk, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          bytesTransferred += chunk.length;
-          resolve(id);
-        }
-      });
-    });
-    inflight.set(id, promise);
-  };
-
-  let i = 0;
-  for await (const chunk of readStream) {
-    if (token.isCancellationRequested) {
-      inflight.clear();
-      return;
-    }
-
-    sendChunk(i++, chunk);
-
-    // Ensure at most 3 chunks are in flight
-    while (inflight.size >= 3) {
-      const id = await Promise.race(inflight.values());
-      inflight.delete(id);
-      yield bytesTransferred;
-    }
-  }
-
-  // Wait for all inflight sends to finish and yield progress
-  while (inflight.size > 0) {
-    const id = await Promise.race(inflight.values());
-    inflight.delete(id);
-    yield bytesTransferred;
-  }
-
-  websocket.send(JSON.stringify({ command: 'simbolik:upload:finish' }));
+function sendAsync(ws: WebSocket, data: Buffer | string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ws.send(data as any, (err?: Error) => (err ? reject(err) : resolve()));
+  });
 }
+
+/**
+ * File upload via WebSocket, yielding progress.
+ * 
+ * Automatically handles backpressure.
+ */
+export async function* uploadFile(
+  ws: WebSocket,
+  file: vscode.Uri,
+  token: vscode.CancellationToken
+): AsyncGenerator<number, void, void> {
+  const CHUNK_SIZE = 512 * 1024;         // 512 KB chunks
+  const HIGH_WM    = 32 * 1024 * 1024;   // pause if > 32 MB queued
+  const LOW_WM     = 16 * 1024 * 1024;   // resume when < 16 MB
+  const TICK_MS    = 150;                // report progress at least every 150 ms
+
+  const rs = createReadStream(file.fsPath, { highWaterMark: CHUNK_SIZE });
+  let bytesTransferred = 0;
+  let lastTick = 0;
+
+  await sendAsync(ws, JSON.stringify({ command: "simbolik:upload:start" }));
+  try {
+    for await (const chunk of rs) {
+      if (token.isCancellationRequested) return;
+      await sendAsync(ws, chunk);
+      bytesTransferred += (chunk as Buffer).length;
+      // Backpressure: keep socket reasonably full, not flooded
+      while (ws.bufferedAmount && ws.bufferedAmount > HIGH_WM) {
+        if (token.isCancellationRequested) return;
+        await new Promise<void>(r => setTimeout(r, 5))
+        if (ws.bufferedAmount < LOW_WM) break;
+        if (Date.now() - lastTick > TICK_MS) {
+          lastTick = Date.now();
+          yield bytesTransferred
+        }
+      }
+      if (Date.now() - lastTick > TICK_MS) {
+        lastTick = Date.now();
+        yield bytesTransferred
+      }
+    }
+    // Final tick to reach 100%
+    yield bytesTransferred;
+    await sendAsync(ws, JSON.stringify({ command: "simbolik:upload:finish" }));
+  } finally {
+  }
+}
+
 
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();

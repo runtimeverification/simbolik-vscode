@@ -2,6 +2,9 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [11.1.1] - 2025-09-15
+- This is pure maintenance release to fix some type-checking issue.
+
 ## [11.1.0] - 2025-09-15
 - Added remote test runner for Foundry and Kontrol
 
