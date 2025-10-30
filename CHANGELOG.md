@@ -2,6 +2,9 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [11.1.2] - 2025-30-30
+- This updates fixes a bug during file upload.
+
 ## [11.1.1] - 2025-09-15
 - This is pure maintenance release to fix some type-checking issue.
 
