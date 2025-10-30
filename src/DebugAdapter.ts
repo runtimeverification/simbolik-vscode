@@ -108,7 +108,7 @@ export async function* uploadFile(
   const LOW_WM     = 16 * 1024 * 1024;   // resume when < 16 MB
   const TICK_MS    = 150;                // report progress at least every 150 ms
 
-  const rs = createReadStream(file.fsPath, { highWaterMark: CHUNK_SIZE });
+  const rs = createReadStream(file.path, { highWaterMark: CHUNK_SIZE });
   let bytesTransferred = 0;
   let lastTick = 0;
 

@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "11.1.1",
+  "version": "11.1.2",
   "engines": {
     "vscode": "^1.79.0"
   },
