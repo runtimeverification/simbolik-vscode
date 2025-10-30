@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 import { IWorkspaceWatcher } from './WorkspaceWatcher';
+import { FoundryBuildInfo, treeShakeFoundryBuildInfo } from './treeshake';
 
 export
 type Credentials = {
@@ -125,6 +126,46 @@ export async function startDebugging(
       }
     }
 
+    const prunedBuildInfoFiles: vscode.Uri[] = [];
+    // Tree shake build info files
+    progress.report({ message: "Optimizing build info files" });
+    for (let i = 0; i < buildInfoFiles.length; i++) {
+      const buildInfoFile = buildInfoFiles[i];
+      const contents = await vscode.workspace.fs.readFile(buildInfoFile);
+      const buildInfo: FoundryBuildInfo = JSON.parse(new TextDecoder().decode(contents));
+      const projectRoot = await foundryRoot(activeTextEditor.document.uri);
+      const relativePath = file.replace('file://', '').replace(projectRoot.path + '/', '');
+      const entry = `${relativePath}:${contractName}`;
+      let shaken;
+      try {
+        const result = treeShakeFoundryBuildInfo(
+          buildInfo,
+          entry,
+          {
+            keepBytecode: true,
+            keepSourceMaps: true,
+            keepIr: false,
+            keepLegacyAssembly: false,
+            stripDocs: true,
+            stripStorageLayout: false,
+            narrowOutputSelection: true,
+            pruneLibraries: true,
+            onlyEntryContractArtifact: false,
+          }
+        );
+        shaken = result.shaken;
+      } catch (e) {
+        continue;
+      }
+      const shakenContents = new TextEncoder().encode(
+        JSON.stringify(shaken)
+      );
+      const outputFile = buildInfoFile.with({ path: buildInfoFile.path.replace('.json', '.min.json') });
+      await vscode.workspace.fs.writeFile(outputFile, shakenContents);
+      prunedBuildInfoFiles.push(outputFile);
+    }
+
+
     progress.report({ increment: 100 });
 
     const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
@@ -137,7 +178,7 @@ export async function startDebugging(
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
-      buildInfoFiles,
+      prunedBuildInfoFiles,
       myFoundryRoot,
       credentials,
       clientVersion,
