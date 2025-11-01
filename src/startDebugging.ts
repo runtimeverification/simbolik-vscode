@@ -140,17 +140,7 @@ export async function startDebugging(
       try {
         const result = treeShakeFoundryBuildInfo(
           buildInfo,
-          { source: entrySource, contract: contractName},
-          {
-            keepBytecode: true,
-            keepSourceMaps: true,
-            keepIr: false,
-            keepLegacyAssembly: false,
-            keepOutputSelection: false,
-            keepAst: true,
-            keepDocs: false,
-            keepStorageLayout: true,
-          }
+          { source: entrySource, contract: contractName }
         );
         shaken = result.shaken;
       } catch (e) {

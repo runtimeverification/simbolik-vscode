@@ -1,6 +1,6 @@
 // Tree-shake a Foundry build-info object (Standard JSON input + output)
 // to only include the entry-point contract and its transitive dependencies.
-// Supports various size-saving options to strip unneeded data from the
+// Supports various size-saving operations to strip unneeded data from the
 // build-info.
 
 type Json = any;
@@ -91,18 +91,6 @@ export interface FoundryBuildInfo {
   output: SolcOutput;              // Standard JSON *output* (result)
 }
 
-/* ------------------------------- Options --------------------------------- */
-
-export interface TreeShakeOptions {
-  keepBytecode?: boolean;              // default: false
-  keepSourceMaps?: boolean;            // default: false
-  keepIr?: boolean;                    // default: false
-  keepLegacyAssembly?: boolean;        // default: false
-  keepOutputSelection?: boolean;       // default: false
-  keepAst?: boolean;                   // default: false
-  keepDocs?: boolean;                  // default: false
-  keepStorageLayout?: boolean;         // default: false
-}
 
 export interface TreeShakeResult {
   shaken: FoundryBuildInfo;
@@ -123,42 +111,18 @@ export interface TreeShakeResult {
  */
 export function treeShakeFoundryBuildInfo(
   buildInfo: FoundryBuildInfo,
-  entry: EntryPoint,
-  opts: TreeShakeOptions = {}
+  entry: EntryPoint
 ): TreeShakeResult {
-  const {
-    keepBytecode = false,
-    keepSourceMaps = false,
-    keepIr = false,
-    keepLegacyAssembly = false,
-    keepOutputSelection = false,
-    keepAst = false,
-    keepDocs  = false,
-    keepStorageLayout = false,
-  } = opts;
-
   const originalBytes = bytesLength(buildInfo);
 
   // 1) Compute kept sources from OUTPUT
   const sourcesSet = resolveDependencies(buildInfo.output, entry);
 
   // 2) Prune OUTPUT with size-saving toggles.
-  const prunedOutput = pruneOutput(buildInfo.output, {
-    sourcesSet,
-    keepBytecode,
-    keepSourceMaps,
-    keepIr,
-    keepLegacyAssembly,
-    keepAst,
-    keepDocs,
-    keepStorageLayout,
-  });
+  const prunedOutput = pruneOutput(buildInfo.output, sourcesSet);
 
   // 3) Prune INPUT to the same source set (+ optional narrowing).
-  const prunedInput = pruneInput(buildInfo.input, {
-    sourcesSet,
-    keepOutputSelection,
-  });
+  const prunedInput = pruneInput(buildInfo.input, sourcesSet);
 
   const shaken: FoundryBuildInfo = {
     _format: buildInfo._format,
@@ -189,27 +153,8 @@ export function treeShakeFoundryBuildInfo(
 
 function pruneOutput(
   output: SolcOutput,
-  params: {
-    sourcesSet: Set<string>;
-    keepBytecode: boolean;
-    keepSourceMaps: boolean;
-    keepIr: boolean;
-    keepLegacyAssembly: boolean;
-    keepAst: boolean;
-    keepDocs: boolean;
-    keepStorageLayout: boolean;
-  }
+  sourcesSet: Set<string>
 ): SolcOutput {
-  const {
-    sourcesSet,
-    keepBytecode,
-    keepSourceMaps,
-    keepIr,
-    keepLegacyAssembly,
-    keepAst,
-    keepDocs,
-    keepStorageLayout,
-  } = params;
 
   const pruned: SolcOutput = {};
   if (output.version) pruned.version = output.version;
@@ -224,28 +169,11 @@ function pruneOutput(
         const cloned = deepClone(artifact);
 
         // size trims
-        if (!keepSourceMaps) {
-          cloned?.evm?.bytecode && (cloned.evm.bytecode.sourceMap = undefined);
-          cloned?.evm?.deployedBytecode && (cloned.evm.deployedBytecode.sourceMap = undefined);
-        }
-        if (!keepLegacyAssembly && cloned?.evm?.legacyAssembly) {
-          delete cloned.evm.legacyAssembly;
-        }
-        if (!keepIr) {
-          if (cloned.ir) delete cloned.ir;
-          if (cloned.irOptimized) delete cloned.irOptimized;
-        }
-        if (!keepBytecode) {
-          if (cloned?.evm?.bytecode?.object) cloned.evm.bytecode.object = "";
-          if (cloned?.evm?.deployedBytecode?.object) cloned.evm.deployedBytecode.object = "";
-        }
-        if (!keepDocs) {
-          if (cloned.devdoc) delete cloned.devdoc;
-          if (cloned.userdoc) delete cloned.userdoc;
-        }
-        if (!keepStorageLayout && cloned.storageLayout) {
-          delete cloned.storageLayout;
-        }
+        if (cloned?.evm?.legacyAssembly) delete cloned.evm.legacyAssembly;
+        if (cloned.ir) delete cloned.ir;
+        if (cloned.irOptimized) delete cloned.irOptimized;
+        if (cloned.devdoc) delete cloned.devdoc;
+        if (cloned.userdoc) delete cloned.userdoc;
         kept[name] = cloned;
       }
       if (Object.keys(kept).length > 0) pruned.contracts[src] = kept;
@@ -257,10 +185,6 @@ function pruneOutput(
     pruned.sources = {};
     for (const [src, srcObj] of Object.entries(output.sources)) {
       if (sourcesSet.has(src)) pruned.sources[src] = srcObj;
-      // prune ast if present
-      if (pruned.sources[src]?.ast && !keepAst) {
-        delete pruned.sources[src].ast;
-      }
     }
   }
 
@@ -279,12 +203,8 @@ function pruneOutput(
 
 function pruneInput(
   input: StandardJsonInput,
-  params: {
-    sourcesSet: Set<string>;
-    keepOutputSelection: boolean;
-  }
+  sourcesSet: Set<string>
 ): StandardJsonInput {
-  const { sourcesSet, keepOutputSelection } = params;
 
   const out: StandardJsonInput = {
     language: input.language,
@@ -309,19 +229,8 @@ function pruneInput(
   }
 
   // settings.outputSelection
-  if (!keepOutputSelection) {
-    // Remove entire outputSelection
-    if (out.settings) out.settings.outputSelection = {};
-  } else if (out.settings?.outputSelection) {
-    // Keep only entries for kept sources
-    const selIn = out.settings.outputSelection;
-    const selOut: typeof selIn = {};
-    for (const [file, perContract] of Object.entries(selIn)) {
-      if (file === "*" || sourcesSet.has(file)) {
-        selOut[file] = perContract;
-      }
-    }
-    out.settings.outputSelection = selOut;
+  if (out.settings?.outputSelection) {
+    out.settings.outputSelection = {};
   }
 
   return out;
