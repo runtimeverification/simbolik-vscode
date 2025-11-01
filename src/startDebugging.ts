@@ -150,8 +150,6 @@ export async function startDebugging(
             keepAst: true,
             stripDocs: true,
             stripStorageLayout: false,
-            narrowOutputSelection: true,
-            pruneLibraries: true,
           }
         );
         shaken = result.shaken;

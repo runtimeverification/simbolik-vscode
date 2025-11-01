@@ -1,4 +1,3 @@
-// treeShakeFoundryBuildInfo.ts
 // Tree-shake a Foundry build-info object (Standard JSON input + output)
 // to only include the entry-point contract and its transitive dependencies.
 
@@ -93,7 +92,7 @@ export interface FoundryBuildInfo {
 /* ------------------------------- Options --------------------------------- */
 
 export interface TreeShakeOptions {
-  keepBytecode?: boolean;              // default: true
+  keepBytecode?: boolean;              // default: false
   keepSourceMaps?: boolean;            // default: false
   keepIr?: boolean;                    // default: false
   keepLegacyAssembly?: boolean;        // default: false
@@ -101,10 +100,6 @@ export interface TreeShakeOptions {
   keepAst?: boolean;                   // default: false
   stripDocs?: boolean;                 // default: false
   stripStorageLayout?: boolean;        // default: false
-
-  // Input-specific tweaks:
-  narrowOutputSelection?: boolean; // default: true (limits to kept files)
-  pruneLibraries?: boolean;        // default: true (drop libraries for removed files)
 }
 
 export interface TreeShakeResult {
@@ -117,7 +112,7 @@ export interface TreeShakeResult {
   };
 }
 
-/* --------------------------------- API ------------------------------------- */
+/* -------------------------------- API ------------------------------------ */
 
 /**
  * Tree-shake a Foundry build-info (standard input + output) given an entry FQN.
@@ -129,7 +124,7 @@ export function treeShakeFoundryBuildInfo(
   opts: TreeShakeOptions = {}
 ): TreeShakeResult {
   const {
-    keepBytecode = true,
+    keepBytecode = false,
     keepSourceMaps = false,
     keepIr = false,
     keepLegacyAssembly = false,
@@ -137,13 +132,11 @@ export function treeShakeFoundryBuildInfo(
     keepAst = false,
     stripDocs = false,
     stripStorageLayout = false,
-    narrowOutputSelection = true,
-    pruneLibraries = true,
   } = opts;
 
   const originalBytes = bytesLength(buildInfo);
 
-  // 1) Compute kept sources from OUTPUT (prefer metadata; fallback AST).
+  // 1) Compute kept sources from OUTPUT
   const sourcesSet = resolveDependencies(buildInfo.output, entry);
 
   // 2) Prune OUTPUT with size-saving toggles.
@@ -161,9 +154,7 @@ export function treeShakeFoundryBuildInfo(
   // 3) Prune INPUT to the same source set (+ optional narrowing).
   const prunedInput = pruneInput(buildInfo.input, {
     sourcesSet,
-    narrowOutputSelection,
     keepOutputSelection,
-    pruneLibraries,
   });
 
   const shaken: FoundryBuildInfo = {
@@ -191,7 +182,7 @@ export function treeShakeFoundryBuildInfo(
   };
 }
 
-/* ------------------------------- OUTPUT pruning ----------------------------- */
+/* ------------------------------ OUTPUT pruning --------------------------- */
 
 function pruneOutput(
   output: SolcOutput,
@@ -281,18 +272,16 @@ function pruneOutput(
   return pruned;
 }
 
-/* -------------------------------- INPUT pruning ----------------------------- */
+/* ------------------------------ INPUT pruning ---------------------------- */
 
 function pruneInput(
   input: StandardJsonInput,
   params: {
     sourcesSet: Set<string>;
-    narrowOutputSelection: boolean;
     keepOutputSelection: boolean;
-    pruneLibraries: boolean
   }
 ): StandardJsonInput {
-  const { sourcesSet, narrowOutputSelection, keepOutputSelection, pruneLibraries } = params;
+  const { sourcesSet, keepOutputSelection } = params;
 
   const out: StandardJsonInput = {
     language: input.language,
@@ -308,7 +297,7 @@ function pruneInput(
   }
 
   // settings.libraries
-  if (pruneLibraries && out.settings?.libraries) {
+  if (out.settings?.libraries) {
     const libs: NonNullable<StandardJsonInput["settings"]>["libraries"] = {};
     for (const [src, libMap] of Object.entries(out.settings.libraries)) {
       if (sourcesSet.has(src)) libs[src] = libMap;
@@ -319,7 +308,7 @@ function pruneInput(
   // settings.outputSelection
   // Option A (default): keep only entries for kept files, plus wildcard rules.
   // This keeps the structure valid for re-compilation while narrowing scope.
-  if (keepOutputSelection &&narrowOutputSelection && out.settings?.outputSelection) {
+  if (keepOutputSelection && out.settings?.outputSelection) {
     const selIn = out.settings.outputSelection;
     const selOut: typeof selIn = {};
     for (const [file, perContract] of Object.entries(selIn)) {
@@ -336,7 +325,7 @@ function pruneInput(
   return out;
 }
 
-/* ------------------------------ Dependency logic --------------------------- */
+/* ---------------------------- Dependency logic --------------------------- */
 
 export class ContractNotFoundError extends Error {}
 
@@ -359,7 +348,7 @@ function resolveDependencies(
 
 }
 
-/* --------------------------------- Utils ----------------------------------- */
+/* -------------------------------- Utils ---------------------------------- */
 
 function deepClone<T>(x: T): T {
   return x == null ? (x as any) : JSON.parse(JSON.stringify(x));
