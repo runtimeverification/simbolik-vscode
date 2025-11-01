@@ -1,5 +1,7 @@
 // Tree-shake a Foundry build-info object (Standard JSON input + output)
 // to only include the entry-point contract and its transitive dependencies.
+// Supports various size-saving options to strip unneeded data from the
+// build-info.
 
 type Json = any;
 
@@ -98,8 +100,8 @@ export interface TreeShakeOptions {
   keepLegacyAssembly?: boolean;        // default: false
   keepOutputSelection?: boolean;       // default: false
   keepAst?: boolean;                   // default: false
-  stripDocs?: boolean;                 // default: false
-  stripStorageLayout?: boolean;        // default: false
+  keepDocs?: boolean;                  // default: false
+  keepStorageLayout?: boolean;         // default: false
 }
 
 export interface TreeShakeResult {
@@ -115,8 +117,9 @@ export interface TreeShakeResult {
 /* -------------------------------- API ------------------------------------ */
 
 /**
- * Tree-shake a Foundry build-info (standard input + output) given an entry FQN.
- * `entryFQN` can be "path/File.sol:Contract" or just "Contract" if unique.
+ * Tree-shake a Foundry build-info (standard input + output) given an entry
+ * point tuple (source file + contract name). Returns the shaken build-info
+ * along with statistics about the shaking process.
  */
 export function treeShakeFoundryBuildInfo(
   buildInfo: FoundryBuildInfo,
@@ -130,8 +133,8 @@ export function treeShakeFoundryBuildInfo(
     keepLegacyAssembly = false,
     keepOutputSelection = false,
     keepAst = false,
-    stripDocs = false,
-    stripStorageLayout = false,
+    keepDocs  = false,
+    keepStorageLayout = false,
   } = opts;
 
   const originalBytes = bytesLength(buildInfo);
@@ -147,8 +150,8 @@ export function treeShakeFoundryBuildInfo(
     keepIr,
     keepLegacyAssembly,
     keepAst,
-    stripDocs,
-    stripStorageLayout,
+    keepDocs,
+    keepStorageLayout,
   });
 
   // 3) Prune INPUT to the same source set (+ optional narrowing).
@@ -193,8 +196,8 @@ function pruneOutput(
     keepIr: boolean;
     keepLegacyAssembly: boolean;
     keepAst: boolean;
-    stripDocs: boolean;
-    stripStorageLayout: boolean;
+    keepDocs: boolean;
+    keepStorageLayout: boolean;
   }
 ): SolcOutput {
   const {
@@ -204,8 +207,8 @@ function pruneOutput(
     keepIr,
     keepLegacyAssembly,
     keepAst,
-    stripDocs,
-    stripStorageLayout,
+    keepDocs,
+    keepStorageLayout,
   } = params;
 
   const pruned: SolcOutput = {};
@@ -236,11 +239,11 @@ function pruneOutput(
           if (cloned?.evm?.bytecode?.object) cloned.evm.bytecode.object = "";
           if (cloned?.evm?.deployedBytecode?.object) cloned.evm.deployedBytecode.object = "";
         }
-        if (stripDocs) {
+        if (!keepDocs) {
           if (cloned.devdoc) delete cloned.devdoc;
           if (cloned.userdoc) delete cloned.userdoc;
         }
-        if (stripStorageLayout && cloned.storageLayout) {
+        if (!keepStorageLayout && cloned.storageLayout) {
           delete cloned.storageLayout;
         }
         kept[name] = cloned;
@@ -306,9 +309,11 @@ function pruneInput(
   }
 
   // settings.outputSelection
-  // Option A (default): keep only entries for kept files, plus wildcard rules.
-  // This keeps the structure valid for re-compilation while narrowing scope.
-  if (keepOutputSelection && out.settings?.outputSelection) {
+  if (!keepOutputSelection) {
+    // Remove entire outputSelection
+    if (out.settings) out.settings.outputSelection = {};
+  } else if (out.settings?.outputSelection) {
+    // Keep only entries for kept sources
     const selIn = out.settings.outputSelection;
     const selOut: typeof selIn = {};
     for (const [file, perContract] of Object.entries(selIn)) {
@@ -317,9 +322,6 @@ function pruneInput(
       }
     }
     out.settings.outputSelection = selOut;
-  } else if (!keepOutputSelection) {
-    // Option B: drop entirely.
-    if (out.settings) out.settings.outputSelection = {};
   }
 
   return out;

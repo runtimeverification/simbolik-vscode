@@ -148,8 +148,8 @@ export async function startDebugging(
             keepLegacyAssembly: false,
             keepOutputSelection: false,
             keepAst: true,
-            stripDocs: true,
-            stripStorageLayout: false,
+            keepDocs: false,
+            keepStorageLayout: true,
           }
         );
         shaken = result.shaken;
