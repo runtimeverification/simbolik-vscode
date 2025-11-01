@@ -86,13 +86,15 @@ export interface FoundryBuildInfo {
 /* --------------------------------- Options --------------------------------- */
 
 export interface TreeShakeOptions {
-  keepBytecode?: boolean;          // default: true
-  keepSourceMaps?: boolean;        // default: false
-  keepIr?: boolean;                // default: false
-  keepLegacyAssembly?: boolean;    // default: false
+  keepBytecode?: boolean;              // default: true
+  keepSourceMaps?: boolean;            // default: false
+  keepIr?: boolean;                    // default: false
+  keepLegacyAssembly?: boolean;        // default: false
+  keepOutputSelection?: boolean;       // default: false
+  keepAst?: boolean;                   // default: false
   onlyEntryContractArtifact?: boolean; // default: false
-  stripDocs?: boolean;             // default: false
-  stripStorageLayout?: boolean;    // default: false
+  stripDocs?: boolean;                 // default: false
+  stripStorageLayout?: boolean;        // default: false
 
   // Input-specific tweaks:
   narrowOutputSelection?: boolean; // default: true (limits to kept files)
@@ -107,7 +109,6 @@ export interface TreeShakeResult {
     savingsPercent: number;
     keptSources: string[];
     entry: { source: string; contract: string };
-    resolution: "metadata" | "ast" | "single-file";
   };
 }
 
@@ -127,6 +128,8 @@ export function treeShakeFoundryBuildInfo(
     keepSourceMaps = false,
     keepIr = false,
     keepLegacyAssembly = false,
+    keepOutputSelection = false,
+    keepAst = false,
     onlyEntryContractArtifact = false,
     stripDocs = false,
     stripStorageLayout = false,
@@ -134,13 +137,13 @@ export function treeShakeFoundryBuildInfo(
     pruneLibraries = true,
   } = opts;
 
-  const originalBytes = byteLengthSafe(buildInfo);
+  const originalBytes = bytesLength(buildInfo);
 
   // 1) Resolve entry file/contract from OUTPUT (more reliable than input).
   const { entrySource, entryContract } = resolveEntry(buildInfo.output, entryFQN);
 
   // 2) Compute kept sources from OUTPUT (prefer metadata; fallback AST).
-  const { sourcesSet, resolution } = resolveDependencies(buildInfo.output, entrySource, entryContract);
+  const sourcesSet = resolveDependencies(buildInfo.output, entrySource, entryContract);
 
   // 3) Prune OUTPUT with size-saving toggles.
   const prunedOutput = pruneOutput(buildInfo.output, {
@@ -151,6 +154,7 @@ export function treeShakeFoundryBuildInfo(
     keepSourceMaps,
     keepIr,
     keepLegacyAssembly,
+    keepAst,
     onlyEntryContractArtifact,
     stripDocs,
     stripStorageLayout,
@@ -160,6 +164,7 @@ export function treeShakeFoundryBuildInfo(
   const prunedInput = pruneInput(buildInfo.input, {
     sourcesSet,
     narrowOutputSelection,
+    keepOutputSelection,
     pruneLibraries,
   });
 
@@ -173,7 +178,7 @@ export function treeShakeFoundryBuildInfo(
     output: prunedOutput,
   };
 
-  const shakenBytes = byteLengthSafe(shaken);
+  const shakenBytes = bytesLength(shaken);
   const savingsPercent =
     originalBytes > 0 ? Math.round((1 - shakenBytes / originalBytes) * 1000) / 10 : 0;
 
@@ -185,7 +190,6 @@ export function treeShakeFoundryBuildInfo(
       savingsPercent,
       keptSources: [...sourcesSet].sort(),
       entry: { source: entrySource, contract: entryContract },
-      resolution,
     },
   };
 }
@@ -202,6 +206,7 @@ function pruneOutput(
     keepSourceMaps: boolean;
     keepIr: boolean;
     keepLegacyAssembly: boolean;
+    keepAst: boolean;
     onlyEntryContractArtifact: boolean;
     stripDocs: boolean;
     stripStorageLayout: boolean;
@@ -215,6 +220,7 @@ function pruneOutput(
     keepSourceMaps,
     keepIr,
     keepLegacyAssembly,
+    keepAst,
     onlyEntryContractArtifact,
     stripDocs,
     stripStorageLayout,
@@ -234,26 +240,26 @@ function pruneOutput(
         const cloned = deepClone(artifact);
 
         // size trims
-        if (!params.keepSourceMaps) {
+        if (!keepSourceMaps) {
           cloned?.evm?.bytecode && (cloned.evm.bytecode.sourceMap = undefined);
           cloned?.evm?.deployedBytecode && (cloned.evm.deployedBytecode.sourceMap = undefined);
         }
-        if (!params.keepLegacyAssembly && cloned?.evm?.legacyAssembly) {
+        if (!keepLegacyAssembly && cloned?.evm?.legacyAssembly) {
           delete cloned.evm.legacyAssembly;
         }
-        if (!params.keepIr) {
+        if (!keepIr) {
           if (cloned.ir) delete cloned.ir;
           if (cloned.irOptimized) delete cloned.irOptimized;
         }
-        if (!params.keepBytecode) {
+        if (!keepBytecode) {
           if (cloned?.evm?.bytecode?.object) cloned.evm.bytecode.object = "";
           if (cloned?.evm?.deployedBytecode?.object) cloned.evm.deployedBytecode.object = "";
         }
-        if (params.stripDocs) {
+        if (stripDocs) {
           if (cloned.devdoc) delete cloned.devdoc;
           if (cloned.userdoc) delete cloned.userdoc;
         }
-        if (params.stripStorageLayout && cloned.storageLayout) {
+        if (stripStorageLayout && cloned.storageLayout) {
           delete cloned.storageLayout;
         }
         kept[name] = cloned;
@@ -267,6 +273,10 @@ function pruneOutput(
     pruned.sources = {};
     for (const [src, srcObj] of Object.entries(output.sources)) {
       if (sourcesSet.has(src)) pruned.sources[src] = srcObj;
+      // prune ast if present
+      if (pruned.sources[src]?.ast && !keepAst) {
+        delete pruned.sources[src].ast;
+      }
     }
   }
 
@@ -285,9 +295,14 @@ function pruneOutput(
 
 function pruneInput(
   input: StandardJsonInput,
-  params: { sourcesSet: Set<string>; narrowOutputSelection: boolean; pruneLibraries: boolean }
+  params: {
+    sourcesSet: Set<string>;
+    narrowOutputSelection: boolean;
+    keepOutputSelection: boolean;
+    pruneLibraries: boolean
+  }
 ): StandardJsonInput {
-  const { sourcesSet, narrowOutputSelection, pruneLibraries } = params;
+  const { sourcesSet, narrowOutputSelection, keepOutputSelection, pruneLibraries } = params;
 
   const out: StandardJsonInput = {
     language: input.language,
@@ -314,7 +329,7 @@ function pruneInput(
   // settings.outputSelection
   // Option A (default): keep only entries for kept files, plus wildcard rules.
   // This keeps the structure valid for re-compilation while narrowing scope.
-  if (narrowOutputSelection && out.settings?.outputSelection) {
+  if (keepOutputSelection &&narrowOutputSelection && out.settings?.outputSelection) {
     const selIn = out.settings.outputSelection;
     const selOut: typeof selIn = {};
     for (const [file, perContract] of Object.entries(selIn)) {
@@ -323,6 +338,9 @@ function pruneInput(
       }
     }
     out.settings.outputSelection = selOut;
+  } else if (!keepOutputSelection) {
+    // Option B: drop entirely.
+    if (out.settings) out.settings.outputSelection = {};
   }
 
   return out;
@@ -331,6 +349,8 @@ function pruneInput(
 /* ------------------------------ Dependency logic --------------------------- */
 
 export class ContractNotFoundError extends Error {}
+
+export class MissingSourcesInMetadataError extends Error {}
 
 function parseEntryFQN(entry: string): { file?: string; contract: string } {
   const i = entry.lastIndexOf(":");
@@ -381,47 +401,15 @@ function resolveDependencies(
   output: SolcOutput,
   entrySource: string,
   _entryContract: string
-): { sourcesSet: Set<string>; resolution: "metadata" | "ast" | "single-file" } {
+):  Set<string> {
   const contracts = output.contracts ?? {};
   const artifact = contracts[entrySource]?.[_entryContract];
   const meta = safeParseJSON(artifact?.metadata);
   if (meta?.sources && typeof meta.sources === "object") {
-    return { sourcesSet: new Set(Object.keys(meta.sources)), resolution: "metadata" };
+    return new Set(Object.keys(meta.sources));
   }
+  throw new MissingSourcesInMetadataError(`Missing or invalid metadata.sources in artifact for ${entrySource}:${_entryContract}`);
 
-  const ast = output.sources?.[entrySource]?.ast;
-  if (ast) {
-    const set = new Set<string>();
-    collectImportsDFS(output, entrySource, set);
-    return { sourcesSet: set, resolution: "ast" };
-  }
-
-  return { sourcesSet: new Set([entrySource]), resolution: "single-file" };
-}
-
-function collectImportsDFS(output: SolcOutput, src: string, seen: Set<string>) {
-  if (seen.has(src)) return;
-  seen.add(src);
-
-  const ast = output.sources?.[src]?.ast;
-  if (!ast) return;
-
-  const stack: any[] = [ast];
-  while (stack.length) {
-    const node = stack.pop();
-    if (node && typeof node === "object") {
-      if (node.nodeType === "ImportDirective") {
-        // Different solc versions: absolutePath or file
-        const abs = node.absolutePath || node.file;
-        if (abs && typeof abs === "string") collectImportsDFS(output, abs, seen);
-      }
-      for (const v of Object.values(node)) {
-        if (!v || typeof v !== "object") continue;
-        if (Array.isArray(v)) for (const it of v) stack.push(it);
-        else stack.push(v);
-      }
-    }
-  }
 }
 
 /* --------------------------------- Utils ----------------------------------- */
@@ -430,28 +418,8 @@ function deepClone<T>(x: T): T {
   return x == null ? (x as any) : JSON.parse(JSON.stringify(x));
 }
 
-function byteLengthSafe(obj: any): number {
-  try {
-    return Buffer.byteLength(JSON.stringify(obj));
-  } catch {
-    return JSON.stringify(safeForStringify(obj)).length;
-  }
-}
-
-function safeForStringify(obj: any): any {
-  const seen = new WeakSet();
-  const walk = (x: any): any => {
-    if (x && typeof x === "object") {
-      if (seen.has(x)) return "[[Circular]]";
-      seen.add(x);
-      if (Array.isArray(x)) return x.map(walk);
-      const out: any = {};
-      for (const [k, v] of Object.entries(x)) out[k] = walk(v);
-      return out;
-    }
-    return x;
-  };
-  return walk(obj);
+function bytesLength(obj: any): number {
+  return Buffer.byteLength(JSON.stringify(obj));
 }
 
 function safeParseJSON(s?: string): any | undefined {

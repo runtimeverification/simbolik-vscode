@@ -105,6 +105,7 @@ export async function startDebugging(
       }
     }
     
+    // Collect build-info files
     let buildInfoFiles;
     try {
       buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
@@ -126,9 +127,9 @@ export async function startDebugging(
       }
     }
 
+    // Tree shake build-info files
     const prunedBuildInfoFiles: vscode.Uri[] = [];
-    // Tree shake build info files
-    progress.report({ message: "Optimizing build info files" });
+    progress.report({ message: "Optimizing build-info files" });
     for (let i = 0; i < buildInfoFiles.length; i++) {
       const buildInfoFile = buildInfoFiles[i];
       const contents = await vscode.workspace.fs.readFile(buildInfoFile);
@@ -146,6 +147,8 @@ export async function startDebugging(
             keepSourceMaps: true,
             keepIr: false,
             keepLegacyAssembly: false,
+            keepOutputSelection: false,
+            keepAst: true,
             stripDocs: true,
             stripStorageLayout: false,
             narrowOutputSelection: true,
