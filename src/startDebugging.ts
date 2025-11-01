@@ -135,13 +135,12 @@ export async function startDebugging(
       const contents = await vscode.workspace.fs.readFile(buildInfoFile);
       const buildInfo: FoundryBuildInfo = JSON.parse(new TextDecoder().decode(contents));
       const projectRoot = await foundryRoot(activeTextEditor.document.uri);
-      const relativePath = file.replace('file://', '').replace(projectRoot.path + '/', '');
-      const entry = `${relativePath}:${contractName}`;
+      const entrySource = file.replace('file://', '').replace(projectRoot.path + '/', '');
       let shaken;
       try {
         const result = treeShakeFoundryBuildInfo(
           buildInfo,
-          entry,
+          { source: entrySource, contract: contractName},
           {
             keepBytecode: true,
             keepSourceMaps: true,
@@ -153,7 +152,6 @@ export async function startDebugging(
             stripStorageLayout: false,
             narrowOutputSelection: true,
             pruneLibraries: true,
-            onlyEntryContractArtifact: false,
           }
         );
         shaken = result.shaken;

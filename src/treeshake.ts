@@ -4,7 +4,14 @@
 
 type Json = any;
 
-/* ----------------------- Minimal Standard JSON (input) ---------------------- */
+/* ------------------------------- Entry Point ----------------------------- */
+
+export interface EntryPoint {
+  source: string;
+  contract: string;
+}
+
+/* --------------------- Minimal Standard JSON (input) --------------------- */
 
 export interface StandardJsonInput {
   language?: string; // "Solidity"
@@ -31,7 +38,7 @@ export interface StandardJsonInput {
   };
 }
 
-/* ----------------------- Minimal Standard JSON (output) --------------------- */
+/* ----------------------- Minimal Standard JSON (output) ------------------ */
 
 export interface SolcOutput {
   contracts?: {
@@ -71,7 +78,7 @@ export interface SolcOutput {
   version?: string;
 }
 
-/* ------------------------------ Foundry build-info -------------------------- */
+/* ----------------------------- Foundry build-info ------------------------ */
 
 export interface FoundryBuildInfo {
   _format?: string;                // e.g. "etherscan-build-info-1"
@@ -83,7 +90,7 @@ export interface FoundryBuildInfo {
   output: SolcOutput;              // Standard JSON *output* (result)
 }
 
-/* --------------------------------- Options --------------------------------- */
+/* ------------------------------- Options --------------------------------- */
 
 export interface TreeShakeOptions {
   keepBytecode?: boolean;              // default: true
@@ -92,7 +99,6 @@ export interface TreeShakeOptions {
   keepLegacyAssembly?: boolean;        // default: false
   keepOutputSelection?: boolean;       // default: false
   keepAst?: boolean;                   // default: false
-  onlyEntryContractArtifact?: boolean; // default: false
   stripDocs?: boolean;                 // default: false
   stripStorageLayout?: boolean;        // default: false
 
@@ -108,7 +114,6 @@ export interface TreeShakeResult {
     shakenBytes: number;
     savingsPercent: number;
     keptSources: string[];
-    entry: { source: string; contract: string };
   };
 }
 
@@ -120,7 +125,7 @@ export interface TreeShakeResult {
  */
 export function treeShakeFoundryBuildInfo(
   buildInfo: FoundryBuildInfo,
-  entryFQN: string,
+  entry: EntryPoint,
   opts: TreeShakeOptions = {}
 ): TreeShakeResult {
   const {
@@ -130,7 +135,6 @@ export function treeShakeFoundryBuildInfo(
     keepLegacyAssembly = false,
     keepOutputSelection = false,
     keepAst = false,
-    onlyEntryContractArtifact = false,
     stripDocs = false,
     stripStorageLayout = false,
     narrowOutputSelection = true,
@@ -139,28 +143,22 @@ export function treeShakeFoundryBuildInfo(
 
   const originalBytes = bytesLength(buildInfo);
 
-  // 1) Resolve entry file/contract from OUTPUT (more reliable than input).
-  const { entrySource, entryContract } = resolveEntry(buildInfo.output, entryFQN);
+  // 1) Compute kept sources from OUTPUT (prefer metadata; fallback AST).
+  const sourcesSet = resolveDependencies(buildInfo.output, entry);
 
-  // 2) Compute kept sources from OUTPUT (prefer metadata; fallback AST).
-  const sourcesSet = resolveDependencies(buildInfo.output, entrySource, entryContract);
-
-  // 3) Prune OUTPUT with size-saving toggles.
+  // 2) Prune OUTPUT with size-saving toggles.
   const prunedOutput = pruneOutput(buildInfo.output, {
     sourcesSet,
-    entrySource,
-    entryContract,
     keepBytecode,
     keepSourceMaps,
     keepIr,
     keepLegacyAssembly,
     keepAst,
-    onlyEntryContractArtifact,
     stripDocs,
     stripStorageLayout,
   });
 
-  // 4) Prune INPUT to the same source set (+ optional narrowing).
+  // 3) Prune INPUT to the same source set (+ optional narrowing).
   const prunedInput = pruneInput(buildInfo.input, {
     sourcesSet,
     narrowOutputSelection,
@@ -189,7 +187,6 @@ export function treeShakeFoundryBuildInfo(
       shakenBytes,
       savingsPercent,
       keptSources: [...sourcesSet].sort(),
-      entry: { source: entrySource, contract: entryContract },
     },
   };
 }
@@ -200,28 +197,22 @@ function pruneOutput(
   output: SolcOutput,
   params: {
     sourcesSet: Set<string>;
-    entrySource: string;
-    entryContract: string;
     keepBytecode: boolean;
     keepSourceMaps: boolean;
     keepIr: boolean;
     keepLegacyAssembly: boolean;
     keepAst: boolean;
-    onlyEntryContractArtifact: boolean;
     stripDocs: boolean;
     stripStorageLayout: boolean;
   }
 ): SolcOutput {
   const {
     sourcesSet,
-    entrySource,
-    entryContract,
     keepBytecode,
     keepSourceMaps,
     keepIr,
     keepLegacyAssembly,
     keepAst,
-    onlyEntryContractArtifact,
     stripDocs,
     stripStorageLayout,
   } = params;
@@ -236,7 +227,6 @@ function pruneOutput(
       if (!sourcesSet.has(src)) continue;
       const kept: NonNullable<SolcOutput["contracts"]>[string] = {};
       for (const [name, artifact] of Object.entries(contracts || {})) {
-        if (onlyEntryContractArtifact && src === entrySource && name !== entryContract) continue;
         const cloned = deepClone(artifact);
 
         // size trims
@@ -352,63 +342,20 @@ export class ContractNotFoundError extends Error {}
 
 export class MissingSourcesInMetadataError extends Error {}
 
-function parseEntryFQN(entry: string): { file?: string; contract: string } {
-  const i = entry.lastIndexOf(":");
-  return i === -1 ? { contract: entry } : { file: entry.slice(0, i), contract: entry.slice(i + 1) };
-}
-
-function resolveEntry(
-  output: SolcOutput,
-  entryFQN: string
-): { entrySource: string; entryContract: string } {
-  const contracts = output.contracts ?? {};
-  const { file: wantedFile, contract: wantedContract } = parseEntryFQN(entryFQN);
-
-  if (wantedFile) {
-    const fileContracts = contracts[wantedFile];
-    if (!fileContracts) throw new ContractNotFoundError(`Entry file "${wantedFile}" not found in output.contracts.`);
-    if (!(wantedContract in fileContracts)) {
-      const available = Object.keys(fileContracts).join(", ");
-      throw new Error(
-        `Contract "${wantedContract}" not found in "${wantedFile}". Available: ${available}`
-      );
-    }
-    return { entrySource: wantedFile, entryContract: wantedContract };
-  }
-
-  // find unique by name
-  let found: string | undefined;
-  for (const [src, fileContracts] of Object.entries(contracts)) {
-    if (fileContracts && wantedContract in fileContracts) {
-      if (found && found !== src) {
-        throw new Error(
-          `Contract "${wantedContract}" found in multiple files. Use "File.sol:${wantedContract}".`
-        );
-      }
-      found = src;
-    }
-  }
-  if (!found) {
-    const sample = Object.entries(contracts)
-      .flatMap(([src, cs]) => Object.keys(cs || {}).map((c) => `${src}:${c}`))
-      .slice(0, 10);
-    throw new Error(`Contract "${wantedContract}" not found. Sample: ${sample.join(", ")} ...`);
-  }
-  return { entrySource: found, entryContract: wantedContract };
-}
-
 function resolveDependencies(
   output: SolcOutput,
-  entrySource: string,
-  _entryContract: string
+  entry: EntryPoint
 ):  Set<string> {
   const contracts = output.contracts ?? {};
-  const artifact = contracts[entrySource]?.[_entryContract];
+  const artifact = contracts[entry.source]?.[entry.contract];
+  if (!artifact) {
+    throw new ContractNotFoundError(`Contract not found in build info output: ${entry.source}:${entry.contract}`);
+  }
   const meta = safeParseJSON(artifact?.metadata);
   if (meta?.sources && typeof meta.sources === "object") {
     return new Set(Object.keys(meta.sources));
   }
-  throw new MissingSourcesInMetadataError(`Missing or invalid metadata.sources in artifact for ${entrySource}:${_entryContract}`);
+  throw new MissingSourcesInMetadataError(`Missing or invalid metadata.sources in artifact for ${entry.source}:${entry.contract}`);
 
 }
 
