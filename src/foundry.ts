@@ -76,7 +76,7 @@ async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   const configPath = vscode.Uri.joinPath(root, 'foundry.toml');
   const config = await vscode.workspace.fs.readFile(configPath);
   const text = new TextDecoder().decode(config);
-  return parseToml(text);
+  return parseToml(text, { integersAsBigInt: true });
 }
 
 async function forgeBuildInfo(root: vscode.Uri): Promise<vscode.Uri[]> {
