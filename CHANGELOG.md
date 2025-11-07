@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+
+## [11.1.3] - 2025-11-07
+- Fixed a bug in the toml parser used for parsing foundry.toml files
+
 ## [11.1.2] - 2025-30-30
 - This updates fixes a bug during file upload.
 
