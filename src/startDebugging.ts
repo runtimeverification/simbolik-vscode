@@ -6,7 +6,7 @@ import {
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
-import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
+import { forgeBuildTask, foundryRoot, getBuildInfoFileFromCache } from './foundry';
 import { IWorkspaceWatcher } from './WorkspaceWatcher';
 
 export
@@ -93,7 +93,7 @@ export async function startDebugging(
     // This case is handled after this block
     if (autobuild == 'always' || (autobuild == 'on-change' && workspaceWatcher.hasChanges())) {
       progress.report({ message: "Compiling" });
-      const build = forgeBuildTask(activeTextEditor.document.uri);
+      const build = await forgeBuildTask(activeTextEditor.document.uri);
       const buildExecution = await vscode.tasks.executeTask(build);
       try {
         await completed(buildExecution);
@@ -106,19 +106,19 @@ export async function startDebugging(
     
     let buildInfoFiles;
     try {
-      buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
+      buildInfoFiles = [await getBuildInfoFileFromCache(activeTextEditor.document.uri)];
     } catch (e) {
       if (autobuild == 'never') {
         vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
         return;
       }
       progress.report({ message: "Compiling" });
-      const build = forgeBuildTask(activeTextEditor.document.uri);
+      const build = await forgeBuildTask(activeTextEditor.document.uri);
       const buildExecution = await vscode.tasks.executeTask(build);
       try {
         await completed(buildExecution);
         workspaceWatcher.reset();
-        buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
+        buildInfoFiles = [await getBuildInfoFileFromCache(activeTextEditor.document.uri)];
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project.');
         return;
