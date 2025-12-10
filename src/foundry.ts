@@ -87,10 +87,26 @@ async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> 
     // 		}
     // 	},
     // }
+    if (!cacheEntry) {
+      throw new Error(`No cache entry found for file: ${relativeFilePath.path.slice(1)}`);
+    }
     const artifacts = cacheEntry.artifacts;
+    if (!artifacts || typeof artifacts !== 'object' || Object.keys(artifacts).length === 0) {
+      throw new Error(`No artifacts found in cache entry for file: ${relativeFilePath.path.slice(1)}`);
+    }
     const firstContract = Object.keys(artifacts)[0];
+    if (!firstContract || !artifacts[firstContract]) {
+      throw new Error(`No contract found in artifacts for file: ${relativeFilePath.path.slice(1)}`);
+    }
     const firstVersion = Object.keys(artifacts[firstContract])[0];
-    const buildId = artifacts[firstContract][firstVersion].default.build_id;
+    if (!firstVersion || !artifacts[firstContract][firstVersion]) {
+      throw new Error(`No version found in contract '${firstContract}' for file: ${relativeFilePath.path.slice(1)}`);
+    }
+    const defaultEntry = artifacts[firstContract][firstVersion].default;
+    if (!defaultEntry || !defaultEntry.build_id) {
+      throw new Error(`No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath.path.slice(1)}`);
+    }
+    const buildId = defaultEntry.build_id;
     const buildInfoDir = await forgeBuildInfoDir(root);
     const buildInfoFile = vscode.Uri.joinPath(buildInfoDir, `${buildId}.json`);
     return buildInfoFile;
