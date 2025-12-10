@@ -152,7 +152,7 @@ async function loadCacheFile(root: vscode.Uri): Promise<any> {
  * @param base The base URI to strip from.
  * @param absolute The absolute URI to convert.
  * @returns The relative URI.
- * @throws An error if the absolute path does not start with the base path. 
+ * @throws An error if the absolute path does not start with the base path.
  */
 function relativePath(base: vscode.Uri, absolute: vscode.Uri): vscode.Uri {
   const basePath = base.path;
