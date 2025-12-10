@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
 import { IWorkspaceWatcher } from './WorkspaceWatcher';
+import { FoundryBuildInfo, treeShakeFoundryBuildInfo } from './treeshake';
 
 export
 type Credentials = {
@@ -104,6 +105,7 @@ export async function startDebugging(
       }
     }
     
+    // Collect build-info files
     let buildInfoFiles;
     try {
       buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
@@ -125,6 +127,34 @@ export async function startDebugging(
       }
     }
 
+    // Tree shake build-info files
+    const prunedBuildInfoFiles: vscode.Uri[] = [];
+    progress.report({ message: "Optimizing build-info files" });
+    for (let i = 0; i < buildInfoFiles.length; i++) {
+      const buildInfoFile = buildInfoFiles[i];
+      const contents = await vscode.workspace.fs.readFile(buildInfoFile);
+      const buildInfo: FoundryBuildInfo = JSON.parse(new TextDecoder().decode(contents));
+      const projectRoot = await foundryRoot(activeTextEditor.document.uri);
+      const entrySource = file.replace('file://', '').replace(projectRoot.path + '/', '');
+      let shaken;
+      try {
+        const result = treeShakeFoundryBuildInfo(
+          buildInfo,
+          { source: entrySource, contract: contractName }
+        );
+        shaken = result.shaken;
+      } catch (e) {
+        continue;
+      }
+      const shakenContents = new TextEncoder().encode(
+        JSON.stringify(shaken)
+      );
+      const outputFile = buildInfoFile.with({ path: buildInfoFile.path.replace('.json', '.min.json') });
+      await vscode.workspace.fs.writeFile(outputFile, shakenContents);
+      prunedBuildInfoFiles.push(outputFile);
+    }
+
+
     progress.report({ increment: 100 });
 
     const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
@@ -137,7 +167,7 @@ export async function startDebugging(
       showSourcemaps,
       jsonRpcUrl,
       sourcifyUrl,
-      buildInfoFiles,
+      prunedBuildInfoFiles,
       myFoundryRoot,
       credentials,
       clientVersion,

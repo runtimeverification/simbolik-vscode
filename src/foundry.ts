@@ -91,7 +91,7 @@ async function forgeBuildInfo(root: vscode.Uri): Promise<vscode.Uri[]> {
 
   // Get list of build-info files
   const files = await vscode.workspace.fs.readDirectory(buildInfoDir);
-  const buildInfoFiles = files.filter(([file, type]) => type === vscode.FileType.File && file.endsWith('.json'));
+  const buildInfoFiles = files.filter(([file, type]) => type === vscode.FileType.File && file.endsWith('.json') && !file.endsWith('.min.json'));
 
   if (buildInfoFiles.length === 0) {
     vscode.window.showErrorMessage('No build-info files found');
