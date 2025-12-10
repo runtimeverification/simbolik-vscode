@@ -5,7 +5,6 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import { NullWorkspaceWatcher } from './WorkspaceWatcher';
 import { downloadAndExtract } from './clone';
 
 const outputChannel = vscode.window.createOutputChannel(
@@ -32,11 +31,9 @@ export function activate(context: vscode.ExtensionContext) {
     factory
   ));
 
-  const workspaceWatcher = new NullWorkspaceWatcher();
-
   context.subscriptions.push(vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    (contract, method) => startDebugging(contract, method, workspaceWatcher),
+    (contract, method) => startDebugging(contract, method),
   ));
   
   vscode.debug.onDidStartDebugSession(session => {

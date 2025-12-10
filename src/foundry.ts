@@ -3,7 +3,7 @@ import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
 
 export
-  async function forgeBuildTask(file: vscode.Uri) {
+async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise<vscode.Task> {
   const forgePath = getConfigValue('forge-path', 'forge');
   const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
   const projectRoot = await foundryRoot(file);
@@ -24,7 +24,7 @@ export
         'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_FORCE': 'true',
+        'FOUNDRY_FORCE': force ? 'true' : 'false',
         'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
       }
     })
