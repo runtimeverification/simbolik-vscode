@@ -96,7 +96,7 @@ export async function startDebugging(
       try {
         await completed(buildExecution);
       } catch (e) {
-        vscode.window.showErrorMessage('Failed to build project.');
+        vscode.window.showErrorMessage('Failed to build project. Please check the terminal for build errors.');
         return;
       }
     }
@@ -105,7 +105,11 @@ export async function startDebugging(
     try {
       buildInfoFiles = [await getBuildInfoFileFromCache(activeTextEditor.document.uri)];
     } catch (e) {
-      vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
+      if (autobuild === 'never') {
+        vscode.window.showErrorMessage('Build info not found in cache. Autobuild is disabled; please build the project manually before debugging or enable autobuild.');
+      } else {
+        vscode.window.showErrorMessage('Build info not found in cache. Please check the terminal for build errors.');
+      }
       return;
     }
 
