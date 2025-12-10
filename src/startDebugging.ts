@@ -88,7 +88,7 @@ export async function startDebugging(
 
     // Compile the project if necessary
     // Caching logic is handled by Foundry itself
-    // If autobuild is 'always', we always we force a rebuild
+    // If autobuild is 'always', we always force a rebuild
     if (autobuild == 'always' || autobuild == 'on-change') {
       progress.report({ message: "Compiling" });
       const build = await forgeBuildTask(activeTextEditor.document.uri, autobuild == 'always');
