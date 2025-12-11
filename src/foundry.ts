@@ -25,6 +25,7 @@ async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise
         'FOUNDRY_BYTECODE_HASH': 'ipfs',
         'FOUNDRY_CBOR_METADATA': 'true',
         'FOUNDRY_FORCE': force ? 'true' : 'false',
+        'FOUNDRY_CACHE': 'true',
         'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
       }
     })
