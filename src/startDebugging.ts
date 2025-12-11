@@ -6,8 +6,7 @@ import {
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
-import { forgeBuildTask, foundryRoot, loadBuildInfo } from './foundry';
-import { IWorkspaceWatcher } from './WorkspaceWatcher';
+import { forgeBuildTask, foundryRoot, getBuildInfoFileFromCache } from './foundry';
 
 export
 type Credentials = {
@@ -21,7 +20,6 @@ type Credentials = {
 export async function startDebugging(
   contract: ContractDefinition,
   method: FunctionDefinition,
-  workspaceWatcher: IWorkspaceWatcher
 ) {
   const result = await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -88,41 +86,31 @@ export async function startDebugging(
     const autobuild = getConfigValue<'always'|'on-change'|'never'>('autobuild', 'on-change');
     const rpcNodeType = getConfigValue<'anvil'|'kontrol-node'>('rpc-node-type', 'anvil');
 
-    // Auto build if needed
-    // Notice, that if autobuild is set to 'on-change' and the project is not built, the project will be built
-    // This case is handled after this block
-    if (autobuild == 'always' || (autobuild == 'on-change' && workspaceWatcher.hasChanges())) {
+    // Compile the project if necessary
+    // Caching logic is handled by Foundry itself
+    // If autobuild is 'always', we always force a rebuild
+    if (autobuild === 'always' || autobuild === 'on-change') {
       progress.report({ message: "Compiling" });
-      const build = forgeBuildTask(activeTextEditor.document.uri);
+      const build = await forgeBuildTask(activeTextEditor.document.uri, autobuild === 'always');
       const buildExecution = await vscode.tasks.executeTask(build);
       try {
         await completed(buildExecution);
-        workspaceWatcher.reset();
       } catch (e) {
-        vscode.window.showErrorMessage('Failed to build project.');
+        vscode.window.showErrorMessage('Failed to build project. Please check the terminal for build errors.');
         return;
       }
     }
     
     let buildInfoFiles;
     try {
-      buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
+      buildInfoFiles = [await getBuildInfoFileFromCache(activeTextEditor.document.uri)];
     } catch (e) {
-      if (autobuild == 'never') {
-        vscode.window.showErrorMessage('Failed to load build info. Please build the project first.');
-        return;
+      if (autobuild === 'never') {
+        vscode.window.showErrorMessage('Build info not found in cache. Autobuild is disabled; please build the project manually before debugging or enable autobuild.');
+      } else {
+        vscode.window.showErrorMessage('Build info not found in cache. Please check the terminal for build errors.');
       }
-      progress.report({ message: "Compiling" });
-      const build = forgeBuildTask(activeTextEditor.document.uri);
-      const buildExecution = await vscode.tasks.executeTask(build);
-      try {
-        await completed(buildExecution);
-        workspaceWatcher.reset();
-        buildInfoFiles = await loadBuildInfo(activeTextEditor.document.uri);
-      } catch (e) {
-        vscode.window.showErrorMessage('Failed to build project.');
-        return;
-      }
+      return;
     }
 
     progress.report({ increment: 100 });
