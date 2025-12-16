@@ -1,6 +1,5 @@
-import * as vscode from 'vscode';
 import * as parser from '@solidity-parser/parser';
-import {getConfigValue} from './utils';
+import * as vscode from 'vscode';
 
 type Location = any;
 type ContractDefinition = any;
@@ -75,10 +74,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         if (!hasConstructorArgs) {
           parser.visit(contract, {
             FunctionDefinition: fn => {
-              if (
-                this.isExecutable(fn) &&
-                fn.parameters.length === 0
-              ) {
+              if (this.isExecutable(fn) && fn.parameters.length === 0) {
                 results.push([contract, fn]);
               }
             },

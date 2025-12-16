@@ -13,7 +13,8 @@
   "description": "Advanced Solidity and EVM Debugger",
   "version": "12.0.0",
   "engines": {
-    "vscode": "^1.79.0"
+    "vscode": "^1.79.0",
+    "node": ">=16.0.0"
   },
   "icon": "images/simbolik-icon-light.png",
   "categories": [
@@ -272,6 +273,7 @@
     "glob": "^8.1.0",
     "gts": "^5.3.0",
     "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "mocha": "^10.2.0",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
@@ -293,7 +295,7 @@
   },
   "lint-staged": {
     "src/**/*.{ts,js}": [
-      "gtx fix"
+      "gts fix"
     ]
   },
   "extensionDependencies": [
