@@ -1,3 +1,5 @@
 build
 build-web
 node_modules
+
+.direnv
