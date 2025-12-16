@@ -1,9 +1,11 @@
 import * as parser from '@solidity-parser/parser';
+import type {
+  ASTNode,
+  ContractDefinition,
+  FunctionDefinition,
+  Location,
+} from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
-
-type Location = any;
-type ContractDefinition = any;
-type FunctionDefinition = any;
 
 /**
  * CodelensProvider
@@ -22,6 +24,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
 
   public async provideCodeLenses(
     document: vscode.TextDocument,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     token: vscode.CancellationToken
   ): Promise<vscode.CodeLens[]> {
     const codeLenses = [];
@@ -56,7 +59,9 @@ export class CodelensProvider implements vscode.CodeLensProvider {
     return new vscode.Range(start, end);
   }
 
-  private getFunctions(ast: any): [ContractDefinition, FunctionDefinition][] {
+  private getFunctions(
+    ast: ASTNode
+  ): [ContractDefinition, FunctionDefinition][] {
     const results: [ContractDefinition, FunctionDefinition][] = [];
     parser.visit(ast, {
       ContractDefinition: contract => {
@@ -98,6 +103,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
 
   public resolveCodeLens(
     codeLens: vscode.CodeLens,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     token: vscode.CancellationToken
   ) {
     return codeLens;

@@ -11,6 +11,7 @@ export class SolidityDebugAdapterDescriptorFactory
 {
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
@@ -99,7 +100,7 @@ export class SolidityDebugAdapterDescriptorFactory
 
 function sendAsync(ws: WebSocket, data: Buffer | string): Promise<void> {
   return new Promise((resolve, reject) => {
-    ws.send(data as any, (err?: Error) => (err ? reject(err) : resolve()));
+    ws.send(data, (err?: Error) => (err ? reject(err) : resolve()));
   });
 }
 
@@ -162,7 +163,9 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
     websocket.onmessage = (message: MessageEvent) => {
       const payload = message.data.toString();
       const data = JSON.parse(payload);
-      const dataWithAbsolutePaths = this.prependPaths(data);
+      const dataWithAbsolutePaths = this.prependPaths(
+        data
+      ) as vscode.DebugProtocolMessage;
       this._onDidSendMessage.fire(dataWithAbsolutePaths);
     };
   }
@@ -189,25 +192,24 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
    * named `path` and type `string`, remove the foundry root from the path.
    * @param message
    */
-  trimPaths(
-    message: {[key: string]: any} | any[]
-  ): {[key: string]: any} | any[] {
+  trimPaths(message: unknown): unknown {
     if (Array.isArray(message)) {
       return message.map(item => this.trimPaths(item));
-    } else if (message instanceof Object) {
-      const result = Object.assign({}, message);
-      for (const key in message) {
+    } else if (message instanceof Object && message !== null) {
+      const result = Object.assign({}, message) as Record<string, unknown>;
+      const msg = message as Record<string, unknown>;
+      for (const key in msg) {
         if (
           ['path', 'symbolFilePath'].includes(key) &&
-          typeof message[key] === 'string'
+          typeof msg[key] === 'string'
         ) {
-          const uri = vscode.Uri.parse(message[key]);
+          const uri = vscode.Uri.parse(msg[key] as string);
           result[key] = relativeTo(uri, this.foundryRoot());
-        } else if (key === 'file' && typeof message[key] === 'string') {
-          const uri = vscode.Uri.parse(message[key]);
+        } else if (key === 'file' && typeof msg[key] === 'string') {
+          const uri = vscode.Uri.parse(msg[key] as string);
           result[key] = relativeTo(uri, this.foundryRoot());
-        } else if (typeof message[key] === 'object') {
-          result[key] = this.trimPaths(message[key]);
+        } else if (typeof msg[key] === 'object') {
+          result[key] = this.trimPaths(msg[key]);
         }
       }
       return result;
@@ -220,23 +222,22 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
    * named `path` and type `string`, prepend the foundry root to the path.
    * @param message
    */
-  prependPaths(
-    message: {[key: string]: any} | any[]
-  ): {[key: string]: any} | any[] {
+  prependPaths(message: unknown): unknown {
     if (Array.isArray(message)) {
       return message.map(item => this.prependPaths(item));
-    } else if (message instanceof Object) {
-      const result = Object.assign({}, message);
-      for (const key in message) {
+    } else if (message instanceof Object && message !== null) {
+      const result = Object.assign({}, message) as Record<string, unknown>;
+      const msg = message as Record<string, unknown>;
+      for (const key in msg) {
         if (
           ['path', 'symbolFilePath', 'file'].includes(key) &&
-          typeof message[key] === 'string'
+          typeof msg[key] === 'string'
         ) {
-          result[key] = `${this.foundryRoot()}/${message[key]}`;
-        } else if (key === 'file' && typeof message[key] === 'string') {
-          result[key] = `${this.foundryRoot()}/${message[key]}`;
-        } else if (typeof message[key] === 'object') {
-          result[key] = this.prependPaths(message[key]);
+          result[key] = `${this.foundryRoot()}/${msg[key]}`;
+        } else if (key === 'file' && typeof msg[key] === 'string') {
+          result[key] = `${this.foundryRoot()}/${msg[key]}`;
+        } else if (typeof msg[key] === 'object') {
+          result[key] = this.prependPaths(msg[key]);
         }
       }
       return result;

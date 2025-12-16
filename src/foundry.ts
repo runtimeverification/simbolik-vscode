@@ -80,9 +80,13 @@ export async function getBuildInfoFileFromCache(
 ): Promise<vscode.Uri> {
   const root = await foundryRoot(file);
   try {
-    const cacheContent = await loadCacheFile(root);
+    const cacheContent = (await loadCacheFile(root)) as {
+      files: Record<string, unknown>;
+    };
     const relativeFilePath = relativePath(root, file);
-    const cacheEntry = cacheContent.files[relativeFilePath.path.slice(1)];
+    const cacheEntry = cacheContent.files[
+      relativeFilePath.path.slice(1)
+    ] as Record<string, unknown>;
     // Example entry:
     // "src/Counter.sol": {
     // 	...
@@ -102,7 +106,7 @@ export async function getBuildInfoFileFromCache(
         `No cache entry found for file: ${relativeFilePath.path.slice(1)}`
       );
     }
-    const artifacts = cacheEntry.artifacts;
+    const artifacts = cacheEntry.artifacts as Record<string, unknown>;
     if (
       !artifacts ||
       typeof artifacts !== 'object' ||
@@ -118,13 +122,20 @@ export async function getBuildInfoFileFromCache(
         `No contract found in artifacts for file: ${relativeFilePath.path.slice(1)}`
       );
     }
-    const firstVersion = Object.keys(artifacts[firstContract])[0];
-    if (!firstVersion || !artifacts[firstContract][firstVersion]) {
+    const contractArtifacts = artifacts[firstContract] as Record<
+      string,
+      unknown
+    >;
+    const firstVersion = Object.keys(contractArtifacts)[0];
+    if (!firstVersion || !contractArtifacts[firstVersion]) {
       throw new Error(
         `No version found in contract '${firstContract}' for file: ${relativeFilePath.path.slice(1)}`
       );
     }
-    const defaultEntry = artifacts[firstContract][firstVersion].default;
+    const versionEntry = contractArtifacts[firstVersion] as {
+      default?: {build_id?: string};
+    };
+    const defaultEntry = versionEntry.default;
     if (!defaultEntry || !defaultEntry.build_id) {
       throw new Error(
         `No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath.path.slice(1)}`
@@ -186,7 +197,7 @@ async function getCacheFile(root: vscode.Uri): Promise<vscode.Uri> {
  * @param root The root URI of the Foundry project.
  * @returns A promise that resolves to the parsed JSON contents of the cache file.
  */
-async function loadCacheFile(root: vscode.Uri): Promise<any> {
+async function loadCacheFile(root: vscode.Uri): Promise<unknown> {
   const cacheFile = await getCacheFile(root);
   const cacheContent = await vscode.workspace.fs.readFile(cacheFile);
   const text = new TextDecoder().decode(cacheContent);

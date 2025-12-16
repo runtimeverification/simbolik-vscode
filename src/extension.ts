@@ -66,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
     if (event.event === 'api-key-sessions-limit-exceeded') {
-      const action = await vscode.window.showErrorMessage(
+      await vscode.window.showErrorMessage(
         'Too many debugging sessions running in parallel'
       );
     }

@@ -178,17 +178,18 @@ export async function startDebugging(
     return;
   }
   const {workspaceFolder, debugConfig} = result;
-  const debugSession = await vscode.debug.startDebugging(
-    workspaceFolder,
-    debugConfig
-  );
+  await vscode.debug.startDebugging(workspaceFolder, debugConfig);
   return;
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
   return new Promise((resolve, reject) => {
     const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-      if ((e.execution as any)._id !== (tastkExecution as any)._id) return;
+      if (
+        (e.execution as unknown as {_id: string})._id !==
+        (tastkExecution as unknown as {_id: string})._id
+      )
+        return;
       if (e.exitCode !== 0) {
         reject();
       } else {
