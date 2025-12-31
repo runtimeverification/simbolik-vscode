@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { forgeTest, forgeListTests, ForgeTestSuite, ForgeTestSuiteReport, forgeTestSingle, forgeCoverageSingle } from './foundry';
+import { forgeTestSingle, forgeCoverageSingle, testFiles } from './foundry';
+
+import * as parser from '@solidity-parser/parser';
 
 
 export function createTestController() : vscode.TestController {
@@ -169,7 +171,9 @@ export function createTestController() : vscode.TestController {
 }
 
 
-async function discoverTests(testController: vscode.TestController) : Promise<void> {
+async function discoverTests(
+    testController: vscode.TestController,
+) : Promise<void> {
     testController.items.replace([]);
     const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
     for (const workspaceFolder of workspaceFolders) {
@@ -179,30 +183,53 @@ async function discoverTests(testController: vscode.TestController) : Promise<vo
             workspaceFolder.uri
         );
         testController.items.add(workspaceTestItem);
-        const suite = await forgeListTests(workspaceFolder.uri);
-
-        for (const [fileName, contracts] of Object.entries(suite)) {
-            const fileTestItem = testController.createTestItem(
-                `${workspaceFolder.uri.toString()}/${fileName}`,
-                fileName,
-                vscode.Uri.joinPath(workspaceFolder.uri, fileName)
+        const files = await testFiles(workspaceFolder.uri);
+        for (const file of files) {
+            const fileItem = testController.createTestItem(
+                file.toString(),
+                vscode.workspace.asRelativePath(file),
+                file
             );
-            workspaceTestItem.children.add(fileTestItem);
-
-            for (const [contractName, tests] of Object.entries(contracts)) {
-                const contractTestItem = testController.createTestItem(
-                    `${fileTestItem.id}:${contractName}`,
-                    contractName
-                );
-                fileTestItem.children.add(contractTestItem);
-                for (const testName of tests) {
-                    const testItem = testController.createTestItem(
-                        `${contractTestItem.id}.${testName}`,
-                        testName
+            workspaceTestItem.children.add(fileItem);
+            const content = await vscode.workspace.fs.readFile(file);
+            const text = new TextDecoder().decode(content);
+            const ast = parser.parse(text, {loc: true});
+            parser.visit(ast, {
+                ContractDefinition: contract => {
+                    const uri = file.with({fragment: `L${contract.loc?.start.line}`})
+                    const contractTestItem = testController.createTestItem(
+                        uri.toString(),
+                        contract.name,
+                        uri
                     );
-                    contractTestItem.children.add(testItem);
+                    fileItem.children.add(contractTestItem);
+                    parser.visit(contract, {
+                        FunctionDefinition: func => {
+                            if (func.isConstructor || func.isFallback || func.isReceiveEther) {
+                                return;
+                            }
+                            if (func.visibility !== 'public' && func.visibility !== 'external') {
+                                return;
+                            }
+                            if (!func.name || !func.name.startsWith('test')) {
+                                return;
+                            } 
+                            const testItem = testController.createTestItem(
+                                file.with({fragment: `L${func.loc?.start.line}`}).toString(),
+                                func.name,
+                                file
+                            );
+                            if (func.loc) {
+                                testItem.range = new vscode.Range(
+                                    new vscode.Position(func.loc.start.line - 1, func.loc.start.column),
+                                    new vscode.Position(func.loc.start.line - 1, func.loc.start.column)
+                                );
+                            }
+                            contractTestItem.children.add(testItem);
+                        }
+                    });
                 }
-            }
+            });
         }
     }
 }

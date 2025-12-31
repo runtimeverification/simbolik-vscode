@@ -3,6 +3,53 @@ import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
 import { LcovRecord, parseLcov } from './lcov';
 
+/**
+ * List all source files (excludings libs/tests/scripts) of the given Foundry project
+ */
+export
+async function sourceFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
+  const config = await foundryConfig(root);
+  const srcDir = vscode.Uri.joinPath(root, config?.profile?.default?.src || 'src');
+  const files: vscode.Uri[] = [];
+  const visit = async (dir: vscode.Uri) => {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    for (const [name, type] of entries) {
+      const entryUri = vscode.Uri.joinPath(dir, name);
+      if (type === vscode.FileType.File && name.endsWith('.sol')) {
+        files.push(entryUri);
+      } else if (type === vscode.FileType.Directory) {
+        await visit(entryUri);
+      }
+    }
+  };
+  await visit(srcDir);
+  return files;
+}
+
+/**
+ * List all test files of the given Foundry project
+ */
+export
+async function testFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
+  const config = await foundryConfig(root);
+  const testDir = vscode.Uri.joinPath(root, config?.profile?.default?.test || 'test');
+  const files: vscode.Uri[] = [];
+  const visit = async (dir: vscode.Uri) => {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    for (const [name, type] of entries) {
+      const entryUri = vscode.Uri.joinPath(dir, name);
+      if (type === vscode.FileType.File && name.endsWith('.sol')) {
+        files.push(entryUri);
+      } else if (type === vscode.FileType.Directory) {
+        await visit(entryUri);
+      }
+    }
+  };
+  await visit(testDir);
+  return files;
+}
+
+
 export
 async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise<vscode.Task> {
   const forgePath = getConfigValue('forge-path', 'forge');
