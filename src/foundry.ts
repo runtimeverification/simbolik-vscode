@@ -308,7 +308,7 @@ async function forgeLintFile(file: vscode.Uri, collection: vscode.DiagnosticColl
           new vscode.Position(entry.spans[0].line_start - 1, entry.spans[0].column_start - 1),
           new vscode.Position(entry.spans[0].line_end - 1, entry.spans[0].column_end - 1)
         ),
-        entry.message,
+        entry.rendered ?? entry.message,
         entry.level === 'error' ? vscode.DiagnosticSeverity.Error :
         entry.level === 'warning' ? vscode.DiagnosticSeverity.Warning :
         vscode.DiagnosticSeverity.Information
