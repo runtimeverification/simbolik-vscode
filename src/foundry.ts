@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
+import { LcovRecord, parseLcov } from './lcov';
 
 export
 async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise<vscode.Task> {
@@ -179,4 +180,177 @@ function relativePath(base: vscode.Uri, absolute: vscode.Uri): vscode.Uri {
   }
   const relative = absolutePath.slice(basePath.length);
   return absolute.with({path: relative});
+}
+
+export
+type ForgeTestSuite = { [fileName: string]: { [contractName: string]: string[] } };
+
+/**
+ * List all Foundry tests in the given workspace folder.
+ */
+export
+async function forgeListTests(cwd: vscode.Uri): Promise<ForgeTestSuite> {
+  const forgePath = getConfigValue('forge-path', 'forge');
+  const output = await executeInTerminal(`${forgePath} test --list --json`, { cwd });
+  const result: ForgeTestSuite = JSON.parse(output);
+  return result;
+}
+
+export type ForgeTestSuiteReport = Record<string, ForgeTestReport>; // keyed by filename.sol
+
+export interface ForgeTestReport {
+    duration: string; // e.g. "9ms 823µs 544ns"
+    test_results: Record<string, ForgeTestCaseResult>; // keyed by filename.sol:ContractName
+    warnings: unknown[];
+}
+
+export interface ForgeTestCaseResult {
+    status: "Success" | "Failure" | string;
+    reason: string | null;
+    counterexample: unknown | null;
+    logs: unknown[];
+    decoded_logs: unknown[];
+    kind: ForgeTestKind;
+    traces: unknown[];
+    labeled_addresses: Record<string, unknown>;
+    duration: string;
+    breakpoints: Record<string, unknown>;
+    gas_snapshots: Record<string, unknown>;
+}
+
+export type ForgeTestKind =
+    | { Fuzz: ForgeFuzzKind }
+    | { Unit: ForgeUnitKind }
+    // allow forwards-compat for other kinds
+    | Record<string, unknown>;
+
+export interface ForgeFuzzKind {
+    first_case: ForgeFuzzFirstCase;
+    runs: number;
+    mean_gas: number;
+    median_gas: number;
+    failed_corpus_replays: number;
+}
+
+export interface ForgeFuzzFirstCase {
+    calldata: string; // hex string
+    gas: number;
+    stipend: number;
+}
+
+export interface ForgeUnitKind {
+    gas: number;
+}
+
+
+/**
+ * Run all Foundry tests in the given workspace folder.
+ */
+export
+async function forgeTest(cwd: vscode.Uri) : Promise<ForgeTestSuiteReport> {
+  const forgePath = getConfigValue('forge-path', 'forge');
+  const output = await executeInTerminal(`${forgePath} test --json`, { cwd });
+  const result: ForgeTestSuiteReport = JSON.parse(output);
+  return result;
+}
+
+/**
+ * Run a single Foundry test.
+ */
+export
+async function forgeTestSingle(fileName: string, contractName: string, testMethod: string) : Promise<ForgeTestSuiteReport> {
+  const forgePath = getConfigValue('forge-path', 'forge');
+  const output = await executeInTerminal(`${forgePath} test --json --match-path ${fileName} --match-contract ${contractName} --match-test ${testMethod}`);
+  const result: ForgeTestSuiteReport = JSON.parse(output);
+  return result;
+}
+
+/**
+ * Run Foundry coverage for a single test. 
+ */
+export
+async function forgeCoverageSingle(fileName: string, contractName: string, testMethod: string) : Promise<[ForgeTestSuiteReport, LcovRecord[]]> {
+  const forgePath = getConfigValue('forge-path', 'forge');
+  const output = await executeInTerminal(`${forgePath} coverage --json --match-path ${fileName} --match-contract ${contractName} --match-test ${testMethod}`);
+
+  // `forge coverage --json` outputs some logging info before and after the JSON object.
+  const firstBrace = output.indexOf('{');
+  const lastBrace = output.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error('Failed to parse forge coverage output: no JSON object found');
+  }
+  const jsonString = output.slice(firstBrace, lastBrace + 1);
+  const result: ForgeTestSuiteReport = JSON.parse(jsonString);
+
+  // The lcov report is not written to stdout, but to a file named "lcov.info" in the current working directory.
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]; // TODO: the workspace folder should be a function parameter
+  if (!workspaceFolder) {
+    throw new Error('No workspace folder is open; cannot locate lcov.info output file.');
+  }
+  const lcovUri = vscode.Uri.joinPath(workspaceFolder.uri, 'lcov.info');
+  const lcovContent = await vscode.workspace.fs.readFile(lcovUri);
+  const lcovText = new TextDecoder().decode(lcovContent);
+  const lcovRecords = parseLcov(lcovText);
+  return [result, lcovRecords];
+}
+
+// Why are we using the Terminal API here, instead of child_process or vscode.Task?
+// vscode.Task is not designed to capture command output.
+// child_process spawns a separate process that may not have the same environment as the integrated VSCode terminal.
+// The Terminal API allows us to run the command in the same environment as the user would in the integrated terminal.
+async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = {}): Promise<string> {
+  const terminal = vscode.window.createTerminal({ name: cmd, hideFromUser: true, ...options });
+  const done = new Promise<string>((resolve, reject) => {
+    const disposible = vscode.window.onDidChangeTerminalShellIntegration(async (e) => {
+      if (e.terminal !== terminal) {
+        return;
+      }    
+      disposible.dispose();
+      const execution = e.shellIntegration.executeCommand(`${cmd}`);
+      const outputStream = execution.read();
+      const didStop = vscode.window.onDidEndTerminalShellExecution(async (e) => {
+        if (e.execution !== execution) {
+          return;
+        }
+        didStop.dispose();
+        if (e.exitCode !== 0) {
+          reject(new Error(`${cmd} failed with exit code ${e.exitCode}`));
+          return;
+        }
+        const rawOutput = await streamToString(outputStream);
+        const filteredOutput = stripTerminalControlSequences(rawOutput);
+        resolve(filteredOutput);
+      });
+    });
+  });
+  done.finally(() => { terminal.dispose(); });
+  return done;
+}
+
+async function streamToString(stream: AsyncIterable<string>): Promise<string> {
+  let result = '';
+  for await (const chunk of stream) {
+    result += chunk;
+  }
+  return result;
+}
+
+function stripTerminalControlSequences(input: string): string {
+  // OSC: ESC ] ... BEL  OR  ESC ] ... ESC \
+  const osc = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+  // CSI: ESC [ ... (covers colors, cursor moves, erase, etc.)
+  const csi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+
+  // DCS: ESC P ... ESC \
+  const dcs = /\x1bP[^\x1b]*(?:\x1b\\)/g;
+
+  // Other single-char ESC sequences (less common, but cheap to remove)
+  const esc = /\x1b[@-Z\\-_]/g;
+
+  return input
+    .replace(osc, '')
+    .replace(dcs, '')
+    .replace(csi, '')
+    .replace(esc, '');
 }

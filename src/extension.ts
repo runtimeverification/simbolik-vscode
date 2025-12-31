@@ -5,6 +5,8 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
+import {forgeListTests} from './foundry';
+import { createTestController } from './TestAdapter';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -35,6 +37,26 @@ export function activate(context: vscode.ExtensionContext) {
     (contract, method) => startDebugging(contract, method),
   ));
   
+  context.subscriptions.push(vscode.commands.registerCommand(
+    'simbolik.listForgeTests',
+    async() => {
+      if (!vscode.workspace.workspaceFolders) {
+        vscode.window.showErrorMessage('No workspace folder is open');
+        return;
+      }
+      for (const folder of vscode.workspace.workspaceFolders) {
+        try {
+          const testSuite = await forgeListTests(folder.uri);
+        } catch (e) {
+          // Ignore errors
+        }
+      }
+    }
+  ));
+
+  const testController = createTestController();
+  context.subscriptions.push(testController);
+
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
     if (session.type === 'solidity') {
