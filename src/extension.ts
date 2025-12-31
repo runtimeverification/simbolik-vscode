@@ -5,7 +5,7 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import {forgeListTests} from './foundry';
+import {forgeLintFile, forgeListTests} from './foundry';
 import { createTestController } from './TestAdapter';
 
 const outputChannel = vscode.window.createOutputChannel(
@@ -56,6 +56,24 @@ export function activate(context: vscode.ExtensionContext) {
 
   const testController = createTestController();
   context.subscriptions.push(testController);
+
+  const diagnosticsCollection = vscode.languages.createDiagnosticCollection('solidity');
+  context.subscriptions.push(diagnosticsCollection);
+  vscode.workspace.onDidChangeTextDocument(async (event) => {
+    if (event.document.languageId === 'solidity') {
+      await forgeLintFile(event.document.uri, diagnosticsCollection);
+    }
+  });
+  vscode.workspace.onDidOpenTextDocument(async (document) => {
+    if (document.languageId === 'solidity') {
+      await forgeLintFile(document.uri, diagnosticsCollection);
+    }
+  });
+  vscode.workspace.textDocuments.forEach(async (document) => {
+    if (document.languageId === 'solidity') {
+      await forgeLintFile(document.uri, diagnosticsCollection);
+    }
+  });
 
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);

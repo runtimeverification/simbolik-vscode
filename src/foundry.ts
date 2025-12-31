@@ -294,6 +294,33 @@ async function forgeCoverageSingle(fileName: string, contractName: string, testM
   return [result, lcovRecords];
 }
 
+export
+async function forgeLintFile(file: vscode.Uri, collection: vscode.DiagnosticCollection): Promise<void> {
+  collection.delete(file);
+  const cwd = await foundryRoot(file);
+  const forgePath = getConfigValue('forge-path', 'forge');
+  const output = await executeInTerminal(`${forgePath} lint --json ${file.fsPath}`, { cwd });
+  const diagnistics = output.split('\n').map(line => {
+    try {
+      const entry : ForgeLintDiagnostic = JSON.parse(line);
+      const diagnostic = new vscode.Diagnostic(
+        new vscode.Range(
+          new vscode.Position(entry.spans[0].line_start - 1, entry.spans[0].column_start - 1),
+          new vscode.Position(entry.spans[0].line_end - 1, entry.spans[0].column_end - 1)
+        ),
+        entry.message,
+        entry.level === 'error' ? vscode.DiagnosticSeverity.Error :
+        entry.level === 'warning' ? vscode.DiagnosticSeverity.Warning :
+        vscode.DiagnosticSeverity.Information
+      );
+      return diagnostic;
+    } catch (e) {
+      return null;
+    }
+  }).filter((diag): diag is vscode.Diagnostic => diag !== null);
+  collection.set(file, diagnistics);
+}
+
 // Why are we using the Terminal API here, instead of child_process or vscode.Task?
 // vscode.Task is not designed to capture command output.
 // child_process spawns a separate process that may not have the same environment as the integrated VSCode terminal.
@@ -353,4 +380,50 @@ function stripTerminalControlSequences(input: string): string {
     .replace(dcs, '')
     .replace(csi, '')
     .replace(esc, '');
+}
+
+export interface ForgeLintDiagnostic {
+  $message_type: "diagnostic" | string;
+  message: string;
+  code: ForgeLintCode | null;
+  level: ForgeLintLevel | string;
+  spans: ForgeLintSpan[];
+  children: ForgeLintChild[];
+  rendered: string | null;
+}
+
+export interface ForgeLintCode {
+  code: string;
+  explanation: string | null;
+}
+
+export type ForgeLintLevel = "error" | "warning" | "note" | "help";
+
+export interface ForgeLintSpan {
+  file_name: string;
+  byte_start: number;
+  byte_end: number;
+  line_start: number;
+  line_end: number;
+  column_start: number;
+  column_end: number;
+  is_primary: boolean;
+  text: ForgeLintSpanText[];
+  label: string | null;
+  suggested_replacement: string | null;
+}
+
+export interface ForgeLintSpanText {
+  text: string;
+  highlight_start: number;
+  highlight_end: number;
+}
+
+export interface ForgeLintChild {
+  message: string;
+  code: ForgeLintCode | null;
+  level: ForgeLintLevel | string;
+  spans: ForgeLintSpan[];
+  children: ForgeLintChild[];
+  rendered: string | null;
 }
