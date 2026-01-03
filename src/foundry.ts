@@ -290,35 +290,49 @@ export interface ForgeUnitKind {
 }
 
 
+export type ForgeTestOptions = {
+    path?: string;
+    contract?: string;
+    test?: string;
+}
+
 /**
  * Run all Foundry tests in the given workspace folder.
  */
 export
-async function forgeTest(cwd: vscode.Uri) : Promise<ForgeTestSuiteReport> {
+async function forgeTest(cwd: vscode.Uri, options: ForgeTestOptions) : Promise<ForgeTestSuiteReport> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const output = await executeInTerminal(`${forgePath} test --json`, { cwd });
+  const args = [];
+  if (options.path) {
+    args.push(`--match-path ${options.path}`);
+  }
+  if (options.contract) {
+    args.push(`--match-contract ${options.contract}`);
+  }
+  if (options.test) {
+    args.push(`--match-test ${options.test}`);
+  }
+  const argsString = args.join(' ');
+  const output = await executeInTerminal(`${forgePath} test --json ${argsString}`, { cwd });
   const result: ForgeTestSuiteReport = JSON.parse(output);
   return result;
 }
 
-/**
- * Run a single Foundry test.
- */
 export
-async function forgeTestSingle(fileName: string, contractName: string, testMethod: string) : Promise<ForgeTestSuiteReport> {
+async function forgeCoverage(cwd: vscode.Uri, options: ForgeTestOptions) : Promise<[ForgeTestSuiteReport, LcovRecord[]]> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const output = await executeInTerminal(`${forgePath} test --json --match-path ${fileName} --match-contract ${contractName} --match-test ${testMethod}`);
-  const result: ForgeTestSuiteReport = JSON.parse(output);
-  return result;
-}
-
-/**
- * Run Foundry coverage for a single test. 
- */
-export
-async function forgeCoverageSingle(fileName: string, contractName: string, testMethod: string) : Promise<[ForgeTestSuiteReport, LcovRecord[]]> {
-  const forgePath = getConfigValue('forge-path', 'forge');
-  const output = await executeInTerminal(`${forgePath} coverage --json --match-path ${fileName} --match-contract ${contractName} --match-test ${testMethod}`);
+  const args = [];
+  if (options.path) {
+    args.push(`--match-path ${options.path}`);
+  }
+  if (options.contract) {
+    args.push(`--match-contract ${options.contract}`);
+  }
+  if (options.test) {
+    args.push(`--match-test ${options.test}`);
+  }
+  const argsString = args.join(' ');
+  const output = await executeInTerminal(`${forgePath} coverage --json ${argsString}`, { cwd });
 
   // `forge coverage --json` outputs some logging info before and after the JSON object.
   const firstBrace = output.indexOf('{');
@@ -330,11 +344,10 @@ async function forgeCoverageSingle(fileName: string, contractName: string, testM
   const result: ForgeTestSuiteReport = JSON.parse(jsonString);
 
   // The lcov report is not written to stdout, but to a file named "lcov.info" in the current working directory.
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]; // TODO: the workspace folder should be a function parameter
-  if (!workspaceFolder) {
+  if (!cwd) {
     throw new Error('No workspace folder is open; cannot locate lcov.info output file.');
   }
-  const lcovUri = vscode.Uri.joinPath(workspaceFolder.uri, 'lcov.info');
+  const lcovUri = vscode.Uri.joinPath(cwd, 'lcov.info');
   const lcovContent = await vscode.workspace.fs.readFile(lcovUri);
   const lcovText = new TextDecoder().decode(lcovContent);
   const lcovRecords = parseLcov(lcovText);
