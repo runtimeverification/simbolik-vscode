@@ -65,7 +65,7 @@ async function forgeBuild(file: vscode.Uri, force: boolean = false): Promise<str
   const forgePath = getConfigValue('forge-path', 'forge');
   const root = await foundryRoot(file);
   const compilationTarget = relativePath(root, file);
-  const args = ['build', compilationTarget.path.slice(1)];
+  const args = ['build', compilationTarget];
   const env: { [key: string]: string } = {
     'FOUNDRY_OPTIMIZER': 'false',
     'FOUNDRY_BUILD_INFO': 'true',
@@ -126,7 +126,7 @@ async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> 
   try {
     const cacheContent = await loadCacheFile(root);
     const relativeFilePath = relativePath(root, file);
-    const cacheEntry = cacheContent.files[relativeFilePath.path.slice(1)];
+    const cacheEntry = cacheContent.files[relativeFilePath];
     // Example entry:
     // "src/Counter.sol": {
     // 	...
@@ -142,23 +142,23 @@ async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> 
     // 	},
     // }
     if (!cacheEntry) {
-      throw new Error(`No cache entry found for file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(`No cache entry found for file: ${relativeFilePath}`);
     }
     const artifacts = cacheEntry.artifacts;
     if (!artifacts || typeof artifacts !== 'object' || Object.keys(artifacts).length === 0) {
-      throw new Error(`No artifacts found in cache entry for file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(`No artifacts found in cache entry for file: ${relativeFilePath}`);
     }
     const firstContract = Object.keys(artifacts)[0];
     if (!firstContract || !artifacts[firstContract]) {
-      throw new Error(`No contract found in artifacts for file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(`No contract found in artifacts for file: ${relativeFilePath}`);
     }
     const firstVersion = Object.keys(artifacts[firstContract])[0];
     if (!firstVersion || !artifacts[firstContract][firstVersion]) {
-      throw new Error(`No version found in contract '${firstContract}' for file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(`No version found in contract '${firstContract}' for file: ${relativeFilePath}`);
     }
     const defaultEntry = artifacts[firstContract][firstVersion].default;
     if (!defaultEntry || !defaultEntry.build_id) {
-      throw new Error(`No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(`No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath}`);
     }
     const buildId = defaultEntry.build_id;
     const buildInfoDir = await forgeBuildInfoDir(root);
@@ -294,17 +294,17 @@ async function loadCacheFile(root: vscode.Uri): Promise<any> {
  *
  * @param base The base URI to strip from.
  * @param absolute The absolute URI to convert.
- * @returns The relative URI.
+ * @returns The relative path as a string.
  * @throws An error if the absolute path does not start with the base path.
  */
-function relativePath(base: vscode.Uri, absolute: vscode.Uri): vscode.Uri {
+function relativePath(base: vscode.Uri, absolute: vscode.Uri): string {
   const basePath = base.path;
   const absolutePath = absolute.path;
   if (!absolutePath.startsWith(basePath)) {
     throw new Error(`Path ${absolutePath} does not start with base path ${basePath}`);
   }
   const relative = absolutePath.slice(basePath.length);
-  return absolute.with({path: relative});
+  return absolute.with({path: relative}).path.slice(1);
 }
 
 export

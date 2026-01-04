@@ -29,6 +29,7 @@ export async function createTestController() : Promise<vscode.TestController> {
                     continue;
                 }
                 startDebugging(
+                    file!,
                     contract,
                     method
                 );

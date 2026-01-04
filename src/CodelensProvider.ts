@@ -35,9 +35,8 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         const range: vscode.Range = this.locToRange(loc);
         const debugCommand = {
           title: '▷ Debug',
-          tooltip: 'Start symbolic debugging',
           command: 'simbolik.startDebugging',
-          arguments: [contract, f],
+          arguments: [document.uri, contract, f],
         };
         const debugLens = new vscode.CodeLens(range, debugCommand);
         codeLenses.push(debugLens);

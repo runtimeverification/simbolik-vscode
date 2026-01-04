@@ -5,7 +5,7 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import {forgeLintFile, forgeListTests} from './foundry';
+import {forgeLintFile } from './foundry';
 import { createTestController } from './TestAdapter';
 
 const outputChannel = vscode.window.createOutputChannel(
@@ -34,7 +34,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(vscode.commands.registerCommand(
     'simbolik.startDebugging',
-    (contract, method) => startDebugging(contract, method),
+    (file, contract, method) => startDebugging(file, contract, method),
   ));
   
   const testController = await createTestController();
