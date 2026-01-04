@@ -6,7 +6,7 @@ import {
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
-import { forgeBuildTask, foundryRoot, getBuildInfoFileFromCache } from './foundry';
+import { forgeBuild, foundryRoot, getArtifact, getBuildInfoFileFromCache } from './foundry';
 
 export
 type Credentials = {
@@ -53,34 +53,9 @@ export async function startDebugging(
       throw new Error('No workspace folder.');
     }
 
-    const parameters = method.parameters.flatMap((param: VariableDeclaration) => {
-      if (param.typeName === null) {
-        console.error(
-          `Missing TypeName for parameter ${param} in method ${method} in contract ${contract}`
-        );
-        return [];
-      }
-      const typeName: TypeName = param.typeName;
-      if (!('name' in typeName)) {
-        console.error(
-          `Missing name for TypeName for parameter ${param} in method ${method} in contract ${contract}`
-        );
-        return [];
-      }
-      if (typeof typeName.name !== 'string') {
-        console.error(
-          `Unexpected type for name of TypeName for parameter ${param} in method ${method} in contract ${contract}`
-        );
-        return [];
-      }
-      return [typeName.name];
-    });
-
     const file = activeTextEditor.document.uri.toString();
     const contractName = contract['name'];
-    const methodSignature = `${method['name']}(${parameters.join(',')})`;
     const showSourcemaps = getConfigValue('show-sourcemaps', false);
-    const debugConfigName = `${contractName}.${methodSignature}`;
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
     const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
     const autobuild = getConfigValue<'always'|'on-change'|'never'>('autobuild', 'on-change');
@@ -91,10 +66,8 @@ export async function startDebugging(
     // If autobuild is 'always', we always force a rebuild
     if (autobuild === 'always' || autobuild === 'on-change') {
       progress.report({ message: "Compiling" });
-      const build = await forgeBuildTask(activeTextEditor.document.uri, autobuild === 'always');
-      const buildExecution = await vscode.tasks.executeTask(build);
       try {
-        await completed(buildExecution);
+        await forgeBuild(activeTextEditor.document.uri, autobuild === 'always');
       } catch (e) {
         vscode.window.showErrorMessage('Failed to build project. Please check the terminal for build errors.');
         return;
@@ -113,8 +86,24 @@ export async function startDebugging(
       return;
     }
 
+    const contractArtifact = await getArtifact(activeTextEditor.document.uri, contractName);
+    const content = await vscode.workspace.fs.readFile(contractArtifact);
+    const textContent = new TextDecoder().decode(content);
+    const artifact = JSON.parse(textContent);
+    const methodSignature = Object.keys(artifact.methodIdentifiers ?? {}).find(sig => sig.startsWith(method['name'] + '('))!;
+    const abiParams = methodSignature.slice(method['name']!.length + 1, - 1);
+    if (abiParams !== '') {
+      // Prompt user for input parameters
+      const userInputs = await vscode.window.showInputBox({
+        prompt: `Enter input parameters for ${methodSignature}.`,
+        placeHolder: abiParams
+      });
+    }
+
+
     progress.report({ increment: 100 });
 
+    const debugConfigName = `${contractName}.${methodSignature}`;
     const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
     const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
     const debugConfig = createDebugConfig(
@@ -142,20 +131,6 @@ export async function startDebugging(
     debugConfig
   );
   return;
-}
-
-function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-      if ((e.execution as any)._id !== (tastkExecution as any)._id) return;
-      if (e.exitCode !== 0) {
-        reject();
-      } else {
-        resolve();
-      }
-      disposable.dispose();
-    });
-  });
 }
 
 function createDebugConfig(

@@ -5,11 +5,13 @@ import { LcovRecord, parseLcov } from './lcov';
 
 /**
  * List all source files (excludings libs/tests/scripts) of the given Foundry project
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns An array of URIs of source files.
  */
 export
 async function sourceFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
-  const config = await foundryConfig(root);
-  const srcDir = vscode.Uri.joinPath(root, config?.profile?.default?.src || 'src');
+  const srcDir = await forgeSrcDir(root);
   const files: vscode.Uri[] = [];
   const visit = async (dir: vscode.Uri) => {
     const entries = await vscode.workspace.fs.readDirectory(dir);
@@ -28,11 +30,13 @@ async function sourceFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
 
 /**
  * List all test files of the given Foundry project
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns An array of URIs of test files.
  */
 export
 async function testFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
-  const config = await foundryConfig(root);
-  const testDir = vscode.Uri.joinPath(root, config?.profile?.default?.test || 'test');
+  const testDir = await forgeTestDir(root);
   const files: vscode.Uri[] = [];
   const visit = async (dir: vscode.Uri) => {
     const entries = await vscode.workspace.fs.readDirectory(dir);
@@ -49,41 +53,39 @@ async function testFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
   return files;
 }
 
-
+/**
+ * Build the given source file using Foundry's `forge build` command.
+ * 
+ * @param file The source file to build.
+ * @param force Whether to force a rebuild, ignoring the cache.
+ * @returns The standard output of the `forge build` command.
+ */
 export
-async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise<vscode.Task> {
+async function forgeBuild(file: vscode.Uri, force: boolean = false): Promise<string> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
-  const projectRoot = await foundryRoot(file);
-  const compilationTarget = relativePath(projectRoot, file);
-  const task = new vscode.Task(
-    {
-      label: 'forge build',
-      type: 'shell',
-    },
-    vscode.TaskScope.Workspace,
-    'forge',
-    'simbolik',
-    new vscode.ShellExecution(forgePath, ['build', compilationTarget.fsPath.slice(1)], {
-      cwd,
-      env: {
-        'FOUNDRY_OPTIMIZER': 'false',
-        'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
-        'FOUNDRY_BYTECODE_HASH': 'ipfs',
-        'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_FORCE': force ? 'true' : 'false',
-        'FOUNDRY_CACHE': 'true',
-        'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
-      }
-    })
-  );
-  task.isBackground = true;
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
-  task.presentationOptions.clear = true;
-  return task;
+  const root = await foundryRoot(file);
+  const compilationTarget = relativePath(root, file);
+  const args = ['build', compilationTarget.path.slice(1)];
+  const env: { [key: string]: string } = {
+    'FOUNDRY_OPTIMIZER': 'false',
+    'FOUNDRY_BUILD_INFO': 'true',
+    'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
+    'FOUNDRY_BYTECODE_HASH': 'ipfs',
+    'FOUNDRY_CBOR_METADATA': 'true',
+    'FOUNDRY_FORCE': force ? 'true' : 'false',
+    'FOUNDRY_CACHE': 'true',
+    'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
+  };
+  const cmd = `${forgePath} ${args.join(' ')}`;
+  const result = await executeInTerminal(cmd, { cwd: root.path, env }, true);
+  return result;
 }
 
+/**
+ * Find the root directory of the given Foundry project by locating the directory containing the `foundry.toml` file.
+ * @param file A file or directory within the Foundry project.
+ * @returns The URI of the root directory of the Foundry project.
+ */
 export
 async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
   // Find the root of the project, which is the directory containing the foundry.toml file
@@ -114,6 +116,9 @@ async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
 
 /**
  * Get the build-info file associated with a given source file from the Foundry compiler cache.
+ * @param file The source file URI.
+ * @returns The URI of the build-info file.
+ * @throws An error if the build-info file cannot be found in the cache.
  */
 export
 async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> {
@@ -164,9 +169,30 @@ async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> 
   }
 }
 
+/**
+ * Get the artifact file for a given contract.
+ * 
+ * @param file The source file URI.
+ * @param contractName The name of the contract.
+ * @returns The URI of the artifact file.
+ */
+export
+async function getArtifact(file: vscode.Uri, contractName: string) : Promise<vscode.Uri> {
+  const root = await foundryRoot(file);
+  const outDir = await forgeOutDir(root);
+  const fileName = file.path.split('/').pop();
+  return vscode.Uri.joinPath(outDir, fileName!, contractName + '.json');
+}
+
 export
 type FoundryConfig = { 'profile'?: { [profile: string]: { [key: string]: string } } };
 
+/**
+ * Parse the Foundry configuration file (`foundry.toml`) located at the root of the project.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns The parsed Foundry configuration.
+ */
 export
 async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   const configPath = vscode.Uri.joinPath(root, 'foundry.toml');
@@ -175,6 +201,58 @@ async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   return parseToml(text, { integersAsBigInt: true });
 }
 
+/**
+ * Get the output directory for build artifacts as specified in the Foundry configuration.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns The URI of the output directory.
+ */
+export
+async function forgeOutDir(root: vscode.Uri): Promise<vscode.Uri> {
+  const config = await foundryConfig(root);
+  const defaultProfile = config?.profile?.default ?? {};
+  const outputDir = defaultProfile?.out || 'out';
+  const outDir = vscode.Uri.joinPath(root, outputDir)
+  return outDir;
+}
+
+/**
+ * Get the source directory as specified in the Foundry configuration.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns The URI of the source directory.
+ */
+export
+async function forgeSrcDir(root: vscode.Uri): Promise<vscode.Uri> {
+  const config = await foundryConfig(root);
+  const defaultProfile = config?.profile?.default ?? {};
+  const srcDir = defaultProfile?.src || 'src';
+  const sourceDir = vscode.Uri.joinPath(root, srcDir)
+  return sourceDir;
+}
+
+/**
+ * Get the test directory as specified in the Foundry configuration.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns The URI of the test directory.
+ */
+export
+async function forgeTestDir(root: vscode.Uri): Promise<vscode.Uri> {
+  const config = await foundryConfig(root);
+  const defaultProfile = config?.profile?.default ?? {};
+  const testDir = defaultProfile?.test || 'test';
+  const testsDir = vscode.Uri.joinPath(root, testDir)
+  return testsDir;
+}
+
+/**
+ * Get the build-info directory as specified in the Foundry configuration.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @returns The URI of the build-info directory.
+ */
+export
 async function forgeBuildInfoDir(root: vscode.Uri): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
   const defaultProfile = config?.profile?.default ?? {};
@@ -185,10 +263,10 @@ async function forgeBuildInfoDir(root: vscode.Uri): Promise<vscode.Uri> {
 }
 
 /**
- * Determine the path to the Solidity compiler cache file used by Foundry.
+ * Get the path to the Foundry Solidity compiler cache file.
  *
  * @param root The root URI of the Foundry project.
- * @returns A promise that resolves to the URI of the compiler cache file.
+ * @returns The URI of the cache file.
  */
 async function getCacheFile(root: vscode.Uri): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
@@ -234,11 +312,13 @@ type ForgeTestSuite = { [fileName: string]: { [contractName: string]: string[] }
 
 /**
  * List all Foundry tests in the given workspace folder.
+ * 
+ * @param root The root URI of the Foundry project.
  */
 export
-async function forgeListTests(cwd: vscode.Uri): Promise<ForgeTestSuite> {
+async function forgeListTests(root: vscode.Uri): Promise<ForgeTestSuite> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const output = await executeInTerminal(`${forgePath} test --list --json`, { cwd });
+  const output = await executeInTerminal(`${forgePath} test --list --json`, { cwd: root });
   const result: ForgeTestSuite = JSON.parse(output);
   return result;
 }
@@ -298,9 +378,13 @@ export type ForgeTestOptions = {
 
 /**
  * Run all Foundry tests in the given workspace folder.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @param options Options to filter which tests to run.
+ * @returns The test suite report.
  */
 export
-async function forgeTest(cwd: vscode.Uri, options: ForgeTestOptions) : Promise<ForgeTestSuiteReport> {
+async function forgeTest(root: vscode.Uri, options: ForgeTestOptions) : Promise<ForgeTestSuiteReport> {
   const forgePath = getConfigValue('forge-path', 'forge');
   const args = [];
   if (options.path) {
@@ -313,13 +397,20 @@ async function forgeTest(cwd: vscode.Uri, options: ForgeTestOptions) : Promise<F
     args.push(`--match-test ${options.test}`);
   }
   const argsString = args.join(' ');
-  const output = await executeInTerminal(`${forgePath} test --json ${argsString}`, { cwd });
+  const output = await executeInTerminal(`${forgePath} test --json ${argsString}`, { cwd: root });
   const result: ForgeTestSuiteReport = JSON.parse(output);
   return result;
 }
 
+/**
+ * Run all Foundry tests with coverage in the given workspace folder.
+ * 
+ * @param root The root URI of the Foundry project.
+ * @param options Options to filter which tests to run.
+ * @returns A tuple containing the test suite report and the lcov records.
+ */
 export
-async function forgeCoverage(cwd: vscode.Uri, options: ForgeTestOptions) : Promise<[ForgeTestSuiteReport, LcovRecord[]]> {
+async function forgeCoverage(root: vscode.Uri, options: ForgeTestOptions) : Promise<[ForgeTestSuiteReport, LcovRecord[]]> {
   const forgePath = getConfigValue('forge-path', 'forge');
   const args = [];
   if (options.path) {
@@ -332,7 +423,7 @@ async function forgeCoverage(cwd: vscode.Uri, options: ForgeTestOptions) : Promi
     args.push(`--match-test ${options.test}`);
   }
   const argsString = args.join(' ');
-  const output = await executeInTerminal(`${forgePath} coverage --json ${argsString}`, { cwd });
+  const output = await executeInTerminal(`${forgePath} coverage --json ${argsString}`, { cwd: root });
 
   // `forge coverage --json` outputs some logging info before and after the JSON object.
   const firstBrace = output.indexOf('{');
@@ -344,16 +435,22 @@ async function forgeCoverage(cwd: vscode.Uri, options: ForgeTestOptions) : Promi
   const result: ForgeTestSuiteReport = JSON.parse(jsonString);
 
   // The lcov report is not written to stdout, but to a file named "lcov.info" in the current working directory.
-  if (!cwd) {
+  if (!root) {
     throw new Error('No workspace folder is open; cannot locate lcov.info output file.');
   }
-  const lcovUri = vscode.Uri.joinPath(cwd, 'lcov.info');
+  const lcovUri = vscode.Uri.joinPath(root, 'lcov.info');
   const lcovContent = await vscode.workspace.fs.readFile(lcovUri);
   const lcovText = new TextDecoder().decode(lcovContent);
   const lcovRecords = parseLcov(lcovText);
   return [result, lcovRecords];
 }
 
+/**
+ * Lint the given source file using Foundry's `forge lint` command and populate the given diagnostic collection.
+ * 
+ * @param file The URI of the source file to lint.
+ * @param collection The diagnostic collection to populate with linting results.
+ */
 export
 async function forgeLintFile(file: vscode.Uri, collection: vscode.DiagnosticCollection): Promise<void> {
   collection.delete(file);
@@ -381,39 +478,84 @@ async function forgeLintFile(file: vscode.Uri, collection: vscode.DiagnosticColl
   collection.set(file, diagnistics);
 }
 
-// Why are we using the Terminal API here, instead of child_process or vscode.Task?
-// vscode.Task is not designed to capture command output.
-// child_process spawns a separate process that may not have the same environment as the integrated VSCode terminal.
-// The Terminal API allows us to run the command in the same environment as the user would in the integrated terminal.
-async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = {}): Promise<string> {
-  const terminal = vscode.window.createTerminal({ name: cmd, hideFromUser: true, ...options });
-  const done = new Promise<string>((resolve, reject) => {
-    const disposible = vscode.window.onDidChangeTerminalShellIntegration(async (e) => {
+/**
+ * Run a command in a VSCode terminal and capture its output.
+ * 
+ * @param cmd The command to execute.
+ * @param options Terminal options such as cwd and env.
+ * @param revealOnError Whether to reveal the terminal if the command fails.
+ * @returns The standard output of the command (with terminal control sequences stripped).
+ * 
+ * @dev Why are we using the Terminal API here, instead of child_process or vscode.Task?
+ * vscode.Task is not designed to capture command output.
+ * child_process spawns a separate process that may not have the same environment as the integrated VSCode terminal.
+ * The Terminal API allows us to run the command in the same environment as the user would in the integrated terminal.
+ */
+async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = {}, revealOnError: boolean = false): Promise<string> {
+  const terminal = await createTerminal({ name: options.name ?? cmd, hideFromUser: true, ...options });
+  const done = await executeCommand(cmd, terminal);
+  const outputStream = done.execution.read();
+  if (done.exitCode !== 0) {
+    if (revealOnError) {
+      terminal.show();
+    } else {
+      terminal.dispose();
+    }
+    throw new Error(`${cmd} failed with exit code ${done.exitCode}`);
+  }
+  const rawOutput = await streamToString(outputStream);
+  const filteredOutput = stripTerminalControlSequences(rawOutput);
+  terminal.dispose();
+  return filteredOutput;
+}
+
+/**
+ * Create a VSCode terminal and wait for shell integration to be ready.
+ * 
+ * @param options Terminal options.
+ * @returns A promise that resolves to the created terminal once shell integration is ready.
+ */
+function createTerminal(options: vscode.TerminalOptions = {}): Promise<vscode.Terminal> {
+  const terminal = vscode.window.createTerminal(options);
+  const done = new Promise<vscode.Terminal>((resolve, reject) => {
+    const disposible = vscode.window.onDidChangeTerminalShellIntegration((e) => {
       if (e.terminal !== terminal) {
         return;
-      }    
+      }
       disposible.dispose();
-      const execution = e.shellIntegration.executeCommand(`${cmd}`);
-      const outputStream = execution.read();
-      const didStop = vscode.window.onDidEndTerminalShellExecution(async (e) => {
-        if (e.execution !== execution) {
-          return;
-        }
-        didStop.dispose();
-        if (e.exitCode !== 0) {
-          reject(new Error(`${cmd} failed with exit code ${e.exitCode}`));
-          return;
-        }
-        const rawOutput = await streamToString(outputStream);
-        const filteredOutput = stripTerminalControlSequences(rawOutput);
-        resolve(filteredOutput);
-      });
+      resolve(terminal);
     });
   });
-  done.finally(() => { terminal.dispose(); });
   return done;
 }
 
+/**
+ * Execute a command in a given VSCode terminal and wait for it to finish.
+ * 
+ * @param cmd The command to execute.
+ * @param terminal The terminal in which to execute the command.
+ * @returns A promise that resolves to the terminal shell execution end event.
+ */
+function executeCommand(cmd: string, terminal: vscode.Terminal): Promise<vscode.TerminalShellExecutionEndEvent> {
+  const done = new Promise<vscode.TerminalShellExecutionEndEvent>((resolve, reject) => {
+    const execution = terminal.shellIntegration!.executeCommand(cmd);
+    const didStop = vscode.window.onDidEndTerminalShellExecution(async (e) => {
+      if (e.execution !== execution) {
+        return;
+      }
+      didStop.dispose();
+      resolve(e);
+    });
+  });
+  return done;
+}
+
+/**
+ * Convert an async iterable stream of strings into a single concatenated string.
+ * 
+ * @param stream The async iterable stream of strings to convert.
+ * @returns A promise that resolves to the concatenated string.
+ */
 async function streamToString(stream: AsyncIterable<string>): Promise<string> {
   let result = '';
   for await (const chunk of stream) {
@@ -422,6 +564,12 @@ async function streamToString(stream: AsyncIterable<string>): Promise<string> {
   return result;
 }
 
+/**
+ * Remove terminal control sequences from a string.
+ * 
+ * @param input The string from which to remove terminal control sequences.
+ * @returns The input string with terminal control sequences removed.
+ */
 function stripTerminalControlSequences(input: string): string {
   // OSC: ESC ] ... BEL  OR  ESC ] ... ESC \
   const osc = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
