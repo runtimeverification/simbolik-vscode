@@ -30,14 +30,16 @@ async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = 
   if (done.exitCode !== 0) {
     if (revealOnError) {
       terminal.show();
-    } else {
+    } else if (options.hideFromUser) {
       terminal.dispose();
     }
     throw new Error(`${cmd} failed with exit code ${done.exitCode}`);
   }
   const rawOutput = await streamToString(outputStream);
   const filteredOutput = stripTerminalControlSequences(rawOutput);
-  terminal.dispose();
+  if (options.hideFromUser) {
+    terminal.dispose();
+  }
   return filteredOutput;
 }
 
