@@ -51,7 +51,7 @@ export async function startDebugging(
     let credentials: Credentials;
     let buildInfoFile: vscode.Uri;
     let methodSignature: string;
-    let payload: string;
+    let payload: Uint8Array<ArrayBufferLike>;
     try {
       credentials = await getCredentials();
       progress.report({ message: "Compiling" });
@@ -80,6 +80,7 @@ export async function startDebugging(
       file: file.toString(),
       contractName: contractName,
       methodSignature: methodSignature,
+      payload: uint8ArrayToHex(payload),
       stopAtFirstOpcode: false,
       showSourcemaps: showSourcemaps,
       jsonRpcUrl: jsonRpcUrl,
@@ -153,21 +154,21 @@ async function getMethodSignature(file: vscode.Uri, contract: ContractDefinition
   return methodSignature;
 }
 
-async function getUserInput(methodSignature: string): Promise<string> {
+async function getUserInput(methodSignature: string): Promise<Uint8Array<ArrayBufferLike>> {
   // Extract parameter types from method signature
   const abiParams = methodSignature.slice(methodSignature.indexOf('('));
   if (abiParams === '()') {
-    return '';
+    return new Uint8Array();
   }
   // Prompt user for input parameters
+  let encoded: Uint8Array<ArrayBufferLike> | undefined;
   let userInput = await vscode.window.showInputBox({
     prompt: `Enter input parameters for ${methodSignature}.`,
     placeHolder: abiParams.slice(1, -1),
     validateInput: (value) => {
       try {
         const parsed = parse(value);
-        // const types = getTupleElements(abiParams);
-        const encoded = tuple.encode({
+        encoded = tuple.encode({
           type: abiParams,
           value: parsed,
           buffer: new Uint8Array(),
@@ -183,15 +184,15 @@ async function getUserInput(methodSignature: string): Promise<string> {
       return undefined;
     }
   });
-  if (userInput === undefined) {
+  if (userInput === undefined || !encoded) {
     throw new Error('Debugging cancelled: input parameters required.');
   }
-  return userInput;
+  return encoded;
 }
 
-type InternalExpression = BigInt | string | boolean | InternalExpression[];
+type Param = BigInt | string | boolean | Param[];
 
-function parse(input: string) : InternalExpression[] {
+function parse(input: string) : Param[] {
   const parsed = parser.parse(`
     contract Dummy {
       function dummy() {
@@ -204,14 +205,14 @@ function parse(input: string) : InternalExpression[] {
   const stmt = method.body!.statements[0]! as ExpressionStatement;
   const call = stmt.expression! as FunctionCall;
   const args = call.arguments;
-  const result = args.map(arg => toInternalExpr(arg as Expression));
+  const result = args.map(arg => toParam(arg as Expression));
   return result;
 }
 
-function toInternalExpr(expr: Expression) : InternalExpression {
+function toParam(expr: Expression) : Param {
   switch (expr.type) {
     case 'TupleExpression':
-      return expr.components.map(e => toInternalExpr(e as Expression));
+      return expr.components.map(e => toParam(e as Expression));
     case 'NumberLiteral':
       if (expr.subdenomination) {
         const base = BigInt(expr.number);
@@ -254,3 +255,9 @@ const denominationMap: { [key: string]: bigint } = {
   'gether':       1000000000000000000000000000n,
   'tether':       1000000000000000000000000000000n
 };
+
+function uint8ArrayToHex(bytes: Uint8Array<ArrayBufferLike>): string {
+  return '0x' + Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
