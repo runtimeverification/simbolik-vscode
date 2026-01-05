@@ -19,22 +19,22 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, your extension "simbolik" is now active!');
 
   const codelensProvider = new CodelensProvider();
-  context.subscriptions.push(vscode.languages.registerCodeLensProvider(
-    'solidity',
-    codelensProvider
-  ));
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider('solidity', codelensProvider)
+  );
 
   const factory = new SolidityDebugAdapterDescriptorFactory();
-  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
-    'solidity',
-    factory
-  ));
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory)
+  );
 
-  context.subscriptions.push(vscode.commands.registerCommand(
-    'simbolik.startDebugging',
-    (contract, method) => startDebugging(contract, method),
-  ));
-  
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'simbolik.startDebugging',
+      (contract, method) => startDebugging(contract, method)
+    )
+  );
+
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
     if (session.type === 'solidity') {
@@ -62,13 +62,11 @@ export function activate(context: vscode.ExtensionContext) {
         );
       }
       if (action === 'Learn More') {
-        vscode.env.openExternal(
-          vscode.Uri.parse('https://www.simbolik.dev')
-        );
+        vscode.env.openExternal(vscode.Uri.parse('https://www.simbolik.dev'));
       }
     }
     if (event.event === 'api-key-sessions-limit-exceeded') {
-      const action = await vscode.window.showErrorMessage(
+      await vscode.window.showErrorMessage(
         'Too many debugging sessions running in parallel'
       );
     }

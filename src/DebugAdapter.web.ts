@@ -4,7 +4,7 @@ import {getConfigValue} from './utils';
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
 
-function getWssUrl() : string {
+function getWssUrl(): string {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder || !workspaceFolder.uri.query) {
     return getConfigValue('server', 'wss://code.simbolik.dev');
@@ -15,10 +15,11 @@ function getWssUrl() : string {
 }
 
 export class SolidityDebugAdapterDescriptorFactory
-implements vscode.DebugAdapterDescriptorFactory
+  implements vscode.DebugAdapterDescriptorFactory
 {
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     return new Promise((resolve, reject) => {
@@ -28,47 +29,55 @@ implements vscode.DebugAdapterDescriptorFactory
       const encodedToken = encodeURIComponent(credentials.token);
       const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
       const websocket = new WebSocket(url);
-      const websocketAdapter = new WebsocketDebugAdapter(websocket, session.configuration);
-      const implementation = new vscode.DebugAdapterInlineImplementation(websocketAdapter);
+      const websocketAdapter = new WebsocketDebugAdapter(
+        websocket,
+        session.configuration
+      );
+      const implementation = new vscode.DebugAdapterInlineImplementation(
+        websocketAdapter
+      );
       websocket.onopen = async () => {
         // Create progress bar
-        vscode.window.withProgress({
-          location: vscode.ProgressLocation.Notification,
-          title: 'Sending compilation data to the debugger…',
-          cancellable: true
-        }, async (progress, token) => {
-          // Before the DAP communication starts we upload the build_info files
-          // to the server. This is needed for the server to be able to
-          // resolve the paths to the source files.
-          const buildInfoFiles = session.configuration.buildInfoFiles ?? [];
+        vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Sending compilation data to the debugger…',
+            cancellable: true,
+          },
+          async (progress, token) => {
+            // Before the DAP communication starts we upload the build_info files
+            // to the server. This is needed for the server to be able to
+            // resolve the paths to the source files.
+            const buildInfoFiles = session.configuration.buildInfoFiles ?? [];
 
-          token.onCancellationRequested(() => {
-            websocket.close();
-            reject(new Error('Session cancelled'));
-          });
+            token.onCancellationRequested(() => {
+              websocket.close();
+              reject(new Error('Session cancelled'));
+            });
 
-          progress.report({ increment: 0 });
-          // Get total file size for progress bar
-          let totalFileSize = 0;
-          for (const buildInfoFile of buildInfoFiles) {
-            const uri = vscode.Uri.from(buildInfoFile);
-            const stats = await vscode.workspace.fs.stat(uri);
-            totalFileSize += stats.size;
-          }
-
-          for (const buildInfoFile of buildInfoFiles) {
-            const uploadProgress = uploadFile(websocket, buildInfoFile);
-            let totalTransferred = 0;
-            for await (const bytesTransferred of uploadProgress) {
-              const percentage = (bytesTransferred / totalFileSize) * 100;
-              const increment = percentage - totalTransferred;
-              totalTransferred = percentage;
-              progress.report({ increment });
+            progress.report({increment: 0});
+            // Get total file size for progress bar
+            let totalFileSize = 0;
+            for (const buildInfoFile of buildInfoFiles) {
+              const uri = vscode.Uri.from(buildInfoFile);
+              const stats = await vscode.workspace.fs.stat(uri);
+              totalFileSize += stats.size;
             }
+
+            for (const buildInfoFile of buildInfoFiles) {
+              const uploadProgress = uploadFile(websocket, buildInfoFile);
+              let totalTransferred = 0;
+              for await (const bytesTransferred of uploadProgress) {
+                const percentage = (bytesTransferred / totalFileSize) * 100;
+                const increment = percentage - totalTransferred;
+                totalTransferred = percentage;
+                progress.report({increment});
+              }
+            }
+            websocket.send(JSON.stringify({command: 'simbolik:finish'}));
+            resolve(implementation);
           }
-          websocket.send(JSON.stringify({ command: 'simbolik:finish' }));
-          resolve(implementation);
-        });
+        );
       };
       websocket.onerror = () => {
         if (websocket.readyState === WebSocket.OPEN) {
@@ -93,8 +102,11 @@ implements vscode.DebugAdapterDescriptorFactory
   }
 }
 
-async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerator<number, void, void> {
-  websocket.send(JSON.stringify({ command: 'simbolik:upload:start' }));
+async function* uploadFile(
+  websocket: WebSocket,
+  file: vscode.Uri
+): AsyncGenerator<number, void, void> {
+  websocket.send(JSON.stringify({command: 'simbolik:upload:start'}));
   const contents = await vscode.workspace.fs.readFile(file);
   const fileSize = contents.length;
   const chunkSize = 10 * 1024 * 1024; // 10MB
@@ -103,8 +115,8 @@ async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerat
     const chunk = contents.slice(i, i + chunkSize);
     bytesTransferred += chunk.length;
     // Wait until the buffer is drained before sending the next chunk
-    await new Promise((resolve) => {
-      let t = setTimeout(function check () {
+    await new Promise(resolve => {
+      let t = setTimeout(function check() {
         if (websocket.bufferedAmount === 0) {
           clearTimeout(t);
           resolve(true);
@@ -116,86 +128,97 @@ async function* uploadFile(websocket: WebSocket, file: vscode.Uri): AsyncGenerat
     websocket.send(chunk);
     yield bytesTransferred;
   }
-  websocket.send(JSON.stringify({ command: 'simbolik:upload:finish' }));
+  websocket.send(JSON.stringify({command: 'simbolik:upload:finish'}));
 }
 
 class WebsocketDebugAdapter implements vscode.DebugAdapter {
   _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
   onDidSendMessage = this._onDidSendMessage.event;
-  
-  constructor(private websocket: WebSocket, private configuration: vscode.DebugConfiguration) {
+
+  constructor(
+    private websocket: WebSocket,
+    private configuration: vscode.DebugConfiguration
+  ) {
     websocket.onmessage = (message: MessageEvent) => {
       const data = JSON.parse(message.data);
       const dataWithAbsolutePaths = this.prependPaths(data);
-      this._onDidSendMessage.fire(dataWithAbsolutePaths);    
+      this._onDidSendMessage.fire(
+        dataWithAbsolutePaths as vscode.DebugProtocolMessage
+      );
     };
   }
-  
+
   handleMessage(message: vscode.DebugProtocolMessage): void {
     const messageWithRelativePaths = this.trimPaths(message);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
-  
+
   dispose() {
     this.websocket.close();
   }
-  
-  foundryRoot() : vscode.Uri {
+
+  foundryRoot(): vscode.Uri {
     if (!this.configuration['clientMount']) {
       return vscode.Uri.parse('tmp:///');
     }
     const uri = vscode.Uri.from(this.configuration['clientMount']);
     return uri;
   }
-  
+
   /**
-  * Recursively walk over all object properties and for each property
-  * named `path` and type `string`, remove the foundry root from the path.
-  * @param message
-  */
-  trimPaths(message: {[key: string]: any} | any[] ) : {[key: string]: any} | any[] {
+   * Recursively walk over all object properties and for each property
+   * named `path` and type `string`, remove the foundry root from the path.
+   * @param message
+   */
+  trimPaths(message: unknown): unknown {
     if (Array.isArray(message)) {
-      return message.map((item) => this.trimPaths(item));
-    } else if (message instanceof Object) {
-      const result = Object.assign({}, message);
-      for (const key in message) {
-        if (['path', 'symbolFilePath'].includes(key) && typeof message[key] === 'string') {
-          const uri = vscode.Uri.parse(message[key]);
+      return message.map(item => this.trimPaths(item));
+    } else if (message instanceof Object && message !== null) {
+      const result = Object.assign({}, message) as Record<string, unknown>;
+      const msg = message as Record<string, unknown>;
+      for (const key in msg) {
+        if (
+          ['path', 'symbolFilePath'].includes(key) &&
+          typeof msg[key] === 'string'
+        ) {
+          const uri = vscode.Uri.parse(msg[key] as string);
           result[key] = relativeTo(uri, this.foundryRoot());
-        } else if (key == 'file' && typeof message[key] === 'string') {
-          const uri = vscode.Uri.parse(message[key]);
+        } else if (key === 'file' && typeof msg[key] === 'string') {
+          const uri = vscode.Uri.parse(msg[key] as string);
           result[key] = relativeTo(uri, this.foundryRoot());
-        } else if (typeof message[key] === 'object') {
-          result[key] = this.trimPaths(message[key]);
+        } else if (typeof msg[key] === 'object') {
+          result[key] = this.trimPaths(msg[key]);
         }
       }
       return result;
     }
     return message;
   }
-  
+
   /**
-  * Recursively walk over all object properties and for each property
-  * named `path` and type `string`, prepend the foundry root to the path.
-  * @param message
-  */
-  prependPaths(message: {[key: string]: any} | any[]) : {[key: string]: any} | any[] {
+   * Recursively walk over all object properties and for each property
+   * named `path` and type `string`, prepend the foundry root to the path.
+   * @param message
+   */
+  prependPaths(message: unknown): unknown {
     if (Array.isArray(message)) {
-      return message.map((item) => this.prependPaths(item));
-    } else if (message instanceof Object) {
+      return message.map(item => this.prependPaths(item));
+    } else if (message instanceof Object && message !== null) {
       const foundryRoot = this.foundryRoot();
       let prefix = foundryRoot.toString();
       if (prefix === 'tmp:/') {
         prefix = 'tmp://';
       }
-      const result = Object.assign({}, message);
-      for (const key in message) {
-        if (['path', 'symbolFilePath', 'file'].includes(key) && typeof message[key] === 'string') {
-          result[key] = `${prefix}/${message[key]}`;
-        } else if (key == 'file' && typeof message[key] === 'string') {
-          result[key] = `${prefix}/${message[key]}`;
-        } else if (typeof message[key] === 'object') {
-          result[key] = this.prependPaths(message[key]);
+      const result = Object.assign({}, message) as Record<string, unknown>;
+      const msg = message as Record<string, unknown>;
+      for (const key in msg) {
+        if (
+          ['path', 'symbolFilePath', 'file'].includes(key) &&
+          typeof msg[key] === 'string'
+        ) {
+          result[key] = `${prefix}/${msg[key]}`;
+        } else if (typeof msg[key] === 'object') {
+          result[key] = this.prependPaths(msg[key]);
         }
       }
       return result;

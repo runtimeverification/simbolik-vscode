@@ -13,7 +13,8 @@
   "description": "Advanced Solidity and EVM Debugger",
   "version": "12.0.0",
   "engines": {
-    "vscode": "^1.79.0"
+    "vscode": "^1.79.0",
+    "node": ">=16.0.0"
   },
   "icon": "images/simbolik-icon-light.png",
   "categories": [
@@ -109,7 +110,10 @@
         },
         "simbolik.rpc-node-type": {
           "type": "string",
-          "enum": ["anvil", "kontrol-node"],
+          "enum": [
+            "anvil",
+            "kontrol-node"
+          ],
           "default": "anvil",
           "description": "The type of the JSON-RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta.",
           "order": 11
@@ -168,7 +172,10 @@
               },
               "rpcNodeType": {
                 "type": "string",
-                "enum": ["anvil", "kontrol-node"],
+                "enum": [
+                  "anvil",
+                  "kontrol-node"
+                ],
                 "description": "The type of the RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta."
               }
             }
@@ -250,7 +257,8 @@
     "posttest": "npm run lint",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
-    "version:major": "npm version major --no-git-tag-version"
+    "version:major": "npm version major --no-git-tag-version",
+    "prepare": "husky || true"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
@@ -264,6 +272,8 @@
     "eslint": "^8.41.0",
     "glob": "^8.1.0",
     "gts": "^5.3.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "mocha": "^10.2.0",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
@@ -277,6 +287,16 @@
     "smol-toml": "^1.2.0",
     "vscode-uri": "^3.0.8",
     "ws": "^8.18.1"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "src/**/*.{ts,js}": [
+      "gts fix"
+    ]
   },
   "extensionDependencies": [
     "runtimeverification.kaas-vscode"

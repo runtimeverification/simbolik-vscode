@@ -1,11 +1,15 @@
+import {parse as parseToml} from 'smol-toml';
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
-import {parse as parseToml} from 'smol-toml';
 
-export
-async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise<vscode.Task> {
+export async function forgeBuildTask(
+  file: vscode.Uri,
+  force = false
+): Promise<vscode.Task> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const cwd = file.with({path: file.path.split('/').slice(0, -1).join('/')}).fsPath;
+  const cwd = file.with({
+    path: file.path.split('/').slice(0, -1).join('/'),
+  }).fsPath;
   const projectRoot = await foundryRoot(file);
   const compilationTarget = relativePath(projectRoot, file);
   const task = new vscode.Task(
@@ -16,19 +20,24 @@ async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise
     vscode.TaskScope.Workspace,
     'forge',
     'simbolik',
-    new vscode.ShellExecution(forgePath, ['build', compilationTarget.fsPath.slice(1)], {
-      cwd,
-      env: {
-        'FOUNDRY_OPTIMIZER': 'false',
-        'FOUNDRY_BUILD_INFO': 'true',
-        'FOUNDRY_EXTRA_OUTPUT': '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
-        'FOUNDRY_BYTECODE_HASH': 'ipfs',
-        'FOUNDRY_CBOR_METADATA': 'true',
-        'FOUNDRY_FORCE': force ? 'true' : 'false',
-        'FOUNDRY_CACHE': 'true',
-        'FOUNDRY_USE_LITERAL_CONTENT': 'false' // Literal content blows up the size of the build-info
+    new vscode.ShellExecution(
+      forgePath,
+      ['build', compilationTarget.fsPath.slice(1)],
+      {
+        cwd,
+        env: {
+          FOUNDRY_OPTIMIZER: 'false',
+          FOUNDRY_BUILD_INFO: 'true',
+          FOUNDRY_EXTRA_OUTPUT:
+            '["storageLayout", "evm.bytecode.generatedSources", "evm.bytecode.functionDebugData", "evm.deployedBytecode.functionDebugData", "evm.deployedBytecode.immutableReferences"]',
+          FOUNDRY_BYTECODE_HASH: 'ipfs',
+          FOUNDRY_CBOR_METADATA: 'true',
+          FOUNDRY_FORCE: force ? 'true' : 'false',
+          FOUNDRY_CACHE: 'true',
+          FOUNDRY_USE_LITERAL_CONTENT: 'false', // Literal content blows up the size of the build-info
+        },
       }
-    })
+    )
   );
   task.isBackground = true;
   task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
@@ -36,11 +45,10 @@ async function forgeBuildTask(file: vscode.Uri, force: boolean = false): Promise
   return task;
 }
 
-export
-async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
+export async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
   // Find the root of the project, which is the directory containing the foundry.toml file
-  let base = file.with({'path': '/', 'query': '', 'authority': ''});
-  let pathSegments = file.path.split('/');
+  const base = file.with({path: '/', query: '', authority: ''});
+  const pathSegments = file.path.split('/');
   let stat;
   try {
     const uri = vscode.Uri.joinPath(base, ...pathSegments, 'foundry.toml');
@@ -67,13 +75,18 @@ async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
 /**
  * Get the build-info file associated with a given source file from the Foundry compiler cache.
  */
-export
-async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> {
+export async function getBuildInfoFileFromCache(
+  file: vscode.Uri
+): Promise<vscode.Uri> {
   const root = await foundryRoot(file);
   try {
-    const cacheContent = await loadCacheFile(root);
+    const cacheContent = (await loadCacheFile(root)) as {
+      files: Record<string, unknown>;
+    };
     const relativeFilePath = relativePath(root, file);
-    const cacheEntry = cacheContent.files[relativeFilePath.path.slice(1)];
+    const cacheEntry = cacheContent.files[
+      relativeFilePath.path.slice(1)
+    ] as Record<string, unknown>;
     // Example entry:
     // "src/Counter.sol": {
     // 	...
@@ -89,50 +102,74 @@ async function getBuildInfoFileFromCache(file: vscode.Uri): Promise<vscode.Uri> 
     // 	},
     // }
     if (!cacheEntry) {
-      throw new Error(`No cache entry found for file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(
+        `No cache entry found for file: ${relativeFilePath.path.slice(1)}`
+      );
     }
-    const artifacts = cacheEntry.artifacts;
-    if (!artifacts || typeof artifacts !== 'object' || Object.keys(artifacts).length === 0) {
-      throw new Error(`No artifacts found in cache entry for file: ${relativeFilePath.path.slice(1)}`);
+    const artifacts = cacheEntry.artifacts as Record<string, unknown>;
+    if (
+      !artifacts ||
+      typeof artifacts !== 'object' ||
+      Object.keys(artifacts).length === 0
+    ) {
+      throw new Error(
+        `No artifacts found in cache entry for file: ${relativeFilePath.path.slice(1)}`
+      );
     }
     const firstContract = Object.keys(artifacts)[0];
     if (!firstContract || !artifacts[firstContract]) {
-      throw new Error(`No contract found in artifacts for file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(
+        `No contract found in artifacts for file: ${relativeFilePath.path.slice(1)}`
+      );
     }
-    const firstVersion = Object.keys(artifacts[firstContract])[0];
-    if (!firstVersion || !artifacts[firstContract][firstVersion]) {
-      throw new Error(`No version found in contract '${firstContract}' for file: ${relativeFilePath.path.slice(1)}`);
+    const contractArtifacts = artifacts[firstContract] as Record<
+      string,
+      unknown
+    >;
+    const firstVersion = Object.keys(contractArtifacts)[0];
+    if (!firstVersion || !contractArtifacts[firstVersion]) {
+      throw new Error(
+        `No version found in contract '${firstContract}' for file: ${relativeFilePath.path.slice(1)}`
+      );
     }
-    const defaultEntry = artifacts[firstContract][firstVersion].default;
+    const versionEntry = contractArtifacts[firstVersion] as {
+      default?: {build_id?: string};
+    };
+    const defaultEntry = versionEntry.default;
     if (!defaultEntry || !defaultEntry.build_id) {
-      throw new Error(`No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath.path.slice(1)}`);
+      throw new Error(
+        `No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath.path.slice(1)}`
+      );
     }
     const buildId = defaultEntry.build_id;
     const buildInfoDir = await forgeBuildInfoDir(root);
     const buildInfoFile = vscode.Uri.joinPath(buildInfoDir, `${buildId}.json`);
     return buildInfoFile;
   } catch (e) {
-    throw new Error(`Failed to get build info file from cache for ${file.toString()}: ${e}`);
+    throw new Error(
+      `Failed to get build info file from cache for ${file.toString()}: ${e}`
+    );
   }
 }
 
-export
-type FoundryConfig = { 'profile'?: { [profile: string]: { [key: string]: string } } };
+export type FoundryConfig = {
+  profile?: {[profile: string]: {[key: string]: string}};
+};
 
-export
-async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
+export async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
   const configPath = vscode.Uri.joinPath(root, 'foundry.toml');
   const config = await vscode.workspace.fs.readFile(configPath);
   const text = new TextDecoder().decode(config);
-  return parseToml(text, { integersAsBigInt: true });
+  return parseToml(text, {integersAsBigInt: true});
 }
 
 async function forgeBuildInfoDir(root: vscode.Uri): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
   const defaultProfile = config?.profile?.default ?? {};
   const outputDir = defaultProfile?.out || 'out';
-  const buildInfo = defaultProfile?.build_info_path || outputDir + '/build-info';
-  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo)
+  const buildInfo =
+    defaultProfile?.build_info_path || outputDir + '/build-info';
+  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo);
   return buildInfoDir;
 }
 
@@ -146,7 +183,11 @@ async function getCacheFile(root: vscode.Uri): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
   const defaultProfile = config?.profile?.default ?? {};
   const cachePath = defaultProfile?.cache_path || 'cache';
-  const cacheFile = vscode.Uri.joinPath(root, cachePath, 'solidity-files-cache.json');
+  const cacheFile = vscode.Uri.joinPath(
+    root,
+    cachePath,
+    'solidity-files-cache.json'
+  );
   return cacheFile;
 }
 
@@ -156,7 +197,7 @@ async function getCacheFile(root: vscode.Uri): Promise<vscode.Uri> {
  * @param root The root URI of the Foundry project.
  * @returns A promise that resolves to the parsed JSON contents of the cache file.
  */
-async function loadCacheFile(root: vscode.Uri): Promise<any> {
+async function loadCacheFile(root: vscode.Uri): Promise<unknown> {
   const cacheFile = await getCacheFile(root);
   const cacheContent = await vscode.workspace.fs.readFile(cacheFile);
   const text = new TextDecoder().decode(cacheContent);
@@ -175,7 +216,9 @@ function relativePath(base: vscode.Uri, absolute: vscode.Uri): vscode.Uri {
   const basePath = base.path;
   const absolutePath = absolute.path;
   if (!absolutePath.startsWith(basePath)) {
-    throw new Error(`Path ${absolutePath} does not start with base path ${basePath}`);
+    throw new Error(
+      `Path ${absolutePath} does not start with base path ${basePath}`
+    );
   }
   const relative = absolutePath.slice(basePath.length);
   return absolute.with({path: relative});

@@ -5,149 +5,191 @@ import {
   VariableDeclaration,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
-import { getConfigValue } from './utils';
-import { forgeBuildTask, foundryRoot, getBuildInfoFileFromCache } from './foundry';
+import {
+  forgeBuildTask,
+  foundryRoot,
+  getBuildInfoFileFromCache,
+} from './foundry';
+import {getConfigValue} from './utils';
 
-export
-type Credentials = {
-  provider: 'github',
-  token: string
-} | {
-  provider: 'simbolik',
-  token: string
-}
+export type Credentials =
+  | {
+      provider: 'github';
+      token: string;
+    }
+  | {
+      provider: 'simbolik';
+      token: string;
+    };
 
 export async function startDebugging(
   contract: ContractDefinition,
-  method: FunctionDefinition,
+  method: FunctionDefinition
 ) {
-  const result = await vscode.window.withProgress({
-    location: vscode.ProgressLocation.Notification,
-    title: "Simbolik"
-  }, async (progress) => {
-    const apiKey = getConfigValue<string>('api-key', 'valid-api-key')
+  const result = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'Simbolik',
+    },
+    async progress => {
+      const apiKey = getConfigValue<string>('api-key', 'valid-api-key');
 
-    let credentials: Credentials;
-    if (apiKey !== 'valid-api-key' && apiKey !== '') {
-      credentials = { provider: 'simbolik', token: apiKey };
-    } else {
-      const session = await vscode.authentication.getSession('github', ['user:email'], {
-        createIfNone: true
-      });
-      if (!session) {
-        vscode.window.showErrorMessage('Please sign in to GitHub or provide a Simbolik API key.');
-        return;
-      }
-      credentials = { provider: 'github', token: session.accessToken };
-    }
-
-    const activeTextEditor = vscode.window.activeTextEditor;
-    if (!activeTextEditor) {
-      throw new Error('No active text editor.');
-    }
-
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(
-      activeTextEditor.document.uri
-    );
-    if (!workspaceFolder) {
-      throw new Error('No workspace folder.');
-    }
-
-    const parameters = method.parameters.flatMap((param: VariableDeclaration) => {
-      if (param.typeName === null) {
-        console.error(
-          `Missing TypeName for parameter ${param} in method ${method} in contract ${contract}`
-        );
-        return [];
-      }
-      const typeName: TypeName = param.typeName;
-      if (!('name' in typeName)) {
-        console.error(
-          `Missing name for TypeName for parameter ${param} in method ${method} in contract ${contract}`
-        );
-        return [];
-      }
-      if (typeof typeName.name !== 'string') {
-        console.error(
-          `Unexpected type for name of TypeName for parameter ${param} in method ${method} in contract ${contract}`
-        );
-        return [];
-      }
-      return [typeName.name];
-    });
-
-    const file = activeTextEditor.document.uri.toString();
-    const contractName = contract['name'];
-    const methodSignature = `${method['name']}(${parameters.join(',')})`;
-    const showSourcemaps = getConfigValue('show-sourcemaps', false);
-    const debugConfigName = `${contractName}.${methodSignature}`;
-    const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
-    const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
-    const autobuild = getConfigValue<'always'|'on-change'|'never'>('autobuild', 'on-change');
-    const rpcNodeType = getConfigValue<'anvil'|'kontrol-node'>('rpc-node-type', 'anvil');
-
-    // Compile the project if necessary
-    // Caching logic is handled by Foundry itself
-    // If autobuild is 'always', we always force a rebuild
-    if (autobuild === 'always' || autobuild === 'on-change') {
-      progress.report({ message: "Compiling" });
-      const build = await forgeBuildTask(activeTextEditor.document.uri, autobuild === 'always');
-      const buildExecution = await vscode.tasks.executeTask(build);
-      try {
-        await completed(buildExecution);
-      } catch (e) {
-        vscode.window.showErrorMessage('Failed to build project. Please check the terminal for build errors.');
-        return;
-      }
-    }
-    
-    let buildInfoFiles;
-    try {
-      buildInfoFiles = [await getBuildInfoFileFromCache(activeTextEditor.document.uri)];
-    } catch (e) {
-      if (autobuild === 'never') {
-        vscode.window.showErrorMessage('Build info not found in cache. Autobuild is disabled; please build the project manually before debugging or enable autobuild.');
+      let credentials: Credentials;
+      if (apiKey !== 'valid-api-key' && apiKey !== '') {
+        credentials = {provider: 'simbolik', token: apiKey};
       } else {
-        vscode.window.showErrorMessage('Build info not found in cache. Please check the terminal for build errors.');
+        const session = await vscode.authentication.getSession(
+          'github',
+          ['user:email'],
+          {
+            createIfNone: true,
+          }
+        );
+        if (!session) {
+          vscode.window.showErrorMessage(
+            'Please sign in to GitHub or provide a Simbolik API key.'
+          );
+          return;
+        }
+        credentials = {provider: 'github', token: session.accessToken};
       }
-      return;
+
+      const activeTextEditor = vscode.window.activeTextEditor;
+      if (!activeTextEditor) {
+        throw new Error('No active text editor.');
+      }
+
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+        activeTextEditor.document.uri
+      );
+      if (!workspaceFolder) {
+        throw new Error('No workspace folder.');
+      }
+
+      const parameters = method.parameters.flatMap(
+        (param: VariableDeclaration) => {
+          if (param.typeName === null) {
+            console.error(
+              `Missing TypeName for parameter ${param} in method ${method} in contract ${contract}`
+            );
+            return [];
+          }
+          const typeName: TypeName = param.typeName;
+          if (!('name' in typeName)) {
+            console.error(
+              `Missing name for TypeName for parameter ${param} in method ${method} in contract ${contract}`
+            );
+            return [];
+          }
+          if (typeof typeName.name !== 'string') {
+            console.error(
+              `Unexpected type for name of TypeName for parameter ${param} in method ${method} in contract ${contract}`
+            );
+            return [];
+          }
+          return [typeName.name];
+        }
+      );
+
+      const file = activeTextEditor.document.uri.toString();
+      const contractName = contract['name'];
+      const methodSignature = `${method['name']}(${parameters.join(',')})`;
+      const showSourcemaps = getConfigValue('show-sourcemaps', false);
+      const debugConfigName = `${contractName}.${methodSignature}`;
+      const jsonRpcUrl = getConfigValue(
+        'json-rpc-url',
+        'http://localhost:8545'
+      );
+      const sourcifyUrl = getConfigValue(
+        'sourcify-url',
+        'http://localhost:5555'
+      );
+      const autobuild = getConfigValue<'always' | 'on-change' | 'never'>(
+        'autobuild',
+        'on-change'
+      );
+      const rpcNodeType = getConfigValue<'anvil' | 'kontrol-node'>(
+        'rpc-node-type',
+        'anvil'
+      );
+
+      // Compile the project if necessary
+      // Caching logic is handled by Foundry itself
+      // If autobuild is 'always', we always force a rebuild
+      if (autobuild === 'always' || autobuild === 'on-change') {
+        progress.report({message: 'Compiling'});
+        const build = await forgeBuildTask(
+          activeTextEditor.document.uri,
+          autobuild === 'always'
+        );
+        const buildExecution = await vscode.tasks.executeTask(build);
+        try {
+          await completed(buildExecution);
+        } catch (e) {
+          vscode.window.showErrorMessage(
+            'Failed to build project. Please check the terminal for build errors.'
+          );
+          return;
+        }
+      }
+
+      let buildInfoFiles;
+      try {
+        buildInfoFiles = [
+          await getBuildInfoFileFromCache(activeTextEditor.document.uri),
+        ];
+      } catch (e) {
+        if (autobuild === 'never') {
+          vscode.window.showErrorMessage(
+            'Build info not found in cache. Autobuild is disabled; please build the project manually before debugging or enable autobuild.'
+          );
+        } else {
+          vscode.window.showErrorMessage(
+            'Build info not found in cache. Please check the terminal for build errors.'
+          );
+        }
+        return;
+      }
+
+      progress.report({increment: 100});
+
+      const clientVersion = vscode.extensions.getExtension(
+        'runtimeverification.simbolik'
+      )?.packageJSON.version;
+      const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
+      const debugConfig = createDebugConfig(
+        debugConfigName,
+        file,
+        contractName,
+        methodSignature,
+        showSourcemaps,
+        jsonRpcUrl,
+        sourcifyUrl,
+        buildInfoFiles,
+        myFoundryRoot,
+        credentials,
+        clientVersion,
+        rpcNodeType
+      );
+      return {workspaceFolder, debugConfig};
     }
-
-    progress.report({ increment: 100 });
-
-    const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
-    const myFoundryRoot = await foundryRoot(activeTextEditor.document.uri);
-    const debugConfig = createDebugConfig(
-      debugConfigName,
-      file,
-      contractName,
-      methodSignature,
-      showSourcemaps,
-      jsonRpcUrl,
-      sourcifyUrl,
-      buildInfoFiles,
-      myFoundryRoot,
-      credentials,
-      clientVersion,
-      rpcNodeType
-    );
-    return { workspaceFolder, debugConfig };
-  });
+  );
   if (!result) {
     return;
   }
-  const { workspaceFolder, debugConfig } = result;
-  const debugSession = await vscode.debug.startDebugging(
-    workspaceFolder,
-    debugConfig
-  );
+  const {workspaceFolder, debugConfig} = result;
+  await vscode.debug.startDebugging(workspaceFolder, debugConfig);
   return;
 }
 
 function completed(tastkExecution: vscode.TaskExecution): Promise<void> {
   return new Promise((resolve, reject) => {
     const disposable = vscode.tasks.onDidEndTaskProcess(e => {
-      if ((e.execution as any)._id !== (tastkExecution as any)._id) return;
+      if (
+        (e.execution as unknown as {_id: string})._id !==
+        (tastkExecution as unknown as {_id: string})._id
+      )
+        return;
       if (e.exitCode !== 0) {
         reject();
       } else {
@@ -187,6 +229,6 @@ function createDebugConfig(
     clientMount: clientMount,
     credentials: credentials,
     clientVersion: clientVersion,
-    rpcNodeType: rpcNodeType
+    rpcNodeType: rpcNodeType,
   };
 }
