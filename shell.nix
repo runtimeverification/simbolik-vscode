@@ -8,5 +8,6 @@ mkShell rec {
   ];
   LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
   LANG = "C.UTF-8";
-  shellHook = with pkgs; '''';
+  shellHook = with pkgs; ''
+  '';
 }

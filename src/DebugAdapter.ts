@@ -44,7 +44,7 @@ export class SolidityDebugAdapterDescriptorFactory
 
             token.onCancellationRequested(() => {
               websocket.close();
-              reject(new Error('Debuggin session cancelled'));
+              reject(new Error('Debugging session cancelled'));
             });
 
             progress.report({increment: 0});
@@ -233,8 +233,6 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
           ['path', 'symbolFilePath', 'file'].includes(key) &&
           typeof msg[key] === 'string'
         ) {
-          result[key] = `${this.foundryRoot()}/${msg[key]}`;
-        } else if (key === 'file' && typeof msg[key] === 'string') {
           result[key] = `${this.foundryRoot()}/${msg[key]}`;
         } else if (typeof msg[key] === 'object') {
           result[key] = this.prependPaths(msg[key]);

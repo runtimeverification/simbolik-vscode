@@ -187,7 +187,7 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {}
 
 /**
- * Math a URI path against a pattern.
+ * Match a URI path against a pattern.
  * For example, if the pattern is /{sandboxname}/tx/{tx_hash}
  * and the URI is /lorem-ipsum/tx/0xabcdef1234567890
  * then the result should be {sandboxName: 'lorem-ipsum', tx_hash: '0xabcdef1234567890'}

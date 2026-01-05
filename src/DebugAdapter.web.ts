@@ -217,8 +217,6 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
           typeof msg[key] === 'string'
         ) {
           result[key] = `${prefix}/${msg[key]}`;
-        } else if (key === 'file' && typeof msg[key] === 'string') {
-          result[key] = `${prefix}/${msg[key]}`;
         } else if (typeof msg[key] === 'object') {
           result[key] = this.prependPaths(msg[key]);
         }
