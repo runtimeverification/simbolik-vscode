@@ -1,13 +1,15 @@
 import {
   ContractDefinition,
+  Expression,
+  ExpressionStatement,
+  FunctionCall,
   FunctionDefinition,
-  TypeName,
-  VariableDeclaration,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
 import { getConfigValue } from './utils';
 import { forgeBuild, foundryRoot, getArtifact, getBuildInfoFileFromCache } from './foundry';
-import { compileFunction } from 'vm';
+import { tuple } from '@metamask/abi-utils/dist/parsers';
+import * as parser from '@solidity-parser/parser';
 
 export
 type Credentials = {
@@ -153,17 +155,102 @@ async function getMethodSignature(file: vscode.Uri, contract: ContractDefinition
 
 async function getUserInput(methodSignature: string): Promise<string> {
   // Extract parameter types from method signature
-  const abiParams = methodSignature.slice(methodSignature.indexOf('(') + 1, -1);
-  if (abiParams === '') {
+  const abiParams = methodSignature.slice(methodSignature.indexOf('('));
+  if (abiParams === '()') {
     return '';
   }
   // Prompt user for input parameters
-  const userInput = await vscode.window.showInputBox({
+  let userInput = await vscode.window.showInputBox({
     prompt: `Enter input parameters for ${methodSignature}.`,
-    placeHolder: abiParams
+    placeHolder: abiParams.slice(1, -1),
+    validateInput: (value) => {
+      try {
+        const parsed = parse(value);
+        // const types = getTupleElements(abiParams);
+        const encoded = tuple.encode({
+          type: abiParams,
+          value: parsed,
+          buffer: new Uint8Array(),
+          packed: false,
+          tight: false,
+        })
+      } catch (e) {
+        return {
+          message: `Invalid input parameters. Expecting types: ${abiParams.slice(1, -1)}. Provide parameters in Solidity literal syntax.`,
+          severity: vscode.InputBoxValidationSeverity.Error
+        };
+      }
+      return undefined;
+    }
   });
   if (userInput === undefined) {
     throw new Error('Debugging cancelled: input parameters required.');
   }
   return userInput;
 }
+
+type InternalExpression = BigInt | string | boolean | InternalExpression[];
+
+function parse(input: string) : InternalExpression[] {
+  const parsed = parser.parse(`
+    contract Dummy {
+      function dummy() {
+        foo(${input});
+      }
+    }
+  `);
+  const contract = parsed.children[0] as ContractDefinition;
+  const method = contract.subNodes[0] as FunctionDefinition;
+  const stmt = method.body!.statements[0]! as ExpressionStatement;
+  const call = stmt.expression! as FunctionCall;
+  const args = call.arguments;
+  const result = args.map(arg => toInternalExpr(arg as Expression));
+  return result;
+}
+
+function toInternalExpr(expr: Expression) : InternalExpression {
+  switch (expr.type) {
+    case 'TupleExpression':
+      return expr.components.map(e => toInternalExpr(e as Expression));
+    case 'NumberLiteral':
+      if (expr.subdenomination) {
+        const base = BigInt(expr.number);
+        const factor = denominationMap[expr.subdenomination]!;
+        return base * factor;
+      }
+      return BigInt(expr.number);
+    case 'BooleanLiteral':
+      return expr.value;
+    case 'StringLiteral':
+      return expr.value;
+    default:
+      throw new Error();
+  }
+}
+
+const denominationMap: { [key: string]: bigint } = {
+  'wei':          1n,
+  'kwei':         1000n,
+  'ada':          1000n,
+  'femtoether':   1000n,
+  'mwei':         1000000n,
+  'babbage':      1000000n,
+  'picoether':    1000000n,
+  'gwei':         1000000000n,
+  'shannon':      1000000000n,
+  'nanoether':    1000000000n,
+  'nano':         1000000000n,
+  'szabo':        1000000000000n,
+  'microether':   1000000000000n,
+  'micro':        1000000000000n,
+  'finney':       1000000000000000n,
+  'milliether':   1000000000000000n,
+  'milli':        1000000000000000n,
+  'ether':        1000000000000000000n,
+  'kether':       1000000000000000000000n,
+  'grand':        1000000000000000000000n,
+  'einstein':     1000000000000000000000n,
+  'mether':       1000000000000000000000000n,
+  'gether':       1000000000000000000000000000n,
+  'tether':       1000000000000000000000000000000n
+};
