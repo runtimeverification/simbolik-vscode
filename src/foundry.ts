@@ -434,7 +434,7 @@ export async function forgeTest(
   const argsString = args.join(' ');
   const output = await executeInTerminal(
     `${forgePath} test --json --allow-failure ${argsString}`,
-    {cwd: root, hideFromUser: false}
+    {cwd: root}
   );
   const result: ForgeTestSuiteReport = JSON.parse(output);
   return result;
