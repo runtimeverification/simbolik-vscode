@@ -5,8 +5,8 @@ import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import {forgeLintFile } from './foundry';
-import { createTestController } from './TestAdapter';
+import {forgeLintFile} from './foundry';
+import {createTestController} from './TestAdapter';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -21,38 +21,38 @@ export async function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, your extension "simbolik" is now active!');
 
   const codelensProvider = new CodelensProvider();
-  context.subscriptions.push(vscode.languages.registerCodeLensProvider(
-    'solidity',
-    codelensProvider
-  ));
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider('solidity', codelensProvider)
+  );
 
   const factory = new SolidityDebugAdapterDescriptorFactory();
-  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(
-    'solidity',
-    factory
-  ));
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory)
+  );
 
-  context.subscriptions.push(vscode.commands.registerCommand(
-    'simbolik.startDebugging',
-    (file, contract, method) => startDebugging(file, contract, method),
-  ));
-  
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'simbolik.startDebugging',
+      (file, contract, method) => startDebugging(file, contract, method)
+    )
+
   const testController = await createTestController();
   context.subscriptions.push(testController);
 
-  const diagnosticsCollection = vscode.languages.createDiagnosticCollection('solidity');
+  const diagnosticsCollection =
+    vscode.languages.createDiagnosticCollection('solidity');
   context.subscriptions.push(diagnosticsCollection);
-  vscode.workspace.onDidChangeTextDocument(async (event) => {
+  vscode.workspace.onDidChangeTextDocument(async event => {
     if (event.document.languageId === 'solidity') {
       await forgeLintFile(event.document.uri, diagnosticsCollection);
     }
   });
-  vscode.workspace.onDidOpenTextDocument(async (document) => {
+  vscode.workspace.onDidOpenTextDocument(async document => {
     if (document.languageId === 'solidity') {
       await forgeLintFile(document.uri, diagnosticsCollection);
     }
   });
-  vscode.workspace.textDocuments.forEach(async (document) => {
+  vscode.workspace.textDocuments.forEach(async document => {
     if (document.languageId === 'solidity') {
       await forgeLintFile(document.uri, diagnosticsCollection);
     }
@@ -85,9 +85,7 @@ export async function activate(context: vscode.ExtensionContext) {
         );
       }
       if (action === 'Learn More') {
-        vscode.env.openExternal(
-          vscode.Uri.parse('https://www.simbolik.dev')
-        );
+        vscode.env.openExternal(vscode.Uri.parse('https://www.simbolik.dev'));
       }
     }
     if (event.event === 'api-key-sessions-limit-exceeded') {

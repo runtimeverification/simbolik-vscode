@@ -2,29 +2,36 @@ import * as vscode from 'vscode';
 
 /**
  * This module provides utilities for executing commands in VSCode terminals.
- * 
+ *
  * Running subprocesses in VSCode terminals ensures that the commands
  * are executed in the same environment as the user would have
  * when using the integrated terminal.
- * 
+ *
  * Additionally, the terminal can be shown to the user if an error occurs,
  * allowing them to see the error output directly.
- * 
+ *
  * VSCode tasks offer similar functionality, but they don't allow capturing
  * the command output programmatically.
  */
 
 /**
  * Run a command in a VSCode terminal and capture its output.
- * 
+ *
  * @param cmd The command to execute.
  * @param options Terminal options such as cwd and env.
  * @param revealOnError Whether to reveal the terminal if the command fails.
  * @returns The standard output of the command (with terminal control sequences stripped).
  */
-export
-async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = {}, revealOnError: boolean = false): Promise<string> {
-  const terminal = await createTerminal({ name: options.name ?? cmd, hideFromUser: true, ...options });
+export async function executeInTerminal(
+  cmd: string,
+  options: vscode.TerminalOptions = {},
+  revealOnError = false
+): Promise<string> {
+  const terminal = await createTerminal({
+    name: options.name ?? cmd,
+    hideFromUser: true,
+    ...options,
+  });
   const [done, outputStream] = await executeCommand(cmd, terminal);
   if (done.exitCode !== 0) {
     if (revealOnError) {
@@ -44,15 +51,16 @@ async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = 
 
 /**
  * Create a VSCode terminal and wait for shell integration to be ready.
- * 
+ *
  * @param options Terminal options.
  * @returns A promise that resolves to the created terminal once shell integration is ready.
  */
-export
-function createTerminal(options: vscode.TerminalOptions = {}): Promise<vscode.Terminal> {
+export function createTerminal(
+  options: vscode.TerminalOptions = {}
+): Promise<vscode.Terminal> {
   const terminal = vscode.window.createTerminal(options);
   const done = new Promise<vscode.Terminal>((resolve, reject) => {
-    const disposible = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+    const disposible = vscode.window.onDidChangeTerminalShellIntegration(e => {
       if (e.terminal !== terminal) {
         return;
       }
@@ -65,17 +73,21 @@ function createTerminal(options: vscode.TerminalOptions = {}): Promise<vscode.Te
 
 /**
  * Execute a command in a given VSCode terminal and wait for it to finish.
- * 
+ *
  * @param cmd The command to execute.
  * @param terminal The terminal in which to execute the command.
  * @returns A promise that resolves to the terminal shell execution end event.
  */
-export
-function executeCommand(cmd: string, terminal: vscode.Terminal): Promise<[vscode.TerminalShellExecutionEndEvent, AsyncIterable<string>]> {
-  const done = new Promise<[vscode.TerminalShellExecutionEndEvent, AsyncIterable<string>]>((resolve, reject) => {
+export function executeCommand(
+  cmd: string,
+  terminal: vscode.Terminal
+): Promise<[vscode.TerminalShellExecutionEndEvent, AsyncIterable<string>]> {
+  const done = new Promise<
+    [vscode.TerminalShellExecutionEndEvent, AsyncIterable<string>]
+  >((resolve, reject) => {
     const execution = terminal.shellIntegration!.executeCommand(cmd);
     const outputStream = execution.read();
-    const didStop = vscode.window.onDidEndTerminalShellExecution(async (e) => {
+    const didStop = vscode.window.onDidEndTerminalShellExecution(async e => {
       if (e.execution !== execution) {
         return;
       }
@@ -88,7 +100,7 @@ function executeCommand(cmd: string, terminal: vscode.Terminal): Promise<[vscode
 
 /**
  * Convert an async iterable stream of strings into a single concatenated string.
- * 
+ *
  * @param stream The async iterable stream of strings to convert.
  * @returns A promise that resolves to the concatenated string.
  */
@@ -102,7 +114,7 @@ async function streamToString(stream: AsyncIterable<string>): Promise<string> {
 
 /**
  * Remove terminal control sequences from a string.
- * 
+ *
  * @param input The string from which to remove terminal control sequences.
  * @returns The input string with terminal control sequences removed.
  */
