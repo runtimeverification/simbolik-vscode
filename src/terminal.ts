@@ -122,16 +122,20 @@ async function streamToString(stream: AsyncIterable<string>): Promise<string> {
  */
 function stripTerminalControlSequences(input: string): string {
   // OSC: ESC ] ... BEL  OR  ESC ] ... ESC \
-  const osc = /\\x1b\][^\\x07\\x1b]*(?:\\x07|\\x1b\\)/g;
+  // eslint-disable-next-line no-control-regex
+  const osc = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
   // CSI: ESC [ ... (covers colors, cursor moves, erase, etc.)
-  const csi = /\\x1b\[[0-?]*[ -/]*[@-~]/g;
+  // eslint-disable-next-line no-control-regex
+  const csi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
   // DCS: ESC P ... ESC \
-  const dcs = /\\x1bP[^\\x1b]*(?:\\x1b\\)/g;
+  // eslint-disable-next-line no-control-regex
+  const dcs = /\x1bP[^\x1b]*(?:\x1b\\)/g;
 
   // Other single-char ESC sequences (less common, but cheap to remove)
-  const esc = /\\x1b[@-Z\\-_]/g;
+  // eslint-disable-next-line no-control-regex
+  const esc = /\x1b[@-Z\\-_]/g;
 
   return input
     .replace(osc, '')
