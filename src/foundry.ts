@@ -457,7 +457,13 @@ async function forgeLintFile(file: vscode.Uri, collection: vscode.DiagnosticColl
   collection.delete(file);
   const cwd = await foundryRoot(file);
   const forgePath = getConfigValue('forge-path', 'forge');
-  const output = await executeInTerminal(`${forgePath} lint --json ${file.fsPath}`, { cwd });
+  const out = await forgeOutDir(cwd);
+  const lintOut = vscode.Uri.joinPath(out, 'lint');
+  const lintOutPath = relativePath(cwd, lintOut);
+  // `forge lint` will build the file if needed and write the artifacts to the out folder.
+  // The build is not suitable for debugging because it uses different compiler settings.
+  // Hence, we use a different out folder for linting.
+  const output = await executeInTerminal(`${forgePath} lint --json ${file.fsPath} --out='${lintOutPath}'`, { cwd });
   const diagnistics = output.split('\n').map(line => {
     try {
       const entry : ForgeLintDiagnostic = JSON.parse(line);
