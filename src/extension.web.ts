@@ -1,11 +1,11 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import {downloadAndExtract} from './clone';
 import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter.web';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
-import {downloadAndExtract} from './clone';
 
 const outputChannel = vscode.window.createOutputChannel(
   'Simbolik Solidity Debugger',
@@ -32,8 +32,9 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'simbolik.startDebugging',
-      (contract, method) => startDebugging(contract, method)
+      (file, contract, method) => startDebugging(file, contract, method)
     )
+  );
 
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
@@ -82,16 +83,16 @@ export function activate(context: vscode.ExtensionContext) {
     const matchTraceCallPattern = matchUri(traceCallPattern, path);
     if (matchEthereumPattern) {
       const debugConfig = {
-        'name': 'Debug Tx',
-        'type': 'solidity',
-        'request': 'attach',
+        name: 'Debug Tx',
+        type: 'solidity',
+        request: 'attach',
         txHash: matchEthereumPattern.txHash,
         jsonRpcUrl: getConfigValue('json-rpc-url', ''),
         sourcifyUrl: getConfigValue('sourcify-url', ''),
         stopAtFirstOpcode: false,
         credentials: {
-          'provider': 'simbolik',
-          'token':  getConfigValue('api-key', 'junk')
+          provider: 'simbolik',
+          token: getConfigValue('api-key', 'junk'),
         },
       };
       vscode.debug.startDebugging(workspaceFolder, debugConfig);
@@ -109,15 +110,15 @@ export function activate(context: vscode.ExtensionContext) {
         : `https://${url.host}/${sandboxName}`;
       const txHash = matchTraceTxPattern.txHash;
       const debugConfig = {
-        'name': 'Debug Tx',
-        'type': 'solidity',
-        'request': 'attach',
+        name: 'Debug Tx',
+        type: 'solidity',
+        request: 'attach',
         txHash: txHash,
         jsonRpcUrl: rpcUrl,
         sourcifyUrl: sourcifyUrl,
         stopAtFirstOpcode: false,
         credentials: {
-          'provider': 'simbolik',
+          provider: 'simbolik',
           token: getConfigValue('api-key', 'junk'),
         },
       };
@@ -130,15 +131,15 @@ export function activate(context: vscode.ExtensionContext) {
       const sourcifyUrl = `https://api.dev.buildbear.io/v1/sourcify/${sandboxName}`;
       const rpcUrl = `https://dev.rpc.buildbear.io/${sandboxName}`;
       const debugConfig = {
-        'name': 'Debug Tx',
-        'type': 'solidity',
-        'request': 'attach',
+        name: 'Debug Tx',
+        type: 'solidity',
+        request: 'attach',
         txHash: txHash,
         jsonRpcUrl: rpcUrl,
         sourcifyUrl: sourcifyUrl,
         stopAtFirstOpcode: false,
         credentials: {
-          'provider': 'simbolik',
+          provider: 'simbolik',
           token: getConfigValue('api-key', 'junk'),
         },
       };
@@ -149,9 +150,9 @@ export function activate(context: vscode.ExtensionContext) {
       const value = matchTraceCallPattern.value;
       const data = matchTraceCallPattern.data;
       const debugConfig = {
-        'name': 'Debug Call',
-        'type': 'solidity',
-        'request': 'attach',
+        name: 'Debug Call',
+        type: 'solidity',
+        request: 'attach',
         from_: from,
         to: to,
         value: value,
@@ -186,7 +187,7 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {}
 
 /**
- * Math a URI path against a pattern.
+ * Match a URI path against a pattern.
  * For example, if the pattern is /{sandboxname}/tx/{tx_hash}
  * and the URI is /lorem-ipsum/tx/0xabcdef1234567890
  * then the result should be {sandboxName: 'lorem-ipsum', tx_hash: '0xabcdef1234567890'}

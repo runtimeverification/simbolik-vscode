@@ -1,3 +1,4 @@
+import {parse as parseToml} from 'smol-toml';
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
@@ -126,7 +127,13 @@ export async function getBuildInfoFileFromCache(
 ): Promise<vscode.Uri> {
   const root = await foundryRoot(file);
   try {
-    const cacheContent = await loadCacheFile(root);
+    const cacheContent = (await loadCacheFile(root)) as {
+      files: {
+        [key: string]: {
+          artifacts: {[contractName: string]: {[version: string]: unknown}};
+        };
+      };
+    };
     const relativeFilePath = relativePath(root, file);
     const cacheEntry = cacheContent.files[relativeFilePath];
     // Example entry:
@@ -168,7 +175,10 @@ export async function getBuildInfoFileFromCache(
         `No version found in contract '${firstContract}' for file: ${relativeFilePath}`
       );
     }
-    const defaultEntry = artifacts[firstContract][firstVersion].default;
+    const versionEntry = artifacts[firstContract][firstVersion] as {
+      default?: {build_id?: string};
+    };
+    const defaultEntry = versionEntry.default;
     if (!defaultEntry || !defaultEntry.build_id) {
       throw new Error(
         `No 'default' entry or 'build_id' found for contract '${firstContract}' version '${firstVersion}' in file: ${relativeFilePath}`
@@ -301,7 +311,7 @@ async function getCacheFile(root: vscode.Uri): Promise<vscode.Uri> {
  * @param root The root URI of the Foundry project.
  * @returns A promise that resolves to the parsed JSON contents of the cache file.
  */
-async function loadCacheFile(root: vscode.Uri): Promise<any> {
+async function loadCacheFile(root: vscode.Uri): Promise<unknown> {
   const cacheFile = await getCacheFile(root);
   const cacheContent = await vscode.workspace.fs.readFile(cacheFile);
   const text = new TextDecoder().decode(cacheContent);
