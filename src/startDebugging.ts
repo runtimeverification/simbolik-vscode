@@ -51,13 +51,14 @@ export async function startDebugging(
     let credentials: Credentials;
     let buildInfoFile: vscode.Uri;
     let methodSignature: string;
+    let isTest: boolean;
     let payload: Uint8Array<ArrayBufferLike>;
     try {
       credentials = await getCredentials();
       progress.report({ message: "Compiling" });
       buildInfoFile = await compile(file);
       progress.report({ increment: 100 });
-      methodSignature = await getMethodSignature(file, contract, method);
+      ({ methodSignature, isTest } = await getMethodSignature(file, contract, method));
       payload = await getUserInput(methodSignature);
     } catch (e) {
       vscode.window.showErrorMessage((e as Error).message);
@@ -68,7 +69,7 @@ export async function startDebugging(
     const showSourcemaps = getConfigValue('show-sourcemaps', false);
     const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
     const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
-    const rpcNodeType = getConfigValue<'anvil'|'kontrol-node'>('rpc-node-type', 'anvil');
+    const rpcNodeType = isTest ? 'kontrol-node' : 'anvil';
     const debugConfigName = `${contractName}.${methodSignature}`;
     const clientVersion = vscode.extensions.getExtension('runtimeverification.simbolik')?.packageJSON.version;
     const myFoundryRoot = await foundryRoot(file);
@@ -145,13 +146,14 @@ async function compile(file: vscode.Uri): Promise<vscode.Uri> {
   return buildInfoFile;
 }
 
-async function getMethodSignature(file: vscode.Uri, contract: ContractDefinition, method: FunctionDefinition): Promise<string> {
+async function getMethodSignature(file: vscode.Uri, contract: ContractDefinition, method: FunctionDefinition): Promise<{ methodSignature: string, isTest: boolean }> {
   const contractArtifact = await getArtifact(file, contract['name']);
   const content = await vscode.workspace.fs.readFile(contractArtifact);
   const textContent = new TextDecoder().decode(content);
   const artifact = JSON.parse(textContent);
   const methodSignature = Object.keys(artifact.methodIdentifiers ?? {}).find(sig => sig.startsWith(method['name'] + '('))!;
-  return methodSignature;
+  const isTest = Object.keys(artifact.methodIdentifiers ?? {}).some(sig => sig === 'IS_TEST()')
+  return { methodSignature, isTest };
 }
 
 async function getUserInput(methodSignature: string): Promise<Uint8Array<ArrayBufferLike>> {

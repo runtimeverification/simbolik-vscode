@@ -106,16 +106,6 @@
           "description": "Attach requests use this Sourcify endpoint to download the source code of the debugged transaction.",
           "default": "http://localhost:5555",
           "order": 10
-        },
-        "simbolik.rpc-node-type": {
-          "type": "string",
-          "enum": [
-            "anvil",
-            "kontrol-node"
-          ],
-          "default": "anvil",
-          "description": "The type of the JSON-RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta.",
-          "order": 11
         }
       }
     },
