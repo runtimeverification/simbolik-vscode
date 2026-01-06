@@ -1,4 +1,3 @@
-import {parse as parseToml} from 'smol-toml';
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {parse as parseToml} from 'smol-toml';
