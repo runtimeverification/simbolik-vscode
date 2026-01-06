@@ -25,8 +25,7 @@ import * as vscode from 'vscode';
 export
 async function executeInTerminal(cmd: string, options: vscode.TerminalOptions = {}, revealOnError: boolean = false): Promise<string> {
   const terminal = await createTerminal({ name: options.name ?? cmd, hideFromUser: true, ...options });
-  const done = await executeCommand(cmd, terminal);
-  const outputStream = done.execution.read();
+  const [done, outputStream] = await executeCommand(cmd, terminal);
   if (done.exitCode !== 0) {
     if (revealOnError) {
       terminal.show();
@@ -72,15 +71,16 @@ function createTerminal(options: vscode.TerminalOptions = {}): Promise<vscode.Te
  * @returns A promise that resolves to the terminal shell execution end event.
  */
 export
-function executeCommand(cmd: string, terminal: vscode.Terminal): Promise<vscode.TerminalShellExecutionEndEvent> {
-  const done = new Promise<vscode.TerminalShellExecutionEndEvent>((resolve, reject) => {
+function executeCommand(cmd: string, terminal: vscode.Terminal): Promise<[vscode.TerminalShellExecutionEndEvent, AsyncIterable<string>]> {
+  const done = new Promise<[vscode.TerminalShellExecutionEndEvent, AsyncIterable<string>]>((resolve, reject) => {
     const execution = terminal.shellIntegration!.executeCommand(cmd);
+    const outputStream = execution.read();
     const didStop = vscode.window.onDidEndTerminalShellExecution(async (e) => {
       if (e.execution !== execution) {
         return;
       }
       didStop.dispose();
-      resolve(e);
+      resolve([e, outputStream]);
     });
   });
   return done;
