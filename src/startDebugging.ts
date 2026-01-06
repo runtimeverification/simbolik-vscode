@@ -120,10 +120,7 @@ export async function startDebugging(
     return;
   }
   const {workspaceFolder, debugConfig} = result;
-  const debugSession = await vscode.debug.startDebugging(
-    workspaceFolder,
-    debugConfig
-  );
+  await vscode.debug.startDebugging(workspaceFolder, debugConfig);
   return;
 }
 

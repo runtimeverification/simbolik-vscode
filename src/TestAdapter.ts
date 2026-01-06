@@ -23,12 +23,13 @@ export async function createTestController(): Promise<vscode.TestController> {
 
   let testTree: IndexedTestTree = await createTestTree(testController);
 
-  const debugProfile = testController.createRunProfile(
+  testController.createRunProfile(
     'Debug Foundry Tests',
     vscode.TestRunProfileKind.Debug,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async (request, token) => {
       for (const item of request.include ?? []) {
-        const {workspaceFolder, file, contract, method}: TestContext =
+        const {file, contract, method}: TestContext =
           testTree.items.get(item) ?? {};
         if (!contract || !method) {
           vscode.window.showErrorMessage(
@@ -43,11 +44,7 @@ export async function createTestController(): Promise<vscode.TestController> {
     tag('debug')
   );
 
-  const runProfile = createFoundryProfile(
-    testController,
-    testTree,
-    vscode.TestRunProfileKind.Run
-  );
+  createFoundryProfile(testController, testTree, vscode.TestRunProfileKind.Run);
   const coverageCache: WeakMap<
     vscode.FileCoverage,
     vscode.StatementCoverage[]
@@ -60,9 +57,9 @@ export async function createTestController(): Promise<vscode.TestController> {
   );
 
   coverageProfile.loadDetailedCoverage = (
-    testRun: vscode.TestRun,
+    testRun: vscode.TestRun, // eslint-disable-line @typescript-eslint/no-unused-vars
     fileCoverage: vscode.FileCoverage,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Thenable<vscode.FileCoverageDetail[]> => {
     const cached = coverageCache.get(fileCoverage);
     return Promise.resolve(cached ?? []);
@@ -168,6 +165,7 @@ function createFoundryProfile(
           method,
         });
 
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         for (const [item, context] of leafs) {
           if (!item.tags.some(t => t.id === 'run')) {
             continue;
@@ -216,11 +214,12 @@ function processTestReport(
     if (!item.tags.some(t => t.id === 'run')) {
       continue;
     }
-    const {workspaceFolder, file, contract, method} = context;
+    const {file, contract, method} = context;
     const resultKey = `${vscode.workspace.asRelativePath(file, false)}:${contract.name}`;
     const reportEntry = report[resultKey];
 
     const testResult = Object.entries(reportEntry?.test_results).find(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       ([id, tr]) => id.startsWith(method.name + '(')
     );
     if (!testResult) {
@@ -230,6 +229,8 @@ function processTestReport(
       run.errored(item, message);
       continue;
     }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [_, tr] = testResult;
     if (tr.status === 'Failure') {
       const message = new vscode.TestMessage(
