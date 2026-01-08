@@ -268,9 +268,23 @@ function processCoverageReport(
       workspaceFolder.uri,
       ...lcovRecord.file.split('/')
     );
-    const fileCoverage = vscode.FileCoverage.fromDetails(
+    const statementCoverage = new vscode.TestCoverageCount(
+      lcovRecord.lines.hit,
+      lcovRecord.lines.found
+    );
+    const branchCoverage = new vscode.TestCoverageCount(
+      lcovRecord.branches.hit,
+      lcovRecord.branches.found
+    );
+    const functionCoverage = new vscode.TestCoverageCount(
+      lcovRecord.functions.hit,
+      lcovRecord.functions.found
+    );
+    const fileCoverage = new vscode.FileCoverage(
       fileUri,
-      lineCoverages
+      statementCoverage,
+      branchCoverage,
+      functionCoverage
     );
     run.addCoverage(fileCoverage);
     if (coverageCache) {
@@ -301,6 +315,9 @@ async function createTestTree(
       const ast = parser.parse(text, {loc: true});
       parser.visit(ast, {
         ContractDefinition: async contract => {
+          if (contract.kind !== 'contract') {
+            return;
+          }
           const contractItem = await createContractTestItem(
             testController,
             file,
@@ -408,8 +425,7 @@ async function createMethodTestItem(
   );
   if (method.name.startsWith('test')) {
     methodItem.tags = [tag('run'), tag('coverage'), tag('debug')];
-  }
-  if (method.name === 'setUp') {
+  } else {
     methodItem.tags = [tag('debug')];
   }
   if (method.loc) {

@@ -464,7 +464,7 @@ export async function forgeCoverage(
   }
   const argsString = args.join(' ');
   const output = await executeInTerminal(
-    `${forgePath} coverage --json ${argsString}`,
+    `${forgePath} coverage --json --allow-failure --report=lcov --exclude-tests ${argsString}`,
     {cwd: root}
   );
 
