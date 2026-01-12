@@ -12,20 +12,10 @@ import {executeInTerminal} from './terminal';
  */
 export async function sourceFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
   const srcDir = await forgeSrcDir(root);
-  const files: vscode.Uri[] = [];
-  const visit = async (dir: vscode.Uri) => {
-    const entries = await vscode.workspace.fs.readDirectory(dir);
-    for (const [name, type] of entries) {
-      const entryUri = vscode.Uri.joinPath(dir, name);
-      if (type === vscode.FileType.File && name.endsWith('.sol')) {
-        files.push(entryUri);
-      } else if (type === vscode.FileType.Directory) {
-        await visit(entryUri);
-      }
-    }
-  };
-  await visit(srcDir);
-  return files;
+  const sourceFiles = await vscode.workspace.findFiles(
+    new vscode.RelativePattern(srcDir, '**/*.sol')
+  );
+  return sourceFiles;
 }
 
 /**
@@ -36,20 +26,10 @@ export async function sourceFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
  */
 export async function testFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
   const testDir = await forgeTestDir(root);
-  const files: vscode.Uri[] = [];
-  const visit = async (dir: vscode.Uri) => {
-    const entries = await vscode.workspace.fs.readDirectory(dir);
-    for (const [name, type] of entries) {
-      const entryUri = vscode.Uri.joinPath(dir, name);
-      if (type === vscode.FileType.File && name.endsWith('.sol')) {
-        files.push(entryUri);
-      } else if (type === vscode.FileType.Directory) {
-        await visit(entryUri);
-      }
-    }
-  };
-  await visit(testDir);
-  return files;
+  const testFiles = await vscode.workspace.findFiles(
+    new vscode.RelativePattern(testDir, '**/*.sol')
+  );
+  return testFiles;
 }
 
 /**
