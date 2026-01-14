@@ -37,11 +37,15 @@ export async function testFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
  *
  * @param file The source file to build.
  * @param force Whether to force a rebuild, ignoring the cache.
+ * @param outSubfolder Optional subfolder within the output directory to place build artifacts.
+ * @param cacheSubfolder Optional subfolder within the cache directory to place cache files.
  * @returns The standard output of the `forge build` command.
  */
 export async function forgeBuild(
   file: vscode.Uri,
-  force = false
+  force = false,
+  outSubfolder?: string,
+  cacheSubfolder?: string
 ): Promise<string> {
   const forgePath = getConfigValue('forge-path', 'forge');
   const root = await foundryRoot(file);
@@ -57,6 +61,8 @@ export async function forgeBuild(
     FOUNDRY_FORCE: force ? 'true' : 'false',
     FOUNDRY_CACHE: 'true',
     FOUNDRY_USE_LITERAL_CONTENT: 'false', // Literal content blows up the size of the build-info
+    FOUNDRY_OUT: (await forgeOutDir(root, outSubfolder)).path,
+    FOUNDRY_CACHE_PATH: (await forgeCacheDir(root, cacheSubfolder)).path,
   };
   const cmd = `${forgePath} ${args.join(' ')}`;
   const result = await executeInTerminal(cmd, {cwd: root.path, env}, true);
@@ -102,11 +108,15 @@ export async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
  * @throws An error if the build-info file cannot be found in the cache.
  */
 export async function getBuildInfoFileFromCache(
-  file: vscode.Uri
+  file: vscode.Uri,
+  cacheSubfolder?: string
 ): Promise<vscode.Uri> {
   const root = await foundryRoot(file);
   try {
-    const cacheContent = (await loadCacheFile(root)) as {
+    const cacheContent = (await loadCacheFile(root, cacheSubfolder)) as {
+      paths: {
+        build_infos: string;
+      };
       files: {
         [key: string]: {
           artifacts: {[contractName: string]: {[version: string]: unknown}};
@@ -164,8 +174,12 @@ export async function getBuildInfoFileFromCache(
       );
     }
     const buildId = defaultEntry.build_id;
-    const buildInfoDir = await forgeBuildInfoDir(root);
-    const buildInfoFile = vscode.Uri.joinPath(buildInfoDir, `${buildId}.json`);
+    const buildInfoDir = cacheContent.paths.build_infos;
+    const buildInfoFile = vscode.Uri.joinPath(
+      root,
+      buildInfoDir,
+      `${buildId}.json`
+    );
     return buildInfoFile;
   } catch (e) {
     throw new Error(
@@ -183,10 +197,11 @@ export async function getBuildInfoFileFromCache(
  */
 export async function getArtifact(
   file: vscode.Uri,
-  contractName: string
+  contractName: string,
+  outSubfolder?: string
 ): Promise<vscode.Uri> {
   const root = await foundryRoot(file);
-  const outDir = await forgeOutDir(root);
+  const outDir = await forgeOutDir(root, outSubfolder);
   const fileName = file.path.split('/').pop();
   return vscode.Uri.joinPath(outDir, fileName!, contractName + '.json');
 }
@@ -212,13 +227,20 @@ export async function foundryConfig(root: vscode.Uri): Promise<FoundryConfig> {
  * Get the output directory for build artifacts as specified in the Foundry configuration.
  *
  * @param root The root URI of the Foundry project.
+ * @param subfolder Optional subfolder appended to the configured output directory.
  * @returns The URI of the output directory.
  */
-export async function forgeOutDir(root: vscode.Uri): Promise<vscode.Uri> {
+export async function forgeOutDir(
+  root: vscode.Uri,
+  subfolder?: string
+): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
   const defaultProfile = config?.profile?.default ?? {};
   const outputDir = defaultProfile?.out || 'out';
-  const outDir = vscode.Uri.joinPath(root, outputDir);
+  const outDir = vscode.Uri.joinPath(
+    root,
+    subfolder ? `${outputDir}/${subfolder}` : outputDir
+  );
   return outDir;
 }
 
@@ -254,12 +276,16 @@ export async function forgeTestDir(root: vscode.Uri): Promise<vscode.Uri> {
  * Get the build-info directory as specified in the Foundry configuration.
  *
  * @param root The root URI of the Foundry project.
+ * @param outSubfolder Optional subfolder within the output directory. Only used when the build-info path is not explicitly set.
  * @returns The URI of the build-info directory.
  */
-export async function forgeBuildInfoDir(root: vscode.Uri): Promise<vscode.Uri> {
+export async function forgeBuildInfoDir(
+  root: vscode.Uri,
+  outSubfolder?: string
+): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
   const defaultProfile = config?.profile?.default ?? {};
-  const outputDir = defaultProfile?.out || 'out';
+  const outputDir = await forgeOutDir(root, outSubfolder);
   const buildInfo =
     defaultProfile?.build_info_path || outputDir + '/build-info';
   const buildInfoDir = vscode.Uri.joinPath(root, buildInfo);
@@ -270,28 +296,44 @@ export async function forgeBuildInfoDir(root: vscode.Uri): Promise<vscode.Uri> {
  * Get the path to the Foundry Solidity compiler cache file.
  *
  * @param root The root URI of the Foundry project.
+ * @param cacheSubfolder Optional subfolder within the cache directory.
  * @returns The URI of the cache file.
  */
-async function getCacheFile(root: vscode.Uri): Promise<vscode.Uri> {
+async function forgeCacheFile(
+  root: vscode.Uri,
+  cacheSubfolder?: string
+): Promise<vscode.Uri> {
+  const cacheDir = await forgeCacheDir(root, cacheSubfolder);
+  const cacheFile = vscode.Uri.joinPath(cacheDir, 'solidity-files-cache.json');
+  return cacheFile;
+}
+
+async function forgeCacheDir(
+  root: vscode.Uri,
+  cacheSubfolder?: string
+): Promise<vscode.Uri> {
   const config = await foundryConfig(root);
   const defaultProfile = config?.profile?.default ?? {};
   const cachePath = defaultProfile?.cache_path || 'cache';
-  const cacheFile = vscode.Uri.joinPath(
+  const cacheDir = vscode.Uri.joinPath(
     root,
-    cachePath,
-    'solidity-files-cache.json'
+    cacheSubfolder ? `${cachePath}/${cacheSubfolder}` : cachePath
   );
-  return cacheFile;
+  return cacheDir;
 }
 
 /**
  * Get the contents of the Foundry Solidity compiler cache file.
  *
  * @param root The root URI of the Foundry project.
+ * @param cacheSubfolder Optional subfolder within the cache directory.
  * @returns A promise that resolves to the parsed JSON contents of the cache file.
  */
-async function loadCacheFile(root: vscode.Uri): Promise<unknown> {
-  const cacheFile = await getCacheFile(root);
+async function loadCacheFile(
+  root: vscode.Uri,
+  cacheSubfolder?: string
+): Promise<unknown> {
+  const cacheFile = await forgeCacheFile(root, cacheSubfolder);
   const cacheContent = await vscode.workspace.fs.readFile(cacheFile);
   const text = new TextDecoder().decode(cacheContent);
   return JSON.parse(text);
@@ -315,26 +357,6 @@ function relativePath(base: vscode.Uri, absolute: vscode.Uri): string {
   }
   const relative = absolutePath.slice(basePath.length);
   return absolute.with({path: relative}).path.slice(1);
-}
-
-export type ForgeTestSuite = {
-  [fileName: string]: {[contractName: string]: string[]};
-};
-
-/**
- * List all Foundry tests in the given workspace folder.
- *
- * @param root The root URI of the Foundry project.
- */
-export async function forgeListTests(
-  root: vscode.Uri
-): Promise<ForgeTestSuite> {
-  const forgePath = getConfigValue('forge-path', 'forge');
-  const output = await executeInTerminal(`${forgePath} test --list --json`, {
-    cwd: root,
-  });
-  const result: ForgeTestSuite = JSON.parse(output);
-  return result;
 }
 
 export type ForgeTestSuiteReport = Record<string, ForgeTestReport>; // keyed by filename.sol
@@ -414,9 +436,19 @@ export async function forgeTest(
   const argsString = args.join(' ');
   const output = await executeInTerminal(
     `${forgePath} test --json --allow-failure ${argsString}`,
-    {cwd: root}
+    {cwd: root, hideFromUser: false},
+    true
   );
-  const result: ForgeTestSuiteReport = JSON.parse(output);
+  // `forge test --json` may output logging info before and after the JSON object.
+  const firstBrace = output.indexOf('{');
+  const lastBrace = output.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error(
+      'Failed to parse forge coverage output: no JSON object found'
+    );
+  }
+  const jsonString = output.slice(firstBrace, lastBrace + 1);
+  const result: ForgeTestSuiteReport = JSON.parse(jsonString);
   return result;
 }
 
@@ -432,23 +464,38 @@ export async function forgeCoverage(
   options: ForgeTestOptions
 ): Promise<[ForgeTestSuiteReport, LcovRecord[]]> {
   const forgePath = getConfigValue('forge-path', 'forge');
-  const args = [];
-  if (options.path) {
-    args.push(`--match-path ${options.path}`);
-  }
-  if (options.contract) {
-    args.push(`--match-contract ${options.contract}`);
-  }
-  if (options.test) {
-    args.push(`--match-test ${options.test}`);
-  }
-  const argsString = args.join(' ');
+  const out = await forgeOutDir(root, 'coverage');
+  const reportUri = vscode.Uri.joinPath(out, 'lcov.info');
+  const reportFile = relativePath(root, reportUri);
+  const matchPath = options.path ? `--match-path ${options.path}` : '';
+  const matchContract = options.contract
+    ? `--match-contract ${options.contract}`
+    : '';
+  const matchTest = options.test ? `--match-test ${options.test}` : '';
+
+  const cmd = [
+    forgePath,
+    'coverage',
+    '--json',
+    '--allow-failure',
+    '--report',
+    'lcov',
+    '--exclude-tests',
+    '--report-file',
+    reportFile,
+    matchPath,
+    matchContract,
+    matchTest,
+  ].join(' ');
+
+  await vscode.workspace.fs.createDirectory(out);
   const output = await executeInTerminal(
-    `${forgePath} coverage --json --allow-failure --report=lcov --exclude-tests ${argsString}`,
-    {cwd: root}
+    cmd,
+    {cwd: root, hideFromUser: false},
+    true
   );
 
-  // `forge coverage --json` outputs some logging info before and after the JSON object.
+  // `forge coverage --json` may output logging info before and after the JSON object.
   const firstBrace = output.indexOf('{');
   const lastBrace = output.lastIndexOf('}');
   if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
@@ -458,15 +505,7 @@ export async function forgeCoverage(
   }
   const jsonString = output.slice(firstBrace, lastBrace + 1);
   const result: ForgeTestSuiteReport = JSON.parse(jsonString);
-
-  // The lcov report is not written to stdout, but to a file named "lcov.info" in the current working directory.
-  if (!root) {
-    throw new Error(
-      'No workspace folder is open; cannot locate lcov.info output file.'
-    );
-  }
-  const lcovUri = vscode.Uri.joinPath(root, 'lcov.info');
-  const lcovContent = await vscode.workspace.fs.readFile(lcovUri);
+  const lcovContent = await vscode.workspace.fs.readFile(reportUri);
   const lcovText = new TextDecoder().decode(lcovContent);
   const lcovRecords = parseLcov(lcovText);
   return [result, lcovRecords];
@@ -485,15 +524,18 @@ export async function forgeLintFile(
   collection.delete(file);
   const cwd = await foundryRoot(file);
   const forgePath = getConfigValue('forge-path', 'forge');
-  const out = await forgeOutDir(cwd);
-  const lintOut = vscode.Uri.joinPath(out, 'lint');
-  const lintOutPath = relativePath(cwd, lintOut);
+  const out = await forgeOutDir(cwd, 'lint');
+  const cacheDir = await forgeCacheDir(cwd, 'lint');
+  const env = {
+    FOUNDRY_CACHE_PATH: cacheDir.path,
+  };
+  const lintOutPath = relativePath(cwd, out);
   // `forge lint` will build the file if needed and write the artifacts to the out folder.
   // The build is not suitable for debugging because it uses different compiler settings.
   // Hence, we use a different out folder for linting.
   const output = await executeInTerminal(
     `${forgePath} lint --json ${file.fsPath} --out='${lintOutPath}'`,
-    {cwd}
+    {cwd, env}
   );
   const diagnistics = output
     .split('\n')

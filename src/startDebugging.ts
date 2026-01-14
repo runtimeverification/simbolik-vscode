@@ -155,7 +155,7 @@ async function compile(file: vscode.Uri): Promise<vscode.Uri> {
 
   if (autobuild === 'always' || autobuild === 'on-change') {
     try {
-      await forgeBuild(file, autobuild === 'always');
+      await forgeBuild(file, autobuild === 'always', 'simbolik', 'simbolik');
     } catch (e) {
       throw new Error(
         'Failed to build project. Please check the terminal for build errors.'
@@ -165,7 +165,7 @@ async function compile(file: vscode.Uri): Promise<vscode.Uri> {
 
   let buildInfoFile: vscode.Uri;
   try {
-    buildInfoFile = await getBuildInfoFileFromCache(file);
+    buildInfoFile = await getBuildInfoFileFromCache(file, 'simbolik');
   } catch (e) {
     if (autobuild === 'never') {
       throw new Error(
@@ -185,7 +185,11 @@ async function getMethodSignature(
   contract: ContractDefinition,
   method: FunctionDefinition
 ): Promise<{methodSignature: string; isTest: boolean}> {
-  const contractArtifact = await getArtifact(file, contract['name']);
+  const contractArtifact = await getArtifact(
+    file,
+    contract['name'],
+    'simbolik'
+  );
   const content = await vscode.workspace.fs.readFile(contractArtifact);
   const textContent = new TextDecoder().decode(content);
   const artifact = JSON.parse(textContent);
