@@ -18,13 +18,13 @@ import {LcovRecord} from './lcov';
 export async function createTestController(): Promise<vscode.TestController> {
   const testController = vscode.tests.createTestController(
     'simbolik-test-controller',
-    'Foundry Tests'
+    'Solidity Tests'
   );
 
   let testTree: IndexedTestTree = await createTestTree(testController);
 
   testController.createRunProfile(
-    'Debug Foundry Tests',
+    'Debug Test',
     vscode.TestRunProfileKind.Debug,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async (request, token) => {
@@ -40,7 +40,7 @@ export async function createTestController(): Promise<vscode.TestController> {
         startDebugging(file!, contract, method);
       }
     },
-    false,
+    true,
     tag('debug')
   );
 
@@ -137,8 +137,8 @@ function createFoundryProfile(
 ) {
   return testController.createRunProfile(
     profileKind === vscode.TestRunProfileKind.Run
-      ? 'Run Foundry Tests'
-      : 'Run Foundry Tests with Coverage',
+      ? 'Run Tests'
+      : 'Run Tests with Coverage',
     profileKind,
     async (request, token) => {
       const run = testController.createTestRun(request);
@@ -200,7 +200,7 @@ function createFoundryProfile(
         run.end();
       }
     },
-    false,
+    true,
     profileKind === vscode.TestRunProfileKind.Run ? tag('run') : tag('coverage')
   );
 }
