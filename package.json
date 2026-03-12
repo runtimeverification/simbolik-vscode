@@ -288,8 +288,5 @@
     "src/**/*.{ts,js}": [
       "gts fix"
     ]
-  },
-  "extensionDependencies": [
-    "runtimeverification.kaas-vscode"
-  ]
+  }
 }
