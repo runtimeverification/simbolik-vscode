@@ -2,6 +2,15 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [13.0.0] - 2026-03-15
+
+- Added support for debugging Foundry test cases
+- Added a test explorer for Foundry tests
+- Added test coverage reports for Foundry tests
+- Added static analysis integration based on Foundry's linting rules
+- Speed up compilation by only compiling contracts that are relevant for the debugging session
+- Separate compilation for debugging, testing, coverage and static analysis to avoid unnecessary recompilation
+- Simplified debugging functions with parameters by prompting users to input the parameters in a more user-friendly way
 
 ## [12.0.0] - 2025-12-11
 - Improved compilation pipeline
