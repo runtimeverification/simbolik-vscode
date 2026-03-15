@@ -72,6 +72,15 @@ export async function startDebugging(
           contract,
           method
         ));
+        if (isTest) {
+          const hasPermission = await precheckPermission(credentials);
+          if (!hasPermission) {
+            throw new Error(
+              'Debugging test functions is only available to Simbolik supporters.' +
+                'You can become a supporter by making a donation '
+            );
+          }
+        }
         payload = await getUserInput(methodSignature);
       } catch (e) {
         vscode.window.showErrorMessage((e as Error).message);
@@ -124,27 +133,84 @@ export async function startDebugging(
   return;
 }
 
+/**
+ * Resolves credentials for the current user using the following priority order:
+ * 1. Simbolik API key from extension configuration.
+ * 2. An existing GitHub session (silent, no prompt).
+ * 3. Interactive prompt asking the user to choose an authentication method.
+ */
 async function getCredentials(): Promise<Credentials> {
   const apiKey = getConfigValue<string>('api-key', 'valid-api-key');
-  let credentials: Credentials;
   if (apiKey !== 'valid-api-key' && apiKey !== '') {
-    credentials = {provider: 'simbolik', token: apiKey};
-  } else {
-    const session = await vscode.authentication.getSession(
-      'github',
-      ['user:email'],
-      {
-        createIfNone: true,
-      }
-    );
-    if (!session) {
-      throw new Error(
-        'Please sign in to GitHub or provide a Simbolik API key.'
-      );
-    }
-    credentials = {provider: 'github', token: session.accessToken};
+    return {provider: 'simbolik', token: apiKey};
   }
-  return credentials;
+
+  const existingSession = await vscode.authentication.getSession(
+    'github',
+    ['user:email'],
+    {createIfNone: false}
+  );
+  if (existingSession) {
+    return {provider: 'github', token: existingSession.accessToken};
+  }
+
+  return promptForAuthentication();
+}
+
+/**
+ * Asks the user to choose between signing in with GitHub or entering a Simbolik API key,
+ * then delegates to the appropriate sign-in flow.
+ * @throws if the user dismisses the prompt without making a choice.
+ */
+async function promptForAuthentication(): Promise<Credentials> {
+  const choice = await vscode.window.showQuickPick(
+    ['Sign in with GitHub', 'Enter Simbolik API Key'],
+    {placeHolder: 'Choose authentication method'}
+  );
+  if (!choice) {
+    throw new Error('Authentication required to start debugging.');
+  }
+  return choice === 'Enter Simbolik API Key'
+    ? promptForSimbolikApiKey()
+    : signInWithGitHub();
+}
+
+/**
+ * Prompts the user to enter a Simbolik API key, saves it to the global extension
+ * configuration for future use, and returns it as credentials.
+ * @throws if the user dismisses the input box without entering a key.
+ */
+async function promptForSimbolikApiKey(): Promise<Credentials> {
+  const input = await vscode.window.showInputBox({
+    prompt: 'Enter your Simbolik API key',
+    ignoreFocusOut: true,
+    validateInput: value =>
+      value.trim() === '' ? 'API key cannot be empty' : undefined,
+  });
+  if (!input) {
+    throw new Error('Simbolik API key is required to start debugging.');
+  }
+  const token = input.trim();
+  await vscode.workspace
+    .getConfiguration()
+    .update('simbolik.api-key', token, vscode.ConfigurationTarget.Global);
+  return {provider: 'simbolik', token};
+}
+
+/**
+ * Triggers the VS Code GitHub authentication flow and returns the resulting credentials.
+ * @throws if authentication fails or the user cancels the sign-in.
+ */
+async function signInWithGitHub(): Promise<Credentials> {
+  const session = await vscode.authentication.getSession(
+    'github',
+    ['user:email'],
+    {createIfNone: true}
+  );
+  if (!session) {
+    throw new Error('GitHub authentication failed. Please try again.');
+  }
+  return {provider: 'github', token: session.accessToken};
 }
 
 async function compile(file: vscode.Uri): Promise<vscode.Uri> {
@@ -313,4 +379,39 @@ function uint8ArrayToHex(bytes: Uint8Array<ArrayBufferLike>): string {
       .map(b => b.toString(16).padStart(2, '0'))
       .join('')
   );
+}
+
+/**
+ * Checks whether the authenticated user has permission to debug test functions,
+ * which is a feature exclusive to Simbolik supporters.
+ *
+ * Queries the `/permissions` endpoint of the configured Simbolik server. Returns
+ * `true` if the user has the `kontrol-node` permission, or if the check cannot be
+ * completed (e.g. network error, unexpected response) — failing open to avoid
+ * blocking users unnecessarily.
+ *
+ * @param credentials - The credentials to authenticate the request with.
+ * @returns `true` if the user is authorized (or authorization could not be verified), `false` otherwise.
+ */
+async function precheckPermission(credentials: Credentials): Promise<boolean> {
+  const api = getConfigValue('server', 'wss://code.simbolik.dev');
+  const endpoint = api.replace('ws', 'http') + '/permissions';
+  try {
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'x-auth-provider': credentials.provider,
+        'x-auth-token': credentials.token,
+      },
+      signal: AbortSignal.timeout(2000), // Set a timeout to avoid hanging if the server is unresponsive
+    });
+    if (!response.ok) {
+      return true;
+    }
+    const data = await response.json();
+    return !Array.isArray(data) || 'kontrol-node' in data;
+  } catch (e) {
+    // If the request fails (e.g., network error), we don't want to block debugging, so we return true.
+    return true;
+  }
 }
