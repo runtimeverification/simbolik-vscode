@@ -78,7 +78,7 @@ export class CodelensProvider implements vscode.CodeLensProvider {
         if (!hasConstructorArgs) {
           parser.visit(contract, {
             FunctionDefinition: fn => {
-              if (this.isExecutable(fn)) {
+              if (this.isExecutable(fn) && fn.parameters.length === 0) {
                 results.push([contract, fn]);
               }
             },

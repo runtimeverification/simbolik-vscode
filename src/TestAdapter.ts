@@ -23,26 +23,26 @@ export async function createTestController(): Promise<vscode.TestController> {
 
   let testTree: IndexedTestTree = await createTestTree(testController);
 
-  testController.createRunProfile(
-    'Debug Test',
-    vscode.TestRunProfileKind.Debug,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async (request, token) => {
-      for (const item of request.include ?? []) {
-        const {file, contract, method}: TestContext =
-          testTree.items.get(item) ?? {};
-        if (!contract || !method) {
-          vscode.window.showErrorMessage(
-            'Can only debug individual test methods.'
-          );
-          continue;
-        }
-        startDebugging(file!, contract, method);
-      }
-    },
-    true,
-    tag('debug')
-  );
+  // testController.createRunProfile(
+  //   'Debug Test',
+  //   vscode.TestRunProfileKind.Debug,
+  //   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  //   async (request, token) => {
+  //     for (const item of request.include ?? []) {
+  //       const {file, contract, method}: TestContext =
+  //         testTree.items.get(item) ?? {};
+  //       if (!contract || !method) {
+  //         vscode.window.showErrorMessage(
+  //           'Can only debug individual test methods.'
+  //         );
+  //         continue;
+  //       }
+  //       startDebugging(file!, contract, method);
+  //     }
+  //   },
+  //   true,
+  //   tag('debug')
+  // );
 
   createFoundryProfile(testController, testTree, vscode.TestRunProfileKind.Run);
   const coverageCache: WeakMap<

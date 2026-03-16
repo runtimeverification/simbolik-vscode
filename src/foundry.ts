@@ -436,7 +436,7 @@ export async function forgeTest(
   const argsString = args.join(' ');
   const output = await executeInTerminal(
     `${forgePath} test --json --allow-failure ${argsString}`,
-    {cwd: root, hideFromUser: false},
+    {cwd: root, hideFromUser: true},
     true
   );
   // `forge test --json` may output logging info before and after the JSON object.
@@ -491,7 +491,7 @@ export async function forgeCoverage(
   await vscode.workspace.fs.createDirectory(out);
   const output = await executeInTerminal(
     cmd,
-    {cwd: root, hideFromUser: false},
+    {cwd: root, hideFromUser: true},
     true
   );
 
