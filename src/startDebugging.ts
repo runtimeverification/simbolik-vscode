@@ -76,8 +76,8 @@ export async function startDebugging(
           const hasPermission = await precheckPermission(credentials);
           if (!hasPermission) {
             throw new Error(
-              'Debugging test functions is only available to Simbolik supporters.' +
-                'You can become a supporter by making a donation '
+              'Debugging test functions is only available to users with "contributor" or "team player" roles.' +
+                'Login into https://www.simbolik.dev/ for more information on how to get access, or contact support if you believe you should have access.'
             );
           }
         }
@@ -409,7 +409,7 @@ async function precheckPermission(credentials: Credentials): Promise<boolean> {
       return true;
     }
     const data = await response.json();
-    return !Array.isArray(data) || 'kontrol-node' in data;
+    return !Array.isArray(data) || data.includes('kontrol-node');
   } catch (e) {
     // If the request fails (e.g., network error), we don't want to block debugging, so we return true.
     return true;
