@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "12.0.0",
+  "version": "13.0.0",
   "engines": {
     "vscode": "^1.79.0",
     "node": ">=16.0.0"
@@ -107,16 +107,6 @@
           "description": "Attach requests use this Sourcify endpoint to download the source code of the debugged transaction.",
           "default": "http://localhost:5555",
           "order": 10
-        },
-        "simbolik.rpc-node-type": {
-          "type": "string",
-          "enum": [
-            "anvil",
-            "kontrol-node"
-          ],
-          "default": "anvil",
-          "description": "The type of the JSON-RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta.",
-          "order": 11
         }
       }
     },
@@ -281,6 +271,7 @@
   },
   "dependencies": {
     "@andrewbranch/untar.js": "^1.0.3",
+    "@metamask/abi-utils": "^3.0.0",
     "@solidity-parser/parser": "^0.18.0",
     "@types/ws": "^8.5.10",
     "fflate": "^0.8.2",
@@ -297,8 +288,5 @@
     "src/**/*.{ts,js}": [
       "gts fix"
     ]
-  },
-  "extensionDependencies": [
-    "runtimeverification.kaas-vscode"
-  ]
+  }
 }

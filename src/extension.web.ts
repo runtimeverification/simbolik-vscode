@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'simbolik.startDebugging',
-      (contract, method) => startDebugging(contract, method)
+      (file, contract, method) => startDebugging(file, contract, method)
     )
   );
 
