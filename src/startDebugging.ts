@@ -385,6 +385,11 @@ function uint8ArrayToHex(bytes: Uint8Array<ArrayBufferLike>): string {
  * Checks whether the authenticated user has permission to debug test functions,
  * which is a feature exclusive to Simbolik supporters.
  *
+ * Notice, that this is only a pre-check to provide a better user experience by
+ * avoiding starting a debug session that would fail later on due to lack of
+ * permissions. The actual permission check is enforced on the server when the
+ * debug session starts.
+ *
  * Queries the `/permissions` endpoint of the configured Simbolik server. Returns
  * `true` if the user has the `kontrol-node` permission, or if the check cannot be
  * completed (e.g. network error, unexpected response) — failing open to avoid
