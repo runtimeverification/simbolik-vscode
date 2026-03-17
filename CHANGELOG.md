@@ -2,6 +2,11 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [14.0.0] - 2026-03-17
+
+- Added support for debugging Foundry tests
+- Added a dialog to prompt users for parameter values when debugging functions with formal parameters
+
 ## [13.0.0] - 2026-03-15
 
 - Added a test explorer for Foundry tests

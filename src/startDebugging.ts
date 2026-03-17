@@ -73,16 +73,13 @@ export async function startDebugging(
           method
         ));
         if (isTest) {
-          throw new Error(
-            'Test case debugging is not yet available. Stay tuned for updates!'
-          );
-          // const hasPermission = await precheckPermission(credentials);
-          // if (!hasPermission) {
-          //   throw new Error(
-          //     'Debugging test functions is only available to users with "contributor" or "team player" roles.' +
-          //       'Login into https://www.simbolik.dev/ for more information on how to get access, or contact support if you believe you should have access.'
-          //   );
-          // }
+          const hasPermission = await precheckPermission(credentials);
+          if (!hasPermission) {
+            throw new Error(
+              'Debugging test functions is only available to users with "contributor" or "innovator" roles. ' +
+                'Login into https://www.simbolik.dev/ for more information on how to get access, or contact support if you believe you should have access.'
+            );
+          }
         }
         payload = await getUserInput(methodSignature);
       } catch (e) {
@@ -387,6 +384,11 @@ function uint8ArrayToHex(bytes: Uint8Array<ArrayBufferLike>): string {
 /**
  * Checks whether the authenticated user has permission to debug test functions,
  * which is a feature exclusive to Simbolik supporters.
+ *
+ * Notice, that this is only a pre-check to provide a better user experience by
+ * avoiding starting a debug session that would fail later on due to lack of
+ * permissions. The actual permission check is enforced on the server when the
+ * debug session starts.
  *
  * Queries the `/permissions` endpoint of the configured Simbolik server. Returns
  * `true` if the user has the `kontrol-node` permission, or if the check cannot be
