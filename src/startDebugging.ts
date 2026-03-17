@@ -1,8 +1,5 @@
 import {
   ContractDefinition,
-  Expression,
-  ExpressionStatement,
-  FunctionCall,
   FunctionDefinition,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
@@ -13,8 +10,7 @@ import {
   getArtifact,
   getBuildInfoFileFromCache,
 } from './foundry';
-import {tuple} from '@metamask/abi-utils/dist/parsers';
-import * as parser from '@solidity-parser/parser';
+import {abiEncode} from './abi';
 
 export type Credentials =
   | {
@@ -61,7 +57,7 @@ export async function startDebugging(
       let buildInfoFile: vscode.Uri;
       let methodSignature: string;
       let isTest: boolean;
-      let payload: Uint8Array<ArrayBufferLike>;
+      let payload: string;
       try {
         credentials = await getCredentials();
         progress.report({message: 'Compiling'});
@@ -111,7 +107,7 @@ export async function startDebugging(
         file: file.toString(),
         contractName: contractName,
         methodSignature: methodSignature,
-        payload: uint8ArrayToHex(payload),
+        payload: payload,
         stopAtFirstOpcode: false,
         showSourcemaps: showSourcemaps,
         jsonRpcUrl: jsonRpcUrl,
@@ -268,29 +264,21 @@ async function getMethodSignature(
   return {methodSignature, isTest};
 }
 
-async function getUserInput(
-  methodSignature: string
-): Promise<Uint8Array<ArrayBufferLike>> {
+async function getUserInput(methodSignature: string): Promise<string> {
   // Extract parameter types from method signature
   const abiParams = methodSignature.slice(methodSignature.indexOf('('));
   if (abiParams === '()') {
-    return new Uint8Array();
+    return '0x';
   }
   // Prompt user for input parameters
-  let encoded: Uint8Array<ArrayBufferLike> | undefined;
+  let encoded: string | undefined;
   const userInput = await vscode.window.showInputBox({
     prompt: `Enter input parameters for ${methodSignature}.`,
     placeHolder: abiParams.slice(1, -1),
     validateInput: value => {
       try {
-        const parsed = parse(value);
-        encoded = tuple.encode({
-          type: abiParams,
-          value: parsed,
-          buffer: new Uint8Array(),
-          packed: false,
-          tight: false,
-        });
+        const type = methodSignature.slice(methodSignature.indexOf('('));
+        encoded = abiEncode(type, `(${value})`);
       } catch (e) {
         return {
           message: `Invalid input parameters. Expecting types: ${abiParams.slice(1, -1)}. Provide parameters in Solidity literal syntax.`,
@@ -304,81 +292,6 @@ async function getUserInput(
     throw new Error('Debugging cancelled: input parameters required.');
   }
   return encoded;
-}
-
-type Param = BigInt | string | boolean | Param[];
-
-function parse(input: string): Param[] {
-  const parsed = parser.parse(`
-    contract Dummy {
-      function dummy() {
-        foo(${input});
-      }
-    }
-  `);
-  const contract = parsed.children[0] as ContractDefinition;
-  const method = contract.subNodes[0] as FunctionDefinition;
-  const stmt = method.body!.statements[0]! as ExpressionStatement;
-  const call = stmt.expression! as FunctionCall;
-  const args = call.arguments;
-  const result = args.map(arg => toParam(arg as Expression));
-  return result;
-}
-
-function toParam(expr: Expression): Param {
-  switch (expr.type) {
-    case 'TupleExpression':
-      return expr.components.map(e => toParam(e as Expression));
-    case 'NumberLiteral':
-      if (expr.subdenomination) {
-        const base = BigInt(expr.number);
-        const factor = denominationMap[expr.subdenomination]!;
-        return base * factor;
-      }
-      return BigInt(expr.number);
-    case 'BooleanLiteral':
-      return expr.value;
-    case 'StringLiteral':
-      return expr.value;
-    default:
-      throw new Error();
-  }
-}
-
-const denominationMap: {[key: string]: bigint} = {
-  wei: 1n,
-  kwei: 1000n,
-  ada: 1000n,
-  femtoether: 1000n,
-  mwei: 1000000n,
-  babbage: 1000000n,
-  picoether: 1000000n,
-  gwei: 1000000000n,
-  shannon: 1000000000n,
-  nanoether: 1000000000n,
-  nano: 1000000000n,
-  szabo: 1000000000000n,
-  microether: 1000000000000n,
-  micro: 1000000000000n,
-  finney: 1000000000000000n,
-  milliether: 1000000000000000n,
-  milli: 1000000000000000n,
-  ether: 1000000000000000000n,
-  kether: 1000000000000000000000n,
-  grand: 1000000000000000000000n,
-  einstein: 1000000000000000000000n,
-  mether: 1000000000000000000000000n,
-  gether: 1000000000000000000000000000n,
-  tether: 1000000000000000000000000000000n,
-};
-
-function uint8ArrayToHex(bytes: Uint8Array<ArrayBufferLike>): string {
-  return (
-    '0x' +
-    Array.from(bytes)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('')
-  );
 }
 
 /**
