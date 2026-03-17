@@ -8,7 +8,7 @@
 [![Discord](https://img.shields.io/badge/discord-join-7289da)](https://discord.gg/CurfmXNtbN)
 [![License](https://img.shields.io/badge/license-BSD--3-orange)](LICENSE)
 
-[Quick Start](#-quick-start) • [Documentation](#-documentation) • [Community](#-community)
+[Quick Start](#-quick-start) • [Documentation](#-documentation) • [Features](#-interactive-debugging-at-the-solidity-level)
 </div>
 
 Simbolik brings decades of research and engineering in software quality assurance to Solidity. It's an engineer's toolbox, including static analysis detectors, a breakpoint-style debugger, test case explorer, and code coverage reports, all integrated into a seamless experience in Visual Studio Code and Cursor.
