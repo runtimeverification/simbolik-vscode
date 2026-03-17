@@ -76,7 +76,7 @@ export async function startDebugging(
           const hasPermission = await precheckPermission(credentials);
           if (!hasPermission) {
             throw new Error(
-              'Debugging test functions is only available to users with "contributor" or "team player" roles.' +
+              'Debugging test functions is only available to users with "contributor" or "innovator" roles. ' +
                 'Login into https://www.simbolik.dev/ for more information on how to get access, or contact support if you believe you should have access.'
             );
           }
