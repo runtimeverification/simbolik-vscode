@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [14.0.1] - 2026-03-18
+
+- Improved documentation in README.md
+
 ## [14.0.0] - 2026-03-17
 
 - Added support for debugging Foundry tests
