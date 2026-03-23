@@ -2,6 +2,12 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [15.0.0] - 2026-03-23
+
+- Simbolik now allows inspecting mappings
+- Restarting a debugging session now takes code changes into account
+- Fixed a bug, that caused corrupted compilation data on cache hits
+
 ## [14.0.1] - 2026-03-18
 
 - Improved documentation in README.md
