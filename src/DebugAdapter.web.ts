@@ -149,6 +149,11 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   }
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msg = message as Record<string, any>;
+    if (msg.command === 'launch' || msg.command === 'attach') {
+      Object.assign(msg.arguments, this.configuration);
+    }
     const messageWithRelativePaths = this.trimPaths(message);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }

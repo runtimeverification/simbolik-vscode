@@ -22,8 +22,62 @@ export type Credentials =
       token: string;
     };
 
+export interface PartialDebugConfiguration extends vscode.DebugConfiguration {
+  file: string;
+  contractName: string;
+  methodName: string;
+}
+
+export interface FullDebugConfiguration {
+  name: string;
+  type: 'solidity';
+  request: 'launch' | 'attach';
+  file: string;
+  contractName: string;
+  methodSignature: string;
+  payload: string;
+  stopAtFirstOpcode: boolean;
+  showSourcemaps: boolean;
+  jsonRpcUrl: string;
+  sourcifyUrl: string;
+  buildInfoFiles: vscode.Uri[];
+  clientMount: vscode.Uri;
+  credentials: Credentials;
+  clientVersion?: string;
+  rpcNodeType: 'anvil' | 'kontrol-node';
+}
+
 /**
- * Start a debugging session for the given contract and method.
+ * Start a debugging session for the given file, contract and method.
+ */
+export async function startDebugging(
+  file: vscode.Uri,
+  contract: ContractDefinition,
+  method: FunctionDefinition
+) {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
+  if (!workspaceFolder) {
+    vscode.window.showErrorMessage(
+      'Debugging can only be started from within a workspace folder.'
+    );
+    return;
+  }
+  const name = `${contract.name}.${method.name}`;
+  await vscode.debug.startDebugging(workspaceFolder, {
+    type: 'solidity',
+    name,
+    request: 'launch',
+    file: file.toString(),
+    contractName: contract.name,
+    methodName: method.name,
+  });
+}
+
+/**
+ * Populate the debug configuration by performing the necessary preparation steps.
+ * The two-phase approach of first creating a partial configuration with the basic info,
+ * then populating it with the rest of the details is needed, so that we can run the
+ * preperation steps again when the user hits the "restart" button in the debug view.
  *
  * 1. Gather configuration and credentials
  * 2. Compile the project if necessary
@@ -34,25 +88,15 @@ export type Credentials =
  * @param method The method definition to debug.
  * @returns
  */
-export async function startDebugging(
-  file: vscode.Uri,
-  contract: ContractDefinition,
-  method: FunctionDefinition
-) {
+export async function populateDebugConfiguration(
+  config: PartialDebugConfiguration
+): Promise<FullDebugConfiguration> {
   const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
       title: 'Simbolik',
     },
     async progress => {
-      const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage(
-          'Debugging can only be started from within a workspace folder.'
-        );
-        return;
-      }
-
       let credentials: Credentials;
       let buildInfoFile: vscode.Uri;
       let methodSignature: string;
@@ -61,12 +105,12 @@ export async function startDebugging(
       try {
         credentials = await getCredentials();
         progress.report({message: 'Compiling'});
-        buildInfoFile = await compile(file);
+        buildInfoFile = await compile(vscode.Uri.parse(config.file));
         progress.report({increment: 100});
         ({methodSignature, isTest} = await getMethodSignature(
-          file,
-          contract,
-          method
+          vscode.Uri.parse(config.file),
+          config.contractName,
+          config.methodName
         ));
         if (isTest) {
           const hasPermission = await precheckPermission(credentials);
@@ -83,7 +127,7 @@ export async function startDebugging(
         return;
       }
 
-      const contractName = contract['name'];
+      const contractName = config.contractName;
       const showSourcemaps = getConfigValue('show-sourcemaps', false);
       const jsonRpcUrl = getConfigValue(
         'json-rpc-url',
@@ -98,14 +142,14 @@ export async function startDebugging(
       const clientVersion = vscode.extensions.getExtension(
         'runtimeverification.simbolik'
       )?.packageJSON.version;
-      const myFoundryRoot = await foundryRoot(file);
+      const myFoundryRoot = await foundryRoot(vscode.Uri.parse(config.file));
 
-      const debugConfig = {
+      const debugConfig: FullDebugConfiguration = {
         name: debugConfigName,
         type: 'solidity',
         request: 'launch',
-        file: file.toString(),
-        contractName: contractName,
+        file: config.file,
+        contractName,
         methodSignature: methodSignature,
         payload: payload,
         stopAtFirstOpcode: false,
@@ -118,15 +162,15 @@ export async function startDebugging(
         clientVersion: clientVersion,
         rpcNodeType: rpcNodeType,
       };
-      return {workspaceFolder, debugConfig};
+      return debugConfig;
     }
   );
   if (!result) {
-    return;
+    throw new Error(
+      'Failed to start debugging session due to previous errors.'
+    );
   }
-  const {workspaceFolder, debugConfig} = result;
-  await vscode.debug.startDebugging(workspaceFolder, debugConfig);
-  return;
+  return result;
 }
 
 /**
@@ -244,19 +288,15 @@ async function compile(file: vscode.Uri): Promise<vscode.Uri> {
 
 async function getMethodSignature(
   file: vscode.Uri,
-  contract: ContractDefinition,
-  method: FunctionDefinition
+  contractName: string,
+  methodName: string
 ): Promise<{methodSignature: string; isTest: boolean}> {
-  const contractArtifact = await getArtifact(
-    file,
-    contract['name'],
-    'simbolik'
-  );
+  const contractArtifact = await getArtifact(file, contractName, 'simbolik');
   const content = await vscode.workspace.fs.readFile(contractArtifact);
   const textContent = new TextDecoder().decode(content);
   const artifact = JSON.parse(textContent);
   const methodSignature = Object.keys(artifact.methodIdentifiers ?? {}).find(
-    sig => sig.startsWith(method['name'] + '(')
+    sig => sig.startsWith(methodName + '(')
   )!;
   const isTest = Object.keys(artifact.methodIdentifiers ?? {}).some(
     sig => sig === 'IS_TEST()'
