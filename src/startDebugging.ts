@@ -77,7 +77,7 @@ export async function startDebugging(
  * Populate the debug configuration by performing the necessary preparation steps.
  * The two-phase approach of first creating a partial configuration with the basic info,
  * then populating it with the rest of the details is needed, so that we can run the
- * preperation steps again when the user hits the "restart" button in the debug view.
+ * preparation steps again when the user hits the "restart" button in the debug view.
  *
  * 1. Gather configuration and credentials
  * 2. Compile the project if necessary

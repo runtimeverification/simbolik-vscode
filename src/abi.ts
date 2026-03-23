@@ -50,7 +50,7 @@ export function abiEncode(type: string, input: string): string {
 }
 
 /**
- * We expect the user to provide funciton parameters in Solidity syntax.
+ * We expect the user to provide function parameters in Solidity syntax.
  * The metamask abi encoder expects a different syntax.
  *
  * This function normalizes the user input to match the expected syntax of the abi encoder.

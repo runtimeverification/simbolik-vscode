@@ -124,7 +124,7 @@
             "required": [
               "file",
               "contractName",
-              "methodSignature"
+              "methodName"
             ],
             "properties": {
               "contractName": {
