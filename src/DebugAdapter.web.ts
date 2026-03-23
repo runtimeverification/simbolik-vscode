@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
+import {
+  PartialDebugConfiguration,
+  populateDebugConfiguration,
+} from './startDebugging';
 
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
@@ -17,14 +21,21 @@ function getWssUrl(): string {
 export class SolidityDebugAdapterDescriptorFactory
   implements vscode.DebugAdapterDescriptorFactory
 {
-  createDebugAdapterDescriptor(
+  async createDebugAdapterDescriptor(
     session: vscode.DebugSession,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
+    const config =
+      session.configuration.request === 'launch'
+        ? await populateDebugConfiguration(
+            session.configuration as PartialDebugConfiguration
+          )
+        : session.configuration;
+
     return new Promise((resolve, reject) => {
       const server = getWssUrl();
-      const credentials = session.configuration.credentials;
+      const credentials = config.credentials;
       const encodedProvider = encodeURIComponent(credentials.provider);
       const encodedToken = encodeURIComponent(credentials.token);
       const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
