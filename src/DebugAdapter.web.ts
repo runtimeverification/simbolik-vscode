@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
 import {
+  FullDebugConfiguration,
   PartialDebugConfiguration,
   populateDebugConfiguration,
 } from './startDebugging';
@@ -40,10 +41,7 @@ export class SolidityDebugAdapterDescriptorFactory
       const encodedToken = encodeURIComponent(credentials.token);
       const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
       const websocket = new WebSocket(url);
-      const websocketAdapter = new WebsocketDebugAdapter(
-        websocket,
-        config
-      );
+      const websocketAdapter = new WebsocketDebugAdapter(websocket, config);
       const implementation = new vscode.DebugAdapterInlineImplementation(
         websocketAdapter
       );
@@ -148,7 +146,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
 
   constructor(
     private websocket: WebSocket,
-    private configuration: vscode.DebugConfiguration
+    private configuration: vscode.DebugConfiguration | FullDebugConfiguration
   ) {
     websocket.onmessage = (message: MessageEvent) => {
       const data = JSON.parse(message.data);
