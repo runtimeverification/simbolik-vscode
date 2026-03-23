@@ -42,7 +42,7 @@ export class SolidityDebugAdapterDescriptorFactory
       const websocket = new WebSocket(url);
       const websocketAdapter = new WebsocketDebugAdapter(
         websocket,
-        session.configuration
+        config
       );
       const implementation = new vscode.DebugAdapterInlineImplementation(
         websocketAdapter
@@ -59,7 +59,7 @@ export class SolidityDebugAdapterDescriptorFactory
             // Before the DAP communication starts we upload the build_info files
             // to the server. This is needed for the server to be able to
             // resolve the paths to the source files.
-            const buildInfoFiles = session.configuration.buildInfoFiles ?? [];
+            const buildInfoFiles = config.buildInfoFiles ?? [];
 
             token.onCancellationRequested(() => {
               websocket.close();
