@@ -11,7 +11,7 @@
   },
   "publisher": "runtimeverification",
   "description": "Advanced Solidity and EVM Debugger",
-  "version": "14.0.1",
+  "version": "15.0.0",
   "engines": {
     "vscode": "^1.79.0",
     "node": ">=16.0.0"
@@ -75,11 +75,11 @@
             "on-change",
             "always"
           ],
-          "default": "on-change",
+          "default": "always",
           "markdownEnumDescriptions": [
             "Never build the project automatically. This is useful when you're using `forge build --watch` to build the project.",
-            "Build the project when the source code changes.",
-            "Always build the project before every debugging session."
+            "Build the project when the source code changes (utilizes Foundry's built-in compiler cache).",
+            "Build the project before every debugging session."
           ],
           "description": "Chose when Simbolik should build the project.",
           "order": 3
@@ -124,49 +124,20 @@
             "required": [
               "file",
               "contractName",
-              "methodSignature",
-              "jsonRpcUrl",
-              "clientMount",
-              "rpcNodeType"
+              "methodName"
             ],
             "properties": {
               "contractName": {
                 "type": "string",
                 "description": "The name of the contract to debug."
               },
-              "methodSignature": {
+              "methodName": {
                 "type": "string",
-                "description": "The signature of the method to debug."
+                "description": "The name of the method to debug."
               },
               "file": {
                 "type": "string",
                 "description": "The file containing the smart contract to debug."
-              },
-              "clientMount": {
-                "type": "string",
-                "description": "The absolute file system path to the project root."
-              },
-              "jsonRpcUrl": {
-                "type": "string",
-                "description": "The URL of the JSON-RPC server."
-              },
-              "stopAtFirstOpcode": {
-                "type": "boolean",
-                "description": "If set to true, the debugger will stop at the first opcode.",
-                "default": false
-              },
-              "showSourcemaps": {
-                "type": "boolean",
-                "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
-                "default": false
-              },
-              "rpcNodeType": {
-                "type": "string",
-                "enum": [
-                  "anvil",
-                  "kontrol-node"
-                ],
-                "description": "The type of the RPC node that will be launched and used for debugging in the Simbolik backend. Kontrol-node supports cheatcodes and is currently in a closed-beta."
               }
             }
           },

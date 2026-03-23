@@ -1,8 +1,5 @@
 import {
   ContractDefinition,
-  Expression,
-  ExpressionStatement,
-  FunctionCall,
   FunctionDefinition,
 } from '@solidity-parser/parser/dist/src/ast-types';
 import * as vscode from 'vscode';
@@ -13,8 +10,7 @@ import {
   getArtifact,
   getBuildInfoFileFromCache,
 } from './foundry';
-import {tuple} from '@metamask/abi-utils/dist/parsers';
-import * as parser from '@solidity-parser/parser';
+import {abiEncode} from './abi';
 
 export type Credentials =
   | {
@@ -26,8 +22,62 @@ export type Credentials =
       token: string;
     };
 
+export interface PartialDebugConfiguration extends vscode.DebugConfiguration {
+  file: string;
+  contractName: string;
+  methodName: string;
+}
+
+export interface FullDebugConfiguration {
+  name: string;
+  type: 'solidity';
+  request: 'launch' | 'attach';
+  file: string;
+  contractName: string;
+  methodSignature: string;
+  payload: string;
+  stopAtFirstOpcode: boolean;
+  showSourcemaps: boolean;
+  jsonRpcUrl: string;
+  sourcifyUrl: string;
+  buildInfoFiles: vscode.Uri[];
+  clientMount: vscode.Uri;
+  credentials: Credentials;
+  clientVersion?: string;
+  rpcNodeType: 'anvil' | 'kontrol-node';
+}
+
 /**
- * Start a debugging session for the given contract and method.
+ * Start a debugging session for the given file, contract and method.
+ */
+export async function startDebugging(
+  file: vscode.Uri,
+  contract: ContractDefinition,
+  method: FunctionDefinition
+) {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
+  if (!workspaceFolder) {
+    vscode.window.showErrorMessage(
+      'Debugging can only be started from within a workspace folder.'
+    );
+    return;
+  }
+  const name = `${contract.name}.${method.name}`;
+  await vscode.debug.startDebugging(workspaceFolder, {
+    type: 'solidity',
+    name,
+    request: 'launch',
+    file: file.toString(),
+    contractName: contract.name,
+    methodName: method.name,
+  });
+}
+
+/**
+ * Populate the debug configuration by performing the necessary preparation steps.
+ * The two-phase approach of first creating a partial configuration with the basic info,
+ * then populating it with the rest of the details is needed, so that we can run the
+ * preparation steps again when the user hits the "restart" button in the debug view.
  *
  * 1. Gather configuration and credentials
  * 2. Compile the project if necessary
@@ -38,39 +88,29 @@ export type Credentials =
  * @param method The method definition to debug.
  * @returns
  */
-export async function startDebugging(
-  file: vscode.Uri,
-  contract: ContractDefinition,
-  method: FunctionDefinition
-) {
+export async function populateDebugConfiguration(
+  config: PartialDebugConfiguration
+): Promise<FullDebugConfiguration> {
   const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
       title: 'Simbolik',
     },
     async progress => {
-      const workspaceFolder = vscode.workspace.getWorkspaceFolder(file);
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage(
-          'Debugging can only be started from within a workspace folder.'
-        );
-        return;
-      }
-
       let credentials: Credentials;
       let buildInfoFile: vscode.Uri;
       let methodSignature: string;
       let isTest: boolean;
-      let payload: Uint8Array<ArrayBufferLike>;
+      let payload: string;
       try {
         credentials = await getCredentials();
         progress.report({message: 'Compiling'});
-        buildInfoFile = await compile(file);
+        buildInfoFile = await compile(vscode.Uri.parse(config.file));
         progress.report({increment: 100});
         ({methodSignature, isTest} = await getMethodSignature(
-          file,
-          contract,
-          method
+          vscode.Uri.parse(config.file),
+          config.contractName,
+          config.methodName
         ));
         if (isTest) {
           const hasPermission = await precheckPermission(credentials);
@@ -87,7 +127,7 @@ export async function startDebugging(
         return;
       }
 
-      const contractName = contract['name'];
+      const contractName = config.contractName;
       const showSourcemaps = getConfigValue('show-sourcemaps', false);
       const jsonRpcUrl = getConfigValue(
         'json-rpc-url',
@@ -102,16 +142,16 @@ export async function startDebugging(
       const clientVersion = vscode.extensions.getExtension(
         'runtimeverification.simbolik'
       )?.packageJSON.version;
-      const myFoundryRoot = await foundryRoot(file);
+      const myFoundryRoot = await foundryRoot(vscode.Uri.parse(config.file));
 
-      const debugConfig = {
+      const debugConfig: FullDebugConfiguration = {
         name: debugConfigName,
         type: 'solidity',
         request: 'launch',
-        file: file.toString(),
-        contractName: contractName,
+        file: config.file,
+        contractName,
         methodSignature: methodSignature,
-        payload: uint8ArrayToHex(payload),
+        payload: payload,
         stopAtFirstOpcode: false,
         showSourcemaps: showSourcemaps,
         jsonRpcUrl: jsonRpcUrl,
@@ -122,15 +162,15 @@ export async function startDebugging(
         clientVersion: clientVersion,
         rpcNodeType: rpcNodeType,
       };
-      return {workspaceFolder, debugConfig};
+      return debugConfig;
     }
   );
   if (!result) {
-    return;
+    throw new Error(
+      'Failed to start debugging session due to previous errors.'
+    );
   }
-  const {workspaceFolder, debugConfig} = result;
-  await vscode.debug.startDebugging(workspaceFolder, debugConfig);
-  return;
+  return result;
 }
 
 /**
@@ -248,19 +288,15 @@ async function compile(file: vscode.Uri): Promise<vscode.Uri> {
 
 async function getMethodSignature(
   file: vscode.Uri,
-  contract: ContractDefinition,
-  method: FunctionDefinition
+  contractName: string,
+  methodName: string
 ): Promise<{methodSignature: string; isTest: boolean}> {
-  const contractArtifact = await getArtifact(
-    file,
-    contract['name'],
-    'simbolik'
-  );
+  const contractArtifact = await getArtifact(file, contractName, 'simbolik');
   const content = await vscode.workspace.fs.readFile(contractArtifact);
   const textContent = new TextDecoder().decode(content);
   const artifact = JSON.parse(textContent);
   const methodSignature = Object.keys(artifact.methodIdentifiers ?? {}).find(
-    sig => sig.startsWith(method['name'] + '(')
+    sig => sig.startsWith(methodName + '(')
   )!;
   const isTest = Object.keys(artifact.methodIdentifiers ?? {}).some(
     sig => sig === 'IS_TEST()'
@@ -268,29 +304,21 @@ async function getMethodSignature(
   return {methodSignature, isTest};
 }
 
-async function getUserInput(
-  methodSignature: string
-): Promise<Uint8Array<ArrayBufferLike>> {
+async function getUserInput(methodSignature: string): Promise<string> {
   // Extract parameter types from method signature
   const abiParams = methodSignature.slice(methodSignature.indexOf('('));
   if (abiParams === '()') {
-    return new Uint8Array();
+    return '0x';
   }
   // Prompt user for input parameters
-  let encoded: Uint8Array<ArrayBufferLike> | undefined;
+  let encoded: string | undefined;
   const userInput = await vscode.window.showInputBox({
     prompt: `Enter input parameters for ${methodSignature}.`,
     placeHolder: abiParams.slice(1, -1),
     validateInput: value => {
       try {
-        const parsed = parse(value);
-        encoded = tuple.encode({
-          type: abiParams,
-          value: parsed,
-          buffer: new Uint8Array(),
-          packed: false,
-          tight: false,
-        });
+        const type = methodSignature.slice(methodSignature.indexOf('('));
+        encoded = abiEncode(type, `(${value})`);
       } catch (e) {
         return {
           message: `Invalid input parameters. Expecting types: ${abiParams.slice(1, -1)}. Provide parameters in Solidity literal syntax.`,
@@ -304,81 +332,6 @@ async function getUserInput(
     throw new Error('Debugging cancelled: input parameters required.');
   }
   return encoded;
-}
-
-type Param = BigInt | string | boolean | Param[];
-
-function parse(input: string): Param[] {
-  const parsed = parser.parse(`
-    contract Dummy {
-      function dummy() {
-        foo(${input});
-      }
-    }
-  `);
-  const contract = parsed.children[0] as ContractDefinition;
-  const method = contract.subNodes[0] as FunctionDefinition;
-  const stmt = method.body!.statements[0]! as ExpressionStatement;
-  const call = stmt.expression! as FunctionCall;
-  const args = call.arguments;
-  const result = args.map(arg => toParam(arg as Expression));
-  return result;
-}
-
-function toParam(expr: Expression): Param {
-  switch (expr.type) {
-    case 'TupleExpression':
-      return expr.components.map(e => toParam(e as Expression));
-    case 'NumberLiteral':
-      if (expr.subdenomination) {
-        const base = BigInt(expr.number);
-        const factor = denominationMap[expr.subdenomination]!;
-        return base * factor;
-      }
-      return BigInt(expr.number);
-    case 'BooleanLiteral':
-      return expr.value;
-    case 'StringLiteral':
-      return expr.value;
-    default:
-      throw new Error();
-  }
-}
-
-const denominationMap: {[key: string]: bigint} = {
-  wei: 1n,
-  kwei: 1000n,
-  ada: 1000n,
-  femtoether: 1000n,
-  mwei: 1000000n,
-  babbage: 1000000n,
-  picoether: 1000000n,
-  gwei: 1000000000n,
-  shannon: 1000000000n,
-  nanoether: 1000000000n,
-  nano: 1000000000n,
-  szabo: 1000000000000n,
-  microether: 1000000000000n,
-  micro: 1000000000000n,
-  finney: 1000000000000000n,
-  milliether: 1000000000000000n,
-  milli: 1000000000000000n,
-  ether: 1000000000000000000n,
-  kether: 1000000000000000000000n,
-  grand: 1000000000000000000000n,
-  einstein: 1000000000000000000000n,
-  mether: 1000000000000000000000000n,
-  gether: 1000000000000000000000000000n,
-  tether: 1000000000000000000000000000000n,
-};
-
-function uint8ArrayToHex(bytes: Uint8Array<ArrayBufferLike>): string {
-  return (
-    '0x' +
-    Array.from(bytes)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('')
-  );
 }
 
 /**

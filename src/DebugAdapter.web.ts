@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
 import {getConfigValue} from './utils';
+import {
+  FullDebugConfiguration,
+  PartialDebugConfiguration,
+  populateDebugConfiguration,
+} from './startDebugging';
 
 // How long to wait for the server to respond before giving up
 const CONNECTION_TIMEOUT = 3000;
@@ -17,22 +22,26 @@ function getWssUrl(): string {
 export class SolidityDebugAdapterDescriptorFactory
   implements vscode.DebugAdapterDescriptorFactory
 {
-  createDebugAdapterDescriptor(
+  async createDebugAdapterDescriptor(
     session: vscode.DebugSession,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
+    const config =
+      session.configuration.request === 'launch'
+        ? await populateDebugConfiguration(
+            session.configuration as PartialDebugConfiguration
+          )
+        : session.configuration;
+
     return new Promise((resolve, reject) => {
       const server = getWssUrl();
-      const credentials = session.configuration.credentials;
+      const credentials = config.credentials;
       const encodedProvider = encodeURIComponent(credentials.provider);
       const encodedToken = encodeURIComponent(credentials.token);
       const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
       const websocket = new WebSocket(url);
-      const websocketAdapter = new WebsocketDebugAdapter(
-        websocket,
-        session.configuration
-      );
+      const websocketAdapter = new WebsocketDebugAdapter(websocket, config);
       const implementation = new vscode.DebugAdapterInlineImplementation(
         websocketAdapter
       );
@@ -48,7 +57,7 @@ export class SolidityDebugAdapterDescriptorFactory
             // Before the DAP communication starts we upload the build_info files
             // to the server. This is needed for the server to be able to
             // resolve the paths to the source files.
-            const buildInfoFiles = session.configuration.buildInfoFiles ?? [];
+            const buildInfoFiles = config.buildInfoFiles ?? [];
 
             token.onCancellationRequested(() => {
               websocket.close();
@@ -137,7 +146,7 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
 
   constructor(
     private websocket: WebSocket,
-    private configuration: vscode.DebugConfiguration
+    private configuration: vscode.DebugConfiguration | FullDebugConfiguration
   ) {
     websocket.onmessage = (message: MessageEvent) => {
       const data = JSON.parse(message.data);
@@ -149,6 +158,11 @@ class WebsocketDebugAdapter implements vscode.DebugAdapter {
   }
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msg = message as Record<string, any>;
+    if (msg.command === 'launch' || msg.command === 'attach') {
+      Object.assign(msg.arguments, this.configuration);
+    }
     const messageWithRelativePaths = this.trimPaths(message);
     this.websocket.send(JSON.stringify(messageWithRelativePaths));
   }
