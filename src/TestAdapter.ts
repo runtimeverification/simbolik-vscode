@@ -44,14 +44,19 @@ export async function createTestController(): Promise<vscode.TestController> {
     tag('debug')
   );
 
-  createFoundryProfile(testController, testTree, vscode.TestRunProfileKind.Run);
+  const getTestTree = () => testTree;
+  createFoundryProfile(
+    testController,
+    getTestTree,
+    vscode.TestRunProfileKind.Run
+  );
   const coverageCache: WeakMap<
     vscode.FileCoverage,
     vscode.StatementCoverage[]
   > = new WeakMap();
   const coverageProfile = createFoundryProfile(
     testController,
-    testTree,
+    getTestTree,
     vscode.TestRunProfileKind.Coverage,
     coverageCache
   );
@@ -131,7 +136,7 @@ class IndexedTestTree {
 
 function createFoundryProfile(
   testController: vscode.TestController,
-  testTree: IndexedTestTree,
+  getTestTree: () => IndexedTestTree,
   profileKind: vscode.TestRunProfileKind,
   coverageCache?: WeakMap<vscode.FileCoverage, vscode.StatementCoverage[]>
 ) {
@@ -141,6 +146,7 @@ function createFoundryProfile(
       : 'Run Tests with Coverage',
     profileKind,
     async (request, token) => {
+      const testTree = getTestTree();
       const run = testController.createTestRun(request);
       for (const item of request.include ?? []) {
         if (token.isCancellationRequested) {
