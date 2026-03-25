@@ -2,6 +2,10 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [15.0.1] - 2026-03-25
+
+- Fixed a bug, that caused test runs to fail after refreshing the test explorer view
+
 ## [15.0.0] - 2026-03-23
 
 - Simbolik now allows inspecting mappings
