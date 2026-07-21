@@ -8,7 +8,7 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "mounts": [
     "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=komet-ssh-${devcontainerId},target=/home/node/.ssh,type=volume"
+    "source=simbolik-ssh-${devcontainerId},target=/home/node/.ssh,type=volume"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/node/.claude"
@@ -17,8 +17,7 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "anthropic.claude-code",
-        "rust-lang.rust-analyzer"
+        "anthropic.claude-code"
       ]
     }
   }
