@@ -1,0 +1,14 @@
+{
+  "description": "Caller(unopt).go(callee,21) -> Callee(opt).compute(21); result=43, stored=42",
+  "callerAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "calleeAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "goCalldata": "0x37d457f50000000000000000000000005fbdb2315678afecb367f032d93f642f64180aa30000000000000000000000000000000000000000000000000000000000000015",
+  "goTxHash": "0xd40c384845de4e93e51192248f8d991e76872d249e0ba614b6c28e890f05180c",
+  "callerResult": "0x2b",
+  "calleeStored": "0x2a",
+  "traceStepCount": 488,
+  "depthDistribution": {
+    "1": 363,
+    "2": 125
+  }
+}

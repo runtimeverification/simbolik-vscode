@@ -1,0 +1,24 @@
+{
+  "name": "@simbolik/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "kontrol-node execution engine: process lifecycle, JSON-RPC client, and lossless trace fetch.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@simbolik/lifting": "*",
+    "@simbolik/protocol": "*",
+    "lossless-json": "^4.3.0"
+  }
+}

@@ -137,7 +137,12 @@ export async function populateDebugConfiguration(
         'sourcify-url',
         'http://localhost:5555'
       );
-      const rpcNodeType = isTest ? 'kontrol-node' : 'anvil';
+      // kontrol-node (the KEVM engine) is the default backend for every session;
+      // users can switch to anvil via the "simbolik.rpc-node-type" setting.
+      const rpcNodeType = getConfigValue<'anvil' | 'kontrol-node'>(
+        'rpc-node-type',
+        'kontrol-node'
+      );
       const debugConfigName = `${contractName}.${methodSignature}`;
       const clientVersion = vscode.extensions.getExtension(
         'runtimeverification.simbolik'

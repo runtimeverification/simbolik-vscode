@@ -1,0 +1,8 @@
+{
+  "description": "StorageRefs.populate() on unoptimized StorageRefs (solc 0.8.35), recorded from kontrol-node. Exercises reference-type storage decoding: a dynamic array, a short (inline) string, a long (keccak-based) string, dynamic bytes, a uint256->uint256 mapping, a value-member struct, and an emitted event.",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "populateCalldata": "0xf809f205",
+  "callTxHash": "0xb8b99fffdda000db6a0b2972c32185d63b4f61ead11ee95f859c7be46d11f3bb",
+  "traceStepCount": 974,
+  "notes": "Storage slots after populate(): slot 0 = arr (uint256[]; length 3 inline at slot 0, elements [11,22,33] at keccak(0)+i), slot 1 = shortStr (\"hello\", short/inline string), slot 2 = longStr (\"abcdefghijklmnopqrstuvwxyz0123456789\", 36 bytes -> long string, len encoded len*2+1 at slot 2, data at keccak(2)+), slot 3 = blob (dynamic bytes 0xdeadbeef), slot 4 = balances (mapping uint256->uint256; balances[7]=100 at keccak(7 . 4), balances[9]=250 at keccak(9 . 4)), slot 5 = pt.x (=5), slot 6 = pt.y (=6). Verified live post-call: slot0=0x3 (arr length), slot5=0x5, slot6=0x6."
+}

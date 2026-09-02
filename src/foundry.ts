@@ -273,26 +273,6 @@ export async function forgeTestDir(root: vscode.Uri): Promise<vscode.Uri> {
 }
 
 /**
- * Get the build-info directory as specified in the Foundry configuration.
- *
- * @param root The root URI of the Foundry project.
- * @param outSubfolder Optional subfolder within the output directory. Only used when the build-info path is not explicitly set.
- * @returns The URI of the build-info directory.
- */
-export async function forgeBuildInfoDir(
-  root: vscode.Uri,
-  outSubfolder?: string
-): Promise<vscode.Uri> {
-  const config = await foundryConfig(root);
-  const defaultProfile = config?.profile?.default ?? {};
-  const outputDir = await forgeOutDir(root, outSubfolder);
-  const buildInfo =
-    defaultProfile?.build_info_path || outputDir + '/build-info';
-  const buildInfoDir = vscode.Uri.joinPath(root, buildInfo);
-  return buildInfoDir;
-}
-
-/**
  * Get the path to the Foundry Solidity compiler cache file.
  *
  * @param root The root URI of the Foundry project.

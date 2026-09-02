@@ -66,3 +66,9 @@ RUN sudo mkdir -p /etc/nix \
     | sudo tee -a /etc/nix/nix.conf
 # Installs kup, RV's K toolchain manager.
 RUN curl -L https://kframework.org/install | bash
+
+# --- Foundry (forge / anvil / cast) ----------------------------------------
+# Used to compile the Solidity test fixtures and to run a local EVM node
+# (anvil) for the debugger's geth-dialect trace path. Installs to ~/.foundry.
+ENV PATH="/home/node/.foundry/bin:${PATH}"
+RUN curl -L https://foundry.paradigm.xyz | bash && ~/.foundry/bin/foundryup

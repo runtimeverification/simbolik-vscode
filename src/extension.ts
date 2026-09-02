@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
+import {DebugNodeManager} from './nodeManager';
 import {startDebugging} from './startDebugging';
 import {getConfigValue} from './utils';
 import {forgeLintFile} from './foundry';
@@ -25,7 +26,14 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerCodeLensProvider('solidity', codelensProvider)
   );
 
-  const factory = new SolidityDebugAdapterDescriptorFactory();
+  // Owns the per-session execution node (auto-started for launch sessions).
+  const nodeManager = new DebugNodeManager();
+  context.subscriptions.push(nodeManager);
+
+  const factory = new SolidityDebugAdapterDescriptorFactory(
+    context,
+    nodeManager
+  );
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory)
   );
@@ -71,6 +79,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidTerminateDebugSession(session => {
     outputChannel.info(`Debug session ended: ${session.id}`);
+    // One fresh node per session: tear down the node started for this one.
+    if (session.type === 'solidity') {
+      void nodeManager.stop(session.id);
+    }
   });
 
   vscode.debug.onDidReceiveDebugSessionCustomEvent(async event => {

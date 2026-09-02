@@ -1,23 +1,52 @@
-import {createReadStream} from 'fs';
+import {spawn, type ChildProcessByStdio} from 'child_process';
+import type {Readable} from 'stream';
+import * as path from 'path';
 import * as vscode from 'vscode';
-import {MessageEvent, WebSocket} from 'ws';
+import type {DapDispatcher} from '@simbolik/debugger';
+import {loadServer} from './serverBridge';
 import {getConfigValue} from './utils';
+import {DebugNodeManager} from './nodeManager';
 import {
   PartialDebugConfiguration,
   populateDebugConfiguration,
 } from './startDebugging';
 
-// How long to wait for the server to respond before giving up
-const CONNECTION_TIMEOUT = 3000;
+// How long to wait for a spawned tcp server to announce its port before giving up.
+const SERVER_START_TIMEOUT = 10_000;
 
+/**
+ * The local debug-adapter factory. It drives the BUNDLED TypeScript
+ * debug server (`build/server.mjs`, source `src/server.ts`) instead of the old
+ * remote WebSocket service. Two hosting modes, selected by
+ * `simbolik.adapterMode`:
+ *
+ *   - `inline` (default): dynamic-import the ESM server in-process
+ *     ({@link loadServer}) and drive its {@link DapDispatcher} directly through a
+ *     thin {@link DispatcherAdapter} (no socket).
+ *   - `tcp`: spawn `node build/server.mjs --port 0` and connect over TCP via
+ *     `vscode.DebugAdapterServer`.
+ *
+ * In BOTH modes the launch configuration is first populated
+ * ({@link populateDebugConfiguration}: forge build → method signature → payload)
+ * and flows to the server's `productionResolver` as the DAP launch arguments.
+ */
 export class SolidityDebugAdapterDescriptorFactory
   implements vscode.DebugAdapterDescriptorFactory
 {
+  #outputChannel: vscode.OutputChannel | undefined;
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly nodes: DebugNodeManager
+  ) {}
+
   async createDebugAdapterDescriptor(
     session: vscode.DebugSession,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
+    // Populate the launch config (build + method signature + payload). For
+    // `attach` the configuration is already complete and passed through as-is.
     const config =
       session.configuration.request === 'launch'
         ? await populateDebugConfiguration(
@@ -25,249 +54,171 @@ export class SolidityDebugAdapterDescriptorFactory
           )
         : session.configuration;
 
-    return new Promise((resolve, reject) => {
-      const server = getConfigValue('server', 'wss://code.simbolik.dev');
-      const credentials = config.credentials;
-      const encodedProvider = encodeURIComponent(credentials.provider);
-      const encodedToken = encodeURIComponent(credentials.token);
-      const url = `${server}?auth-provider=${encodedProvider}&auth-token=${encodedToken}`;
-      const websocket = new WebSocket(url);
-      const websocketAdapter = new WebsocketDebugAdapter(websocket, config);
-      const implementation = new vscode.DebugAdapterInlineImplementation(
-        websocketAdapter
+    // For `launch`, auto-start a fresh execution node for this session and point
+    // the config at it (unless the user opted out via `auto-start-node`). Runs
+    // AFTER populate so a fast config error (e.g. build failure) short-circuits
+    // before we spawn anything; a node failure throws, aborting the session with
+    // a clear notification. `attach` replays a remote tx and needs no local node.
+    if (config.request === 'launch') {
+      const full = config as import('./startDebugging').FullDebugConfiguration;
+      full.jsonRpcUrl = await this.nodes.ensureUrl(
+        session.id,
+        full.rpcNodeType
       );
-      websocket.once('open', async () => {
-        // Create progress bar
-        vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Sending compilation data to the debugger…',
-            cancellable: true,
-          },
-          async (progress, token) => {
-            // Before the DAP communication starts we upload the build_info files
-            // to the server. This is needed for the server to be able to
-            // resolve the paths to the source files.
-            const buildInfoFiles = config.buildInfoFiles ?? [];
+    }
 
-            token.onCancellationRequested(() => {
-              websocket.close();
-              reject(new Error('Debugging session cancelled'));
-            });
+    const mode = getConfigValue<'inline' | 'tcp'>('adapterMode', 'inline');
+    if (mode === 'tcp') {
+      // VSCode sends `session.configuration` as the launch arguments and talks
+      // to the socket directly (no per-message adapter wrapper in tcp mode), so
+      // merge the populated fields onto it in place so they reach the resolver.
+      Object.assign(session.configuration, config);
+      return this.#createTcp();
+    }
+    return this.#createInline(config);
+  }
 
-            progress.report({increment: 0});
-            // Get total file size for progress bar
-            let totalFileSize = 0;
-            for (const buildInfoFile of buildInfoFiles) {
-              const uri = vscode.Uri.from(buildInfoFile);
-              const stats = await vscode.workspace.fs.stat(uri);
-              totalFileSize += stats.size;
-            }
+  /** Inline: load the ESM server in-process and wrap its dispatcher. */
+  async #createInline(
+    config: vscode.DebugConfiguration
+  ): Promise<vscode.DebugAdapterDescriptor> {
+    const server = await loadServer();
+    const dispatcher = server.createDispatcher();
+    return new vscode.DebugAdapterInlineImplementation(
+      new DispatcherAdapter(dispatcher, config)
+    );
+  }
 
-            for (const buildInfoFile of buildInfoFiles) {
-              const uploadProgress = uploadFile(
-                websocket,
-                buildInfoFile,
-                token
-              );
-              let totalTransferred = 0;
-              for await (const bytesTransferred of uploadProgress) {
-                const percentage = (bytesTransferred / totalFileSize) * 100;
-                const increment = percentage - totalTransferred;
-                totalTransferred = percentage;
-                progress.report({increment});
-              }
-            }
-            websocket.send(JSON.stringify({command: 'simbolik:finish'}));
-            resolve(implementation);
-          }
-        );
-      });
-      websocket.once('error', () => {
-        if (websocket.readyState === WebSocket.OPEN) {
-          return;
-        }
-        websocket.close();
-        vscode.window.showWarningMessage(
-          "Oops! Simbolik's servers are currently experiencing technical difficulties. We apologize for the inconvenience, but we'll be back online shortly."
-        );
-      });
-      setTimeout(() => {
-        if (websocket.readyState === WebSocket.OPEN) {
-          return;
-        }
-        websocket.close();
-        reject(new Error('Connection timed out'));
-        vscode.window.showWarningMessage(
-          "Oops! Simbolik's servers are currently experiencing technical difficulties. We apologize for the inconvenience, but we'll be back online shortly."
-        );
-      }, CONNECTION_TIMEOUT);
+  /**
+   * TCP: spawn the bundled server as a standalone node process and connect over
+   * a socket. VSCode talks to the socket directly, so the populated config is
+   * merged onto `session.configuration` (the object VSCode sends as the launch
+   * arguments) rather than intercepted per-message.
+   */
+  async #createTcp(): Promise<vscode.DebugAdapterDescriptor> {
+    const serverPath = path.join(
+      this.context.extensionPath,
+      'build',
+      'server.mjs'
+    );
+    const channel = this.#channel();
+    const child = spawn(process.execPath, [serverPath, '--port', '0'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const port = await waitForPort(child, channel);
+    return new vscode.DebugAdapterServer(port);
+  }
+
+  #channel(): vscode.OutputChannel {
+    if (this.#outputChannel === undefined) {
+      this.#outputChannel = vscode.window.createOutputChannel(
+        'Simbolik Debug Server'
+      );
+      this.context.subscriptions.push(this.#outputChannel);
+    }
+    return this.#outputChannel;
   }
 }
 
-function sendAsync(ws: WebSocket, data: Buffer | string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    ws.send(data, (err?: Error) => (err ? reject(err) : resolve()));
+/**
+ * Wait until the spawned server prints its `listening port=<n>` line, then
+ * resolve the bound port. stderr is streamed to the output channel; an early
+ * exit or timeout rejects.
+ */
+function waitForPort(
+  child: ChildProcessByStdio<null, Readable, Readable>,
+  channel: vscode.OutputChannel
+): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    let settled = false;
+    const done = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      done(() => {
+        child.kill();
+        reject(new Error('Timed out starting the Simbolik debug server.'));
+      });
+    }, SERVER_START_TIMEOUT);
+
+    let buffer = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      buffer += chunk;
+      const match = buffer.match(/listening port=(\d+)/);
+      if (match) {
+        done(() => resolve(Number(match[1])));
+      }
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => channel.append(chunk));
+    child.once('error', err => done(() => reject(err)));
+    child.once('exit', code =>
+      done(() =>
+        reject(
+          new Error(`Simbolik debug server exited early (code ${code}).`)
+        )
+      )
+    );
   });
 }
 
 /**
- * File upload via WebSocket, yielding progress.
- *
- * Automatically handles backpressure.
+ * Adapts a {@link DapDispatcher} to the `vscode.DebugAdapter` interface for
+ * inline hosting: incoming DAP messages are handed to `dispatcher.handle()` and
+ * each outgoing message it returns is fired back to VSCode. The populated launch
+ * configuration is merged into the `launch`/`attach` request arguments so it
+ * reaches the server's resolver (VSCode sends only the partial configuration).
  */
-export async function* uploadFile(
-  ws: WebSocket,
-  file: vscode.Uri,
-  token: vscode.CancellationToken
-): AsyncGenerator<number, void, void> {
-  const CHUNK_SIZE = 512 * 1024; // 512 KB chunks
-  const HIGH_WM = 32 * 1024 * 1024; // pause if > 32 MB queued
-  const LOW_WM = 16 * 1024 * 1024; // resume when < 16 MB
-  const TICK_MS = 150; // report progress at least every 150 ms
-
-  const rs = createReadStream(file.path, {highWaterMark: CHUNK_SIZE});
-  let bytesTransferred = 0;
-  let lastTick = 0;
-
-  await sendAsync(ws, JSON.stringify({command: 'simbolik:upload:start'}));
-  try {
-    for await (const chunk of rs) {
-      if (token.isCancellationRequested) return;
-      await sendAsync(ws, chunk);
-      bytesTransferred += (chunk as Buffer).length;
-      // Backpressure: keep socket reasonably full, not flooded
-      while (ws.bufferedAmount && ws.bufferedAmount > HIGH_WM) {
-        if (token.isCancellationRequested) return;
-        await new Promise<void>(r => setTimeout(r, 5));
-        if (ws.bufferedAmount < LOW_WM) break;
-        if (Date.now() - lastTick > TICK_MS) {
-          lastTick = Date.now();
-          yield bytesTransferred;
-        }
-      }
-      if (Date.now() - lastTick > TICK_MS) {
-        lastTick = Date.now();
-        yield bytesTransferred;
-      }
-    }
-    // Final tick to reach 100%
-    yield bytesTransferred;
-    await sendAsync(ws, JSON.stringify({command: 'simbolik:upload:finish'}));
-  } finally {
-    /* empty */
-  }
-}
-
-class WebsocketDebugAdapter implements vscode.DebugAdapter {
-  _onDidSendMessage = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
-  onDidSendMessage = this._onDidSendMessage.event;
+class DispatcherAdapter implements vscode.DebugAdapter {
+  #emitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
+  onDidSendMessage = this.#emitter.event;
+  /**
+   * One-slot promise chain serializing dispatch, mirroring the tcp server's
+   * per-connection queue (`tcpServer.ts`). VSCode pipelines several requests on a
+   * stop (`stackTrace`/`scopes`/multiple async `variables`), and a step command's
+   * response + `stopped` event must not interleave with a still-pending async
+   * `variables` from the previous stop — all of which share the dispatcher's
+   * `seq`/`session`/`cursor` state. Serializing guarantees each `handle()` runs to
+   * completion, and its outputs fire, in arrival order.
+   */
+  #queue: Promise<void> = Promise.resolve();
 
   constructor(
-    private websocket: WebSocket,
-    private configuration: vscode.DebugConfiguration
-  ) {
-    websocket.onmessage = (message: MessageEvent) => {
-      const payload = message.data.toString();
-      const data = JSON.parse(payload);
-      const dataWithAbsolutePaths = this.prependPaths(
-        data
-      ) as vscode.DebugProtocolMessage;
-      this._onDidSendMessage.fire(dataWithAbsolutePaths);
-    };
-  }
+    private readonly dispatcher: DapDispatcher,
+    private readonly config: vscode.DebugConfiguration
+  ) {}
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const msg = message as Record<string, any>;
+    const msg = message as {
+      command?: string;
+      arguments?: Record<string, unknown>;
+    };
     if (msg.command === 'launch' || msg.command === 'attach') {
-      Object.assign(msg.arguments, this.configuration);
+      msg.arguments = Object.assign(msg.arguments ?? {}, this.config);
     }
-    const messageWithRelativePaths = this.trimPaths(message);
-    this.websocket.send(JSON.stringify(messageWithRelativePaths));
-  }
-
-  dispose() {
-    this.websocket.close();
-  }
-
-  foundryRoot(): vscode.Uri {
-    if (!this.configuration['clientMount']) {
-      return vscode.Uri.parse('file:///');
-    }
-    const uri = vscode.Uri.from(this.configuration['clientMount']);
-    return uri;
-  }
-
-  /**
-   * Recursively walk over all object properties and for each property
-   * named `path` and type `string`, remove the foundry root from the path.
-   * @param message
-   */
-  trimPaths(message: unknown): unknown {
-    if (Array.isArray(message)) {
-      return message.map(item => this.trimPaths(item));
-    } else if (message instanceof Object && message !== null) {
-      const result = Object.assign({}, message) as Record<string, unknown>;
-      const msg = message as Record<string, unknown>;
-      for (const key in msg) {
-        if (
-          ['path', 'symbolFilePath'].includes(key) &&
-          typeof msg[key] === 'string'
-        ) {
-          const uri = vscode.Uri.parse(msg[key] as string);
-          result[key] = relativeTo(uri, this.foundryRoot());
-        } else if (key === 'file' && typeof msg[key] === 'string') {
-          const uri = vscode.Uri.parse(msg[key] as string);
-          result[key] = relativeTo(uri, this.foundryRoot());
-        } else if (typeof msg[key] === 'object') {
-          result[key] = this.trimPaths(msg[key]);
+    // Enqueue behind any in-flight dispatch. handle() never rejects (it maps
+    // failures to error responses); the catch is a defensive backstop.
+    this.#queue = this.#queue
+      .then(() =>
+        this.dispatcher.handle(
+          message as Parameters<DapDispatcher['handle']>[0]
+        )
+      )
+      .then(outs => {
+        for (const out of outs) {
+          this.#emitter.fire(out as unknown as vscode.DebugProtocolMessage);
         }
-      }
-      return result;
-    }
-    return message;
+      })
+      .catch((err: unknown) => {
+        console.error('Simbolik dispatcher error:', err);
+      });
   }
 
-  /**
-   * Recursively walk over all object properties and for each property
-   * named `path` and type `string`, prepend the foundry root to the path.
-   * @param message
-   */
-  prependPaths(message: unknown): unknown {
-    if (Array.isArray(message)) {
-      return message.map(item => this.prependPaths(item));
-    } else if (message instanceof Object && message !== null) {
-      const result = Object.assign({}, message) as Record<string, unknown>;
-      const msg = message as Record<string, unknown>;
-      for (const key in msg) {
-        if (
-          ['path', 'symbolFilePath', 'file'].includes(key) &&
-          typeof msg[key] === 'string'
-        ) {
-          result[key] = `${this.foundryRoot()}/${msg[key]}`;
-        } else if (typeof msg[key] === 'object') {
-          result[key] = this.prependPaths(msg[key]);
-        }
-      }
-      return result;
-    }
-    return message;
+  dispose(): void {
+    this.#emitter.dispose();
   }
-}
-
-function relativeTo(uri: vscode.Uri, prefixUri: vscode.Uri): string {
-  const s = uri.path;
-  const prefix = prefixUri.path + '/';
-  const relative = stripPrefix(s, prefix);
-  const result = stripPrefix(relative, '/');
-  return result;
-}
-
-function stripPrefix(s: string, prefix: string): string {
-  if (s.startsWith(prefix)) {
-    return s.slice(prefix.length);
-  }
-  return s;
 }

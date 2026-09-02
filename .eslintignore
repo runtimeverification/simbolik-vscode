@@ -1,2 +1,8 @@
 build/
 build-web/
+
+# New TS server workspace packages use their own ESM + Vitest tooling and are
+# type-checked via `npm run typecheck`; they are not linted by the extension's
+# gts config. Root config files likewise.
+packages/
+*.config.ts

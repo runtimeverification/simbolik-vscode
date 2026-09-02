@@ -27,6 +27,9 @@
   ],
   "main": "./build/extension.js",
   "browser": "./build/extension.web.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "contributes": {
     "menus": {
       "editor/title": [
@@ -99,7 +102,7 @@
         "simbolik.json-rpc-url": {
           "type": "string",
           "default": "http://localhost:8545",
-          "description": "Attach requests use this URL as the JSON-RPC endpoint. Notice, that the JSON RPC server must be reachable from the simbolik server. `localhost` here refers to the machine where the simbolik server is running.",
+          "markdownDescription": "JSON-RPC endpoint to use when the extension is **not** auto-starting a node (`#simbolik.auto-start-node#` is off), and for `attach` requests. When auto-start is on, launch sessions use a freshly started node on an ephemeral port and this value is ignored.",
           "order": 9
         },
         "simbolik.sourcify-url": {
@@ -107,6 +110,52 @@
           "description": "Attach requests use this Sourcify endpoint to download the source code of the debugged transaction.",
           "default": "http://localhost:5555",
           "order": 10
+        },
+        "simbolik.adapterMode": {
+          "type": "string",
+          "enum": [
+            "inline",
+            "tcp"
+          ],
+          "default": "inline",
+          "markdownEnumDescriptions": [
+            "Run the debug server in-process in the extension host (default). No socket; the bundled TypeScript server drives the session directly.",
+            "Spawn the bundled TypeScript server as a standalone Node process and connect over TCP. Useful for out-of-process/remote-host debugging and standalone testing."
+          ],
+          "description": "How the extension hosts the local Solidity debug server.",
+          "order": 11
+        },
+        "simbolik.auto-start-node": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Automatically start a fresh execution node (anvil or kontrol-node) for each launch debugging session, so debugging stays one click. Turn this off to debug against your own already-running node at `#simbolik.json-rpc-url#`.",
+          "order": 12
+        },
+        "simbolik.rpc-node-type": {
+          "type": "string",
+          "enum": [
+            "kontrol-node",
+            "anvil"
+          ],
+          "default": "kontrol-node",
+          "markdownEnumDescriptions": [
+            "Kontrol Node — the KEVM (K Framework) execution engine (default). Launched through Nix from `#simbolik.kontrol-node-dir#`.",
+            "Anvil — the Foundry EVM node. Requires [Foundry](https://getfoundry.sh) at `#simbolik.anvil-path#`."
+          ],
+          "markdownDescription": "Which execution node the extension auto-starts for launch debugging sessions. Defaults to `kontrol-node`; switch to `anvil` to run against the Foundry EVM instead.",
+          "order": 13
+        },
+        "simbolik.anvil-path": {
+          "type": "string",
+          "default": "anvil",
+          "markdownDescription": "Path to the `anvil` binary used to auto-start a node when `#simbolik.rpc-node-type#` is `anvil`. Defaults to `anvil` on your `PATH`; set an absolute path if it is installed elsewhere. Requires [Foundry](https://getfoundry.sh).",
+          "order": 14
+        },
+        "simbolik.kontrol-node-dir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Directory of the provisioned `kontrol-node` engine used to auto-start a node when `#simbolik.rpc-node-type#` is `kontrol-node`. When empty, falls back to the `KONTROL_NODE_DIR` environment variable, then `/home/node/kontrol-node`. See `.devcontainer/setup-kontrol-node.sh`.",
+          "order": 15
         }
       }
     },
@@ -204,18 +253,20 @@
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
-    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-base-web -- --minify",
+    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-server -- --minify && npm run esbuild-base-web -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
+    "esbuild-server": "esbuild ./src/server.ts       --bundle --outfile=build/server.mjs      --external:vscode --format=esm --platform=node",
     "esbuild-base-web": "esbuild ./src/extension.web.ts --bundle --outfile=build/extension.web.js --external:vscode --format=cjs --platform=browser --target=es2020 --minify",
-    "esbuild": "npm run esbuild-base -- --sourcemap",
+    "esbuild": "npm run esbuild-base -- --sourcemap && npm run esbuild-server -- --sourcemap",
     "compile": "tsc -p ./tsconfig.json",
     "compile-web": "tsc -p ./tsconfig.web.json",
-    "pretest": "npm run compile && npm run lint",
+    "typecheck": "tsc -b tsconfig.packages.json && tsc -p tsconfig.server.json",
     "lint": "gts lint",
-    "test": "node ./out/test/runTest.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "SIMBOLIK_LIVE=1 vitest run packages/engine/test/live.integration.test.ts",
     "clean": "gts clean",
     "fix": "gts fix",
-    "posttest": "npm run lint",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
     "version:major": "npm version major --no-git-tag-version",
@@ -238,7 +289,8 @@
     "mocha": "^10.2.0",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
-    "typescript": "^5.2.0"
+    "typescript": "^5.2.0",
+    "vitest": "^2.1.8"
   },
   "dependencies": {
     "@andrewbranch/untar.js": "^1.0.3",
