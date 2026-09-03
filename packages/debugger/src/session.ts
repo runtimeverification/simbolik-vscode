@@ -60,6 +60,11 @@ import {
   readPointerValue,
   readStorageWords,
 } from './machineState.js';
+import {
+  decodeCheatcodeCall,
+  isCheatcodeCall,
+  type DecodedCheatcode,
+} from './cheatcodes.js';
 import {enumerateAllEvents, type DecodedEvent} from './events.js';
 import {enumerateMappingKeys, mappingValueSlot} from './mappings.js';
 import {
@@ -138,8 +143,13 @@ interface FrameInfo {
   depth: number;
   /** Lowercase hex address of the running contract. */
   address: string;
-  contract: Contract;
-  cu: CompilationUnit;
+  /**
+   * The resolved contract, or `undefined` for a FOREIGN frame (`kind:'foreign'`)
+   * whose code could not be attributed to any compilation unit.
+   */
+  contract: Contract | undefined;
+  /** The resolved compilation unit, or `undefined` for a FOREIGN frame. */
+  cu: CompilationUnit | undefined;
   optimized: boolean;
   /** Trace step index this frame is positioned at (top = current; parent = CALL site). */
   stepIndex: number;
@@ -158,9 +168,36 @@ interface FrameInfo {
    * reconstructed internal-function sub-frame (`'internal'`), or a Solidity
    * MODIFIER body frame (`'modifier'`, 4b). Modifier frames resolve their name
    * from the ModifierDefinition (via closestFunctionOrModifier) rather than
-   * closestFunction.
+   * closestFunction. A `'cheatcode'` frame (4a) is a synthetic TOP frame for a
+   * cheatcode CALL (a CALL to the cheatcode address): its name is the decoded
+   * invocation and it has NO Solidity function of its own (non-descendable).
+   * A `'foreign'` frame (4b) runs code we cannot attribute to any compilation
+   * unit (etched raw bytecode, an unknown callee): it has NO `contract`/`cu`, no
+   * Solidity `source`, an address-derived `name`, and is non-descendable.
    */
-  kind?: 'evm' | 'internal' | 'modifier';
+  kind?: 'evm' | 'internal' | 'modifier' | 'cheatcode' | 'foreign';
+}
+
+/**
+ * A FOREIGN code resolution: an address running bytecode that could not be
+ * attributed to any compilation unit (etched raw bytecode, an unknown callee).
+ * It carries NO contract/cu — its frame is rendered EVM-only (no Solidity
+ * source, an address-derived name, non-descendable) and its steps are left
+ * unmapped by the stepping model (raw EVM depth, no jump fold), so a foreign
+ * subcall neither mis-maps onto the entry contract nor corrupts parent stepping.
+ */
+interface ForeignResolution {
+  kind: 'foreign';
+  /** Lowercase hex code address whose bytecode is unidentifiable. */
+  address: string;
+}
+
+/** A registry entry: a resolved contract CU, or a foreign (unidentifiable) code address. */
+type RegistryResolution = StepResolution | ForeignResolution;
+
+/** Whether a registry resolution is a FOREIGN (unidentifiable) code address. */
+function isForeign(r: RegistryResolution): r is ForeignResolution {
+  return (r as ForeignResolution).kind === 'foreign';
 }
 
 /**
@@ -221,8 +258,11 @@ interface Handle {
 /** The wired-up state produced by {@link SolidityDebugSession.launch}. */
 interface LaunchedState {
   cus: CompilationUnit[];
-  /** address(hex) → {contract, cu} resolved via CBOR runtime-code identity. */
-  registry: Map<string, StepResolution>;
+  /**
+   * address(hex) → {contract, cu} resolved via CBOR runtime-code identity, or a
+   * FOREIGN sentinel for a code address we could not attribute to any CU.
+   */
+  registry: Map<string, RegistryResolution>;
   /** The ultimate fallback resolution (the launch/entry contract). */
   entryResolution: StepResolution;
   steps: Step[];
@@ -402,6 +442,12 @@ export class SolidityDebugSession {
     }
   >();
 
+  /** Foreign-address raw-bytecode disassembly, cached by lowercase hex address. */
+  readonly #foreignDisasmCache = new Map<
+    string,
+    {list: EvmInstruction[]; pcToIndex: Map<number, number>}
+  >();
+
   /** Events emitted during the session (e.g. `'stopped'`), in order. */
   get events(): DebugProtocol.Event[] {
     return this.#events;
@@ -458,7 +504,7 @@ export class SolidityDebugSession {
 
     // Build the address→{contract, cu} registry over the DISTINCT codeAddresses
     // in the trace (CBOR identification of each frame's runtime code).
-    const registry = new Map<string, StepResolution>();
+    const registry = new Map<string, RegistryResolution>();
     const firstSeen = new Map<string, number>();
     for (let i = 0; i < steps.length; i++) {
       const addr = addressHex(steps[i]!.codeAddress);
@@ -466,11 +512,22 @@ export class SolidityDebugSession {
     }
     for (const [addr, idx] of firstSeen) {
       const code = cursor.at(idx).bytecode;
-      let resolution = this.#identify(cus, code);
-      if (resolution === undefined && addr === inputs.codeAddress.toLowerCase()) {
+      const identified = this.#identify(cus, code);
+      let resolution: RegistryResolution;
+      if (identified !== undefined) {
+        resolution = identified;
+      } else if (addr === inputs.codeAddress.toLowerCase()) {
+        // The ENTRY address maps to entryResolution — that IS its own code, even
+        // when CBOR-identification fails (e.g. metadata stripped).
         resolution = entryResolution;
+      } else {
+        // Any OTHER address whose code does not CBOR-identify is FOREIGN (etched
+        // raw bytecode, an unknown callee). Marking it foreign — rather than
+        // falling back to the entry CU — keeps its foreign PCs from mis-mapping
+        // onto the entry contract's source.
+        resolution = {kind: 'foreign', address: addr};
       }
-      if (resolution !== undefined) registry.set(addr, resolution);
+      registry.set(addr, resolution);
     }
     // An explicit address→build-info map WINS over CBOR-from-trace. For
     // geth (no per-step code) this is the only way to resolve a callee's CU by
@@ -497,8 +554,14 @@ export class SolidityDebugSession {
     const entryAddr = inputs.codeAddress.toLowerCase();
     if (!registry.has(entryAddr)) registry.set(entryAddr, entryResolution);
 
-    const resolve = (index: number): StepResolution | undefined =>
-      registry.get(addressHex(steps[index]!.codeAddress)) ?? entryResolution;
+    const resolve = (index: number): StepResolution | undefined => {
+      const r =
+        registry.get(addressHex(steps[index]!.codeAddress)) ?? entryResolution;
+      // Foreign code has no source map — leave the step UNMAPPED so the stepping
+      // model keeps its raw EVM depth and contributes no jump fold (strictly
+      // safer than mis-mapping the foreign PCs onto the entry contract's map).
+      return isForeign(r) ? undefined : r;
+    };
 
     const model = new SteppingModel(cursor, resolve);
 
@@ -821,10 +884,13 @@ export class SolidityDebugSession {
    * expose it through a `sourceReference` served by {@link source} — keeping the
    * relative `path` as the identity that breakpoints and the stepping model share.
    */
-  #frameSource(frame: FrameInfo): DebugProtocol.Source {
+  #frameSource(frame: FrameInfo): DebugProtocol.Source | undefined {
+    // A FOREIGN frame (etched raw bytecode / unknown callee) has NO compilation
+    // unit and is not attributed to any Solidity source at all.
+    if (frame.cu === undefined) return undefined;
     return (
       this.#sourceFor(frame.cu, frame.path) ?? {
-        // No matching SourceFile (unmapped/foreign step) — best-effort path only.
+        // No matching SourceFile (unmapped step) — best-effort path only.
         name: frame.path.split('/').pop() ?? frame.path,
         path: frame.path,
       }
@@ -902,9 +968,15 @@ export class SolidityDebugSession {
       args.memoryReference,
     );
     const pc0 = refPc + (args.offset ?? 0);
-    const {contract, cu} =
-      state.registry.get(codeAddress) ?? state.entryResolution;
-    const {list, pcToIndex} = this.#disassemblyFor(contract, isInit);
+    const resolution = state.registry.get(codeAddress) ?? state.entryResolution;
+    // A FOREIGN frame has no CU: disassemble the RAW bytecode straight from the
+    // trace (no source locations) rather than a contract runtime image.
+    const contract = isForeign(resolution) ? undefined : resolution.contract;
+    const cu = isForeign(resolution) ? undefined : resolution.cu;
+    const {list, pcToIndex} =
+      contract !== undefined
+        ? this.#disassemblyFor(contract, isInit)
+        : this.#foreignDisassemblyFor(codeAddress);
 
     // Anchor = the instruction at pc0, else the last instruction starting ≤ pc0.
     let anchor = pcToIndex.get(pc0);
@@ -927,13 +999,17 @@ export class SolidityDebugSession {
           instructionBytes: spacedHex(instr.bytes),
           instruction: instr.asm,
         };
-        const pos = this.#resolvePosition(contract, cu, instr.pc, isInit);
-        if (pos !== undefined) {
-          const src = this.#sourceFor(cu, pos.path);
-          if (src !== undefined) {
-            entry.location = src;
-            entry.line = pos.line;
-            entry.column = pos.col + 1;
+        // Source locations only exist for a resolved contract; a foreign frame
+        // shows bare instructions.
+        if (contract !== undefined && cu !== undefined) {
+          const pos = this.#resolvePosition(contract, cu, instr.pc, isInit);
+          if (pos !== undefined) {
+            const src = this.#sourceFor(cu, pos.path);
+            if (src !== undefined) {
+              entry.location = src;
+              entry.line = pos.line;
+              entry.column = pos.col + 1;
+            }
           }
         }
         instructions.push(entry);
@@ -984,6 +1060,31 @@ export class SolidityDebugSession {
   }
 
   /**
+   * Disassemble a FOREIGN code address's RAW bytecode from the trace (cached by
+   * address). A foreign frame has no compilation unit, so there is no contract
+   * runtime image to disassemble — we take the code the node executed at that
+   * address directly. Empty when the address never appears in the trace.
+   */
+  #foreignDisassemblyFor(
+    codeAddress: string,
+  ): {list: EvmInstruction[]; pcToIndex: Map<number, number>} {
+    let cached = this.#foreignDisasmCache.get(codeAddress);
+    if (cached === undefined) {
+      const state = this.#require();
+      const idx = state.steps.findIndex(
+        (s) => addressHex(s.codeAddress) === codeAddress,
+      );
+      const bytecode = idx >= 0 ? state.cursor.at(idx).bytecode : '0x';
+      const list = disassembleBytecode(bytecode);
+      const pcToIndex = new Map<number, number>();
+      list.forEach((instr, i) => pcToIndex.set(instr.pc, i));
+      cached = {list, pcToIndex};
+      this.#foreignDisasmCache.set(codeAddress, cached);
+    }
+    return cached;
+  }
+
+  /**
    * The variable scopes for `frameId`. Unoptimized frames expose
    * `State, Locals, EVM`; optimized frames omit `Locals` (locals are unreliable
    * under optimization) → `State, EVM`. Each scope gets a distinct
@@ -1001,32 +1102,41 @@ export class SolidityDebugSession {
     // only on non-optimized frames (the stack analysis it needs is disabled by
     // the optimized fallback); the remaining four appear on EVERY frame.
     const scopes: DebugProtocol.Scope[] = [];
-    if (!frame.optimized) {
+    // A FOREIGN frame (4b) has no contract/CU at all: the Solidity-decoded scopes
+    // (Locals/State/Globals/Events) assume a contract/fnNode, so it exposes ONLY
+    // the address-driven EVM scope (raw pc/op/stack/memory/storage/calldata).
+    const foreign = frame.kind === 'foreign' || frame.cu === undefined;
+    // A synthetic cheatcode frame (4a) has no Solidity function of its own, so it
+    // exposes NO Locals scope — the local/param resolution assumes a real
+    // FunctionDefinition (`frame.fnNode`), which a cheatcode frame lacks.
+    if (!foreign && !frame.optimized && frame.kind !== 'cheatcode') {
       scopes.push({
         name: 'Locals',
         variablesReference: this.#allocHandle({kind: 'Locals', frameId: fid}),
         expensive: false,
       });
     }
-    scopes.push({
-      name: 'State',
-      variablesReference: this.#allocHandle({kind: 'State', frameId: fid}),
-      expensive: false,
-    });
-    // A read-only Globals scope (Solidity `msg`/`tx`/`block`/`gasleft()`).
-    // Frame-RELATIVE: resolved against the frame's step in `variables()`.
-    scopes.push({
-      name: 'Globals',
-      variablesReference: this.#allocHandle({kind: 'Globals', frameId: fid}),
-      expensive: false,
-    });
-    // A read-only Events scope (event decoding scans LOG ops + ABI, not the
-    // stack analysis the optimized no-Locals fallback disables).
-    scopes.push({
-      name: 'Events',
-      variablesReference: this.#allocHandle({kind: 'Events', frameId: fid}),
-      expensive: false,
-    });
+    if (!foreign) {
+      scopes.push({
+        name: 'State',
+        variablesReference: this.#allocHandle({kind: 'State', frameId: fid}),
+        expensive: false,
+      });
+      // A read-only Globals scope (Solidity `msg`/`tx`/`block`/`gasleft()`).
+      // Frame-RELATIVE: resolved against the frame's step in `variables()`.
+      scopes.push({
+        name: 'Globals',
+        variablesReference: this.#allocHandle({kind: 'Globals', frameId: fid}),
+        expensive: false,
+      });
+      // A read-only Events scope (event decoding scans LOG ops + ABI, not the
+      // stack analysis the optimized no-Locals fallback disables).
+      scopes.push({
+        name: 'Events',
+        variablesReference: this.#allocHandle({kind: 'Events', frameId: fid}),
+        expensive: false,
+      });
+    }
     const storageRef = this.#allocHandle({kind: 'EVMStorage', frameId: fid});
     const memoryRef = this.#allocHandle({kind: 'EVMMemory', frameId: fid});
     scopes.push({
@@ -1124,6 +1234,7 @@ export class SolidityDebugSession {
     this.#sourceByRef.clear();
     this.#contractFrames.clear();
     this.#disasmCache.clear();
+    this.#foreignDisasmCache.clear();
     this.#indexCache.clear();
     this.#programCache.clear();
     this.#varCache.clear();
@@ -1191,7 +1302,49 @@ export class SolidityDebugSession {
         );
       }
     }
+
+    // ── 4a: synthetic cheatcode frame ────────────────────────────────────────
+    // When the CURRENT step is a cheatcode CALL (a CALL to the cheatcode
+    // address), a Foundry/kontrol cheatcode runs as an atomic, self-contained
+    // CALL with no descendable sub-trace. Surface it as a synthetic TOP frame
+    // (appended → renders as stackFrames[0]) labelled with the decoded
+    // invocation, ADDITIVE above the preserved real contract frame(s). It shares
+    // the innermost real frame's source position (the call site — the current
+    // step already maps there). When the step is NOT a cheatcode call this never
+    // runs, so every non-cheatcode fixture reconstructs unchanged.
+    const currentStep = steps[step];
+    const innermostFrame = frames[frames.length - 1];
+    if (
+      currentStep !== undefined &&
+      innermostFrame !== undefined &&
+      isCheatcodeCall(currentStep)
+    ) {
+      const decoded = decodeCheatcodeCall(currentStep, state.cursor.at(step));
+      frames.push(this.#buildCheatcodeFrame(innermostFrame, decoded, id++));
+    }
     return frames;
+  }
+
+  /**
+   * Build the synthetic cheatcode frame: a NON-descendable top frame that shares
+   * `below`'s source position (cu/path/line/column — the cheatcode call site) but
+   * whose name is the decoded `vm.<display>` invocation. `kind:'cheatcode'` keeps
+   * `scopes()` from fabricating Solidity locals for a pseudo-function.
+   */
+  #buildCheatcodeFrame(
+    below: FrameInfo,
+    decoded: DecodedCheatcode | undefined,
+    id: number,
+  ): FrameInfo {
+    const name =
+      decoded !== undefined ? `vm.${decoded.display}` : 'vm.cheatcode';
+    return {
+      ...below,
+      id,
+      name,
+      fnNode: undefined,
+      kind: 'cheatcode',
+    };
   }
 
   /**
@@ -1217,6 +1370,10 @@ export class SolidityDebugSession {
     const state = this.#require();
     const {steps} = state;
     const resolution = state.registry.get(address) ?? state.entryResolution;
+    // A FOREIGN frame has no contract/CU, so internal-function reconstruction
+    // (fnAt / #resolvePosition / #indexFor) cannot run — bail to the single-EVM
+    // frame path (one foreign frame over the preserved parent).
+    if (isForeign(resolution)) return undefined;
     const {contract, cu} = resolution;
 
     // The current EVM occurrence began just after the last step shallower than
@@ -1375,10 +1532,15 @@ export class SolidityDebugSession {
     address: string,
     stepIndex: number,
     id: number,
-    kind: 'evm' | 'internal' | 'modifier' = 'evm',
+    kind: 'evm' | 'internal' | 'modifier' | 'cheatcode' = 'evm',
   ): FrameInfo {
     const state = this.#require();
     const resolution = state.registry.get(address) ?? state.entryResolution;
+    // A FOREIGN frame is rendered EVM-only (no contract/cu, no Solidity source,
+    // an address-derived name) — see {@link #buildForeignFrame}.
+    if (isForeign(resolution)) {
+      return this.#buildForeignFrame(depth, address, stepIndex, id);
+    }
     const {contract, cu, optimized} = resolution;
 
     // A CREATE frame runs constructor (init) code → resolve against the init map.
@@ -1434,6 +1596,36 @@ export class SolidityDebugSession {
   }
 
   /**
+   * Build a FOREIGN frame: a NON-descendable EVM-only frame for a code address
+   * running bytecode we could not attribute to any compilation unit (etched raw
+   * bytecode, an unknown callee). It carries NO contract/cu (→ no Solidity
+   * `source`) and its name is derived from its CODE ADDRESS, so it is never
+   * mis-attributed to the entry contract's source.
+   */
+  #buildForeignFrame(
+    depth: number,
+    address: string,
+    stepIndex: number,
+    id: number,
+  ): FrameInfo {
+    return {
+      id,
+      depth,
+      address,
+      contract: undefined,
+      cu: undefined,
+      optimized: false,
+      stepIndex,
+      path: '',
+      line: 0,
+      column: 1,
+      name: foreignFrameName(address),
+      fnNode: undefined,
+      kind: 'foreign',
+    };
+  }
+
+  /**
    * Render an address/contract-typed VALUE. When the address resolves to a known
    * contract, show `<ContractName> (0x…)` and make it EXPANDABLE — a nested
    * variable whose children are that contract's storage fields at the current
@@ -1448,7 +1640,9 @@ export class SolidityDebugSession {
     const zero = '0x' + '0'.repeat(40);
     const resolution =
       addr !== zero ? this.#state?.registry.get(addr) : undefined;
-    if (resolution !== undefined) {
+    // A FOREIGN address (unidentifiable code) is not expandable into contract
+    // storage — render it as a plain scalar address.
+    if (resolution !== undefined && !isForeign(resolution)) {
       const synthetic = this.#syntheticContractFrame(addr, resolution);
       const ref = this.#allocHandle({kind: 'State', frameId: synthetic.id});
       return {
@@ -1640,6 +1834,8 @@ export class SolidityDebugSession {
   async #stateVariables(frame: FrameInfo): Promise<DebugProtocol.Variable[]> {
     const state = this.#require();
     const {contract, cu, address, stepIndex} = frame;
+    // A FOREIGN frame has no contract layout — no Solidity storage variables.
+    if (contract === undefined || cu === undefined) return [];
     let program = this.#programCache.get(contract);
     if (program === undefined) {
       program = generateEthdebugProgram(cu, contract.sourcePath, contract.name);
@@ -1777,6 +1973,8 @@ export class SolidityDebugSession {
   async #localVariables(frame: FrameInfo): Promise<DebugProtocol.Variable[]> {
     const state = this.#require();
     const {cu, address} = frame;
+    // A FOREIGN frame has no function — no locals/params.
+    if (cu === undefined || frame.contract === undefined) return [];
 
     // Read at the frame's live body position: a frame parked at its function
     // epilogue (e.g. after `continue` runs to the terminal STOP) has already
@@ -1921,6 +2119,8 @@ export class SolidityDebugSession {
   ): Promise<{name: string; value: string; type: string}[]> {
     const state = this.#require();
     const {cu, contract} = frame;
+    // A FOREIGN frame has no contract layout — no mappings to enumerate.
+    if (cu === undefined || contract === undefined) return [];
     // Bounded by the frame's own step: a key touched later must not appear here.
     const keys = enumerateMappingKeys(
       state.steps,
@@ -1994,6 +2194,8 @@ export class SolidityDebugSession {
   ): Promise<DebugProtocol.Variable[]> {
     const state = this.#require();
     const {cu, contract, address} = frame;
+    // A FOREIGN frame has no contract layout — no complex variables.
+    if (cu === undefined || contract === undefined) return [];
 
     let parent:
       | {array?: ArrayLayout; members?: StructMember[]; mapping?: MappingLayout}
@@ -2081,14 +2283,17 @@ export class SolidityDebugSession {
    * it each time. The cache is cleared in {@link disconnect}.
    */
   #variablesFor(frame: FrameInfo, pc: number): ResolvedVariable[] {
-    let byPc = this.#varCache.get(frame.contract);
+    const {contract, cu} = frame;
+    // A FOREIGN frame has no contract — no resolvable variables.
+    if (contract === undefined || cu === undefined) return [];
+    let byPc = this.#varCache.get(contract);
     if (byPc === undefined) {
       byPc = new Map<number, ResolvedVariable[]>();
-      this.#varCache.set(frame.contract, byPc);
+      this.#varCache.set(contract, byPc);
     }
     let vars = byPc.get(pc);
     if (vars === undefined) {
-      vars = variablesAt(frame.cu, frame.contract.sourcePath, frame.contract.name, pc);
+      vars = variablesAt(cu, contract.sourcePath, contract.name, pc);
       byPc.set(pc, vars);
     }
     return vars;
@@ -2373,7 +2578,8 @@ export class SolidityDebugSession {
           (addr === state.inputs.codeAddress.toLowerCase()
             ? state.entryResolution
             : undefined);
-        if (resolution === undefined) return undefined;
+        // A FOREIGN emitter has no ABI to decode its logs against.
+        if (resolution === undefined || isForeign(resolution)) return undefined;
         return {
           defs: resolution.contract.events(),
           name: resolution.contract.name,
@@ -2619,4 +2825,16 @@ function spacedHex(bytes: string): string {
 function structSummary(typeLabel: string): string {
   const name = typeLabel.replace(/^struct\s+(?:.+\.)?/, '');
   return `${name} {…}`;
+}
+
+/**
+ * The display name for a FOREIGN frame, derived from its lowercase hex code
+ * address: `code @ 0x0000…beef` (a shortened head…tail form). Address-derived so
+ * it is never confused with the entry contract's name.
+ */
+function foreignFrameName(address: string): string {
+  const hex = address.startsWith('0x') ? address.slice(2) : address;
+  const short =
+    hex.length > 8 ? `0x${hex.slice(0, 4)}…${hex.slice(-4)}` : `0x${hex}`;
+  return `code @ ${short}`;
 }

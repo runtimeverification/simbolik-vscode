@@ -20,6 +20,12 @@ export {
   type EventDef,
   type EventParamDef,
 } from './events.js';
+export {
+  CHEATCODE_ADDRESS,
+  isCheatcodeCall,
+  decodeCheatcodeCall,
+  type DecodedCheatcode,
+} from './cheatcodes.js';
 export {SolidityDebugSession, type LaunchInputs} from './session.js';
 export {
   disassembleBytecode,
