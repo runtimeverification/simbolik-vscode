@@ -416,6 +416,19 @@ describe('normalizeGethTrace single-frame regression (anvil setNumber)', () => {
     expect(account).toBeDefined();
     expect(BigInt(account!.storage[MINIMAL_SLOT0]!)).toBe(42n);
   });
+
+  // A geth trace has NO block context / tx.gasprice: the optional Globals-scope
+  // fields the kontrol path populates MUST stay undefined here (the "unavailable"
+  // signal the debugger's availability rule reads to omit `block` / `tx.gasprice`).
+  it('leaves the block/tx context fields undefined (unavailable in geth)', () => {
+    for (const s of normalizeGethTrace(anvilEnvelope, txContext)) {
+      expect(s.gasPrice).toBeUndefined();
+      expect(s.difficulty).toBeUndefined();
+      expect(s.blockNumber).toBeUndefined();
+      expect(s.blockTimestamp).toBeUndefined();
+      expect(s.coinbase).toBeUndefined();
+    }
+  });
 });
 
 describe('normalizeGethTrace CREATE frames (init code)', () => {

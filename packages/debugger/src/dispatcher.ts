@@ -15,16 +15,31 @@ import {
   EXCEPTION_BREAKPOINT_FILTERS,
 } from './session.js';
 
+/** DAP `output` event categories the resolver may log into. */
+export type OutputCategory = 'console' | 'stdout' | 'stderr';
+
+/**
+ * Side channel the dispatcher hands the resolver so it can surface diagnostics
+ * (compilation, chosen backend, RPC traffic) in the client's debug console. Each
+ * `log` line is turned into an `output` event emitted alongside the launch
+ * response.
+ */
+export interface ResolveContext {
+  log: (output: string, category?: OutputCategory) => void;
+}
+
 /**
  * Resolves DAP launch/attach args into a READY (already-launched) session
  * (production: run the engine; tests: build from a recorded fixture). The
  * dispatcher does NOT call `launch()` itself — the resolver returns a session
- * that has already queued its entry `stopped` event.
+ * that has already queued its entry `stopped` event. The optional {@link
+ * ResolveContext} lets the resolver stream diagnostics to the debug console.
  */
 export type SessionResolver = (
   args:
     | DebugProtocol.LaunchRequestArguments
     | DebugProtocol.AttachRequestArguments,
+  ctx?: ResolveContext,
 ) => Promise<SolidityDebugSession>;
 
 /** Commands that require a live session; rejected with an error before launch. */
@@ -57,9 +72,36 @@ export class DapDispatcher {
   #session: SolidityDebugSession | undefined;
   /** Cursor into the current session's append-only `events` array. */
   #cursor = 0;
+  /**
+   * Optional sink for messages emitted OUTSIDE a `handle()` return value — used
+   * to STREAM `output` events while a long-running `launch` is still resolving
+   * (deploy → call → trace), so diagnostics appear live instead of arriving in
+   * one batch when the session finally stops. Wired by each transport (the
+   * inline adapter's event emitter / the TCP socket). When unset, launch
+   * diagnostics fall back to being batched into the launch response array.
+   */
+  #emit: ((message: DebugProtocol.ProtocolMessage) => void) | undefined;
 
   constructor(resolve: SessionResolver) {
     this.#resolve = resolve;
+  }
+
+  /**
+   * Register the streaming sink (see {@link #emit}). The transport calls this
+   * once, right after constructing the dispatcher, before any `handle()`.
+   */
+  setEmitter(emit: (message: DebugProtocol.ProtocolMessage) => void): void {
+    this.#emit = emit;
+  }
+
+  /**
+   * Emit one `output`-event line to the debug console immediately via the
+   * streaming sink (no-op if no sink is wired). Used by the transport to flush
+   * host-side diagnostics (compile output, chosen backend) ahead of the
+   * server-side launch diagnostics, sharing the dispatcher's `seq` sequence.
+   */
+  emitConsole(output: string, category: OutputCategory = 'console'): void {
+    this.#emit?.(this.#outputEvent(output, category));
   }
 
   /**
@@ -123,19 +165,34 @@ export class DapDispatcher {
 
       case 'launch':
       case 'attach': {
+        // Diagnostics the resolver logs (chosen backend, RPC traffic) become
+        // `output` events. With a streaming sink wired they are emitted LIVE as
+        // they happen — so the console fills DURING the deploy → call → trace,
+        // not all at once when the session stops. Without a sink (e.g. unit
+        // tests) they fall back to being batched ahead of the response.
+        const outputs: DebugProtocol.Event[] = [];
+        const ctx: ResolveContext = {
+          log: (output, category = 'console') => {
+            const evt = this.#outputEvent(output, category);
+            if (this.#emit) this.#emit(evt);
+            else outputs.push(evt);
+          },
+        };
         let session: SolidityDebugSession;
         try {
           session = await this.#resolve(
             (args ?? {}) as DebugProtocol.LaunchRequestArguments,
+            ctx,
           );
         } catch (err) {
           return [
+            ...outputs,
             this.#error(request, err instanceof Error ? err.message : String(err)),
           ];
         }
         this.#session = session;
         this.#cursor = 0;
-        return [this.#response(request, {}), ...this.#drain()];
+        return [...outputs, this.#response(request, {}), ...this.#drain()];
       }
 
       case 'configurationDone':
@@ -300,6 +357,16 @@ export class DapDispatcher {
   /** Build a dispatcher-generated event (`initialized`/`terminated`) with no body. */
   #dispatcherEvent(event: string): DebugProtocol.Event {
     return {seq: this.#seq++, type: 'event', event};
+  }
+
+  /** Build an `output` event that renders one line in the client's debug console. */
+  #outputEvent(output: string, category: OutputCategory): DebugProtocol.Event {
+    return {
+      seq: this.#seq++,
+      type: 'event',
+      event: 'output',
+      body: {category, output: output.endsWith('\n') ? output : `${output}\n`},
+    } as DebugProtocol.OutputEvent;
   }
 
   /**

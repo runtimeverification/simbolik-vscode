@@ -291,3 +291,25 @@ export function closestFunction(node: AstNode): AstNode | undefined {
   }
   return undefined;
 }
+
+/**
+ * Climb from `node` to the nearest enclosing `FunctionDefinition` OR
+ * `ModifierDefinition` (inclusive). Mirrors {@link closestFunction} but also
+ * matches a modifier body — used ONLY for modifier-frame detection + name
+ * resolution; the function-only {@link closestFunction} contract is unchanged.
+ */
+export function closestFunctionOrModifier(
+  node: AstNode,
+): AstNode | undefined {
+  let current: AstNode | undefined = node;
+  while (current !== undefined) {
+    if (
+      current.nodeType === 'FunctionDefinition' ||
+      current.nodeType === 'ModifierDefinition'
+    ) {
+      return current;
+    }
+    current = current.parent();
+  }
+  return undefined;
+}

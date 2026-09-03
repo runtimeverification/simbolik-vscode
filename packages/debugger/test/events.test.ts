@@ -309,7 +309,7 @@ describe('regression: Events is appended to State/Locals/EVM', () => {
     const session = await terminalSession();
     const frameId = session.stackTrace().stackFrames[0]!.id;
     const names = session.scopes(frameId).scopes.map((s) => s.name);
-    expect(names).toEqual(['State', 'Locals', 'EVM', 'Events']);
+    expect(names).toEqual(['Locals', 'State', 'Globals', 'Events', 'EVM']);
   });
 });
 

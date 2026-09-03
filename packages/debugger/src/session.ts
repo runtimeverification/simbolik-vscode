@@ -41,6 +41,7 @@ import type {Hex} from '@simbolik/protocol';
 import {
   buildInstructionIndex,
   closestFunction,
+  closestFunctionOrModifier,
   findAstNode,
   findInnermostNode,
   identifyContractByRuntimeCode,
@@ -152,6 +153,14 @@ interface FrameInfo {
   name: string;
   /** The FunctionDefinition AST node for the frame, when resolved. */
   fnNode: AstNode | undefined;
+  /**
+   * Whether this is a raw EVM-depth frame (`'evm'`, the default), a
+   * reconstructed internal-function sub-frame (`'internal'`), or a Solidity
+   * MODIFIER body frame (`'modifier'`, 4b). Modifier frames resolve their name
+   * from the ModifierDefinition (via closestFunctionOrModifier) rather than
+   * closestFunction.
+   */
+  kind?: 'evm' | 'internal' | 'modifier';
 }
 
 /**
@@ -167,10 +176,23 @@ interface Handle {
     | 'EVM'
     | 'EVMStorage'
     | 'EVMMemory'
+    | 'EVMCalldata'
+    | 'EVMAccounts'
+    | 'EVMAccount'
+    | 'EVMAccountStorage'
     | 'Complex'
     | 'Events'
-    | 'Event';
+    | 'Event'
+    | 'Globals'
+    | 'GlobalGroup';
   frameId: number;
+  /**
+   * For an `EVMAccount` / `EVMAccountStorage` handle: the raw account map key
+   * (as emitted by the node) whose fields / storage are re-resolved at read time.
+   */
+  accountAddress?: string;
+  /** For a `GlobalGroup` handle: which Solidity global namespace it expands. */
+  group?: 'msg' | 'tx' | 'block';
   /** For an `EVM` handle: the nested `EVMStorage` handle ref. */
   storageRef?: number;
   /** For an `EVM` handle: the nested `EVMMemory` handle ref. */
@@ -975,12 +997,10 @@ export class SolidityDebugSession {
     }
 
     const fid = frame.id;
+    // Display order: Locals → State → Globals → Events → EVM. Locals is present
+    // only on non-optimized frames (the stack analysis it needs is disabled by
+    // the optimized fallback); the remaining four appear on EVERY frame.
     const scopes: DebugProtocol.Scope[] = [];
-    scopes.push({
-      name: 'State',
-      variablesReference: this.#allocHandle({kind: 'State', frameId: fid}),
-      expensive: false,
-    });
     if (!frame.optimized) {
       scopes.push({
         name: 'Locals',
@@ -988,6 +1008,25 @@ export class SolidityDebugSession {
         expensive: false,
       });
     }
+    scopes.push({
+      name: 'State',
+      variablesReference: this.#allocHandle({kind: 'State', frameId: fid}),
+      expensive: false,
+    });
+    // A read-only Globals scope (Solidity `msg`/`tx`/`block`/`gasleft()`).
+    // Frame-RELATIVE: resolved against the frame's step in `variables()`.
+    scopes.push({
+      name: 'Globals',
+      variablesReference: this.#allocHandle({kind: 'Globals', frameId: fid}),
+      expensive: false,
+    });
+    // A read-only Events scope (event decoding scans LOG ops + ABI, not the
+    // stack analysis the optimized no-Locals fallback disables).
+    scopes.push({
+      name: 'Events',
+      variablesReference: this.#allocHandle({kind: 'Events', frameId: fid}),
+      expensive: false,
+    });
     const storageRef = this.#allocHandle({kind: 'EVMStorage', frameId: fid});
     const memoryRef = this.#allocHandle({kind: 'EVMMemory', frameId: fid});
     scopes.push({
@@ -999,14 +1038,6 @@ export class SolidityDebugSession {
         memoryRef,
       }),
       expensive: true,
-    });
-    // A read-only Events scope, appended LAST on EVERY frame (optimized
-    // included — event decoding scans LOG ops + ABI, not the stack analysis the
-    // optimized no-Locals fallback disables).
-    scopes.push({
-      name: 'Events',
-      variablesReference: this.#allocHandle({kind: 'Events', frameId: fid}),
-      expensive: false,
     });
     return {scopes};
   }
@@ -1055,6 +1086,21 @@ export class SolidityDebugSession {
         return {variables: this.#evmStorageVariables(frame)};
       case 'EVMMemory':
         return {variables: this.#evmMemoryVariables(frame)};
+      case 'EVMCalldata':
+        return {variables: this.#evmCalldataVariables(frame)};
+      case 'EVMAccounts':
+        return {variables: this.#evmAccountsVariables(frame)};
+      case 'EVMAccount':
+        return {
+          variables: this.#evmAccountVariables(frame, handle.accountAddress!),
+        };
+      case 'EVMAccountStorage':
+        return {
+          variables: this.#evmAccountStorageVariables(
+            frame,
+            handle.accountAddress!,
+          ),
+        };
       case 'Complex':
         return {
           variables: await this.#complexVariables(
@@ -1063,6 +1109,10 @@ export class SolidityDebugSession {
             handle.complexKind ?? 'local',
           ),
         };
+      case 'Globals':
+        return {variables: this.#globalsVariables(frame)};
+      case 'GlobalGroup':
+        return {variables: this.#globalGroupVariables(frame, handle.group!)};
     }
   }
 
@@ -1100,8 +1150,223 @@ export class SolidityDebugSession {
       stack[depth - 1] = {address, stepIndex: i, depth};
       stack.length = depth; // pop any frames deeper than the current depth
     }
+    if (stack.length === 0) return [];
 
-    return stack.map((f, i) => this.#buildFrame(f.depth, f.address, f.stepIndex, i + 1));
+    // Expand the INNERMOST (top) EVM frame into internal-function sub-frames
+    // (constant-EVM-depth JUMPs). Parent EVM frames stay single frames. On any
+    // inconsistency the reconstruction returns undefined and we fall back to the
+    // single EVM frame for that depth (today's behavior).
+    const innermost = stack[stack.length - 1]!;
+    const internalSteps = this.#reconstructInternalFrames(
+      innermost.depth,
+      innermost.address,
+      step,
+    );
+
+    const frames: FrameInfo[] = [];
+    let id = 1;
+    for (let i = 0; i < stack.length - 1; i++) {
+      const f = stack[i]!;
+      frames.push(this.#buildFrame(f.depth, f.address, f.stepIndex, id++));
+    }
+    if (internalSteps === undefined) {
+      frames.push(
+        this.#buildFrame(
+          innermost.depth,
+          innermost.address,
+          innermost.stepIndex,
+          id++,
+        ),
+      );
+    } else {
+      for (const sub of internalSteps) {
+        frames.push(
+          this.#buildFrame(
+            innermost.depth,
+            innermost.address,
+            sub.stepIndex,
+            id++,
+            sub.kind,
+          ),
+        );
+      }
+    }
+    return frames;
+  }
+
+  /**
+   * Reconstruct the internal-function sub-frames of the innermost EVM frame by
+   * replaying its current occurrence `[evmEntryStep..cur]`. Returns a bottom-first
+   * array of per-frame step indices (parents at their call site, innermost at the
+   * current step), or `undefined` to signal a fail-safe fallback to the single
+   * EVM frame. Never throws.
+   *
+   * A genuine internal-function ENTRY is a JUMPDEST landing (a step whose
+   * predecessor at this EVM depth had source-map `jump:'i'`) whose enclosing scope
+   * is a `FunctionDefinition` (`closestFunction`). The FIRST entry establishes the
+   * base frame (the entry function itself, via the dispatcher's jump-in). A RETURN
+   * is a landing whose predecessor had `jump:'o'` → pop. Landings inside a
+   * modifier body (or unmapped) resolve to no `FunctionDefinition` and are NOT
+   * pushed (4a skips modifiers). Underflow below the base triggers the fallback.
+   */
+  #reconstructInternalFrames(
+    depth: number,
+    address: string,
+    cur: number,
+  ): {stepIndex: number; kind: 'internal' | 'modifier'}[] | undefined {
+    const state = this.#require();
+    const {steps} = state;
+    const resolution = state.registry.get(address) ?? state.entryResolution;
+    const {contract, cu} = resolution;
+
+    // The current EVM occurrence began just after the last step shallower than
+    // this depth (step 0 for a single-EVM-depth trace).
+    let evmEntryStep = 0;
+    for (let i = cur; i >= 0; i--) {
+      if (steps[i]!.depth < depth) {
+        evmEntryStep = i + 1;
+        break;
+      }
+    }
+
+    // A stack over ALL internal jumps (every `jump:'i'` pushes, every `jump:'o'`
+    // pops), so it stays balanced across compiler-generated internal routines
+    // (ABI en/decoders, allocators) whose landings resolve to NO user function,
+    // and across the dispatcher→wrapper→body jumps that map to a function's OWN
+    // body. Only `real` entries — a jump into a DIFFERENT user `FunctionDefinition`
+    // — become DAP frames; `real:false` entries are "phantoms" that keep the depth
+    // honest. A real frame renders at its call site (a parent) or at the current
+    // step (the innermost, finalized below).
+    const stack: {stepIndex: number; real: boolean; fnId: number}[] = [];
+    /** The topmost real frame, whose call site is set when it makes a call. */
+    const topReal = ():
+      | {stepIndex: number; real: boolean; fnId: number}
+      | undefined => {
+      for (let k = stack.length - 1; k >= 0; k--) {
+        if (stack[k]!.real) return stack[k]!;
+      }
+      return undefined;
+    };
+    const fnAt = (i: number): AstNode | undefined => {
+      const fn = this.#resolvePosition(
+        contract,
+        cu,
+        steps[i]!.pc,
+        steps[i]!.isInitCode,
+      )?.fnNode;
+      return fn !== undefined && fn.nodeType === 'FunctionDefinition'
+        ? fn
+        : undefined;
+    };
+    let prevStep = -1;
+    let prevJump: 'i' | 'o' | '-' = '-';
+
+    for (let i = evmEntryStep; i <= cur; i++) {
+      // Skip steps inside an external subcall (a deeper EVM frame); their internal
+      // jumps belong to that frame, not this one.
+      if (steps[i]!.depth !== depth) continue;
+
+      if (prevJump === 'i') {
+        // `i` is a JUMPDEST landing. A jump into a DIFFERENT user function is a
+        // genuine call → a real frame. A landing in the SAME function (the
+        // dispatcher→wrapper→body path, or intra-function jumps), a modifier body,
+        // a compiler routine, or an unmapped pc → a phantom that only balances the
+        // depth.
+        const fn = fnAt(i);
+        const caller = topReal();
+        if (
+          fn !== undefined &&
+          (caller === undefined || caller.fnId !== fn.id)
+        ) {
+          if (caller !== undefined) caller.stepIndex = prevStep; // call site
+          stack.push({stepIndex: i, real: true, fnId: fn.id});
+        } else {
+          stack.push({stepIndex: i, real: false, fnId: fn?.id ?? -1});
+        }
+      } else if (prevJump === 'o') {
+        // A return: pop the matching entry. Nothing to pop → inconsistency.
+        if (stack.length === 0) return undefined;
+        stack.pop();
+      } else if (topReal() === undefined) {
+        // The entry function is reached from the dispatcher WITHOUT a `jump:'i'`,
+        // so seed the base frame from the first curDepth step whose enclosing
+        // scope is a FunctionDefinition (the entry-function body).
+        const fn = fnAt(i);
+        if (fn !== undefined) {
+          stack.push({stepIndex: i, real: true, fnId: fn.id});
+        }
+      }
+
+      prevStep = i;
+      prevJump = state.model.at(i).jump;
+    }
+
+    // Materialize the real frames (bottom-first). No base established → today's
+    // single-EVM-frame behavior.
+    const real = stack.filter((f) => f.real);
+    if (real.length === 0) return undefined;
+
+    // ── 4b: modifier frame ──────────────────────────────────────────────────
+    // If the CURRENT step sits inside a ModifierDefinition body (an INLINE
+    // modifier — no jump:'i'/'o', the only signal is the AST climb + the
+    // source-map modifierDepth), materialize a MODIFIER frame ON TOP of the
+    // function it decorates. The innermost real (function) frame is then LEFT at
+    // its seed position — the modifier's application / decl call site (line 17) —
+    // instead of being repositioned to `cur` (a modifier pc). When the current
+    // step is NOT in a modifier this branch never runs, so every modifier-free
+    // fixture reconstructs byte-identically to 4a (regression guardrail).
+    //
+    // SUSPEND/RESUME fall out for free: at the placeholder `_;` the modifierDepth
+    // INCREASES and control lands in the FunctionDefinition body, so `cur` is no
+    // longer in a modifier → no modifier frame (→ [bump]). On RESUME the
+    // modifierDepth DECREASES back into the ModifierDefinition, so `cur` is in a
+    // modifier again → the frame is re-emitted.
+    // Resolve the def governing the CURRENT logical position. Unmapped
+    // compiler-generated helper steps (ABI coders, checked-arithmetic routines,
+    // allocators) called from within the modifier or function body carry no
+    // source position of their own, so walk back over them — within THIS same
+    // EVM frame — to the nearest step that resolves to a user def, exactly as
+    // #buildFrame does for the frame's own line. Without this look-through, a
+    // helper called from the modifier body (e.g. the checked-mul for `x * 2`)
+    // resolves to no ModifierDefinition, so the modifier frame is dropped AND
+    // the function frame is repositioned onto the helper pc and mislabeled as
+    // the contract for the whole helper region (steps 118–187 here). The
+    // function-body helpers behave symmetrically (they walk back to `bump`), and
+    // in a modifier-free trace no walk-back ever reaches a ModifierDefinition,
+    // so the reconstruction stays byte-identical to 4a (regression guardrail).
+    let curPos = this.#resolvePosition(
+      contract,
+      cu,
+      steps[cur]!.pc,
+      steps[cur]!.isInitCode,
+    );
+    for (
+      let j = cur - 1;
+      (curPos === undefined || curPos.defNode === undefined) &&
+      j >= evmEntryStep &&
+      steps[j]!.depth === depth &&
+      addressHex(steps[j]!.codeAddress) === address;
+      j--
+    ) {
+      curPos = this.#resolvePosition(
+        contract,
+        cu,
+        steps[j]!.pc,
+        steps[j]!.isInitCode,
+      );
+    }
+    if (curPos?.defNode?.nodeType === 'ModifierDefinition') {
+      // Keep the innermost function frame at its call site (seed), append the
+      // modifier frame at the current step (bottom-first → [fn, modifier]).
+      return [
+        ...real.map((f) => ({stepIndex: f.stepIndex, kind: 'internal' as const})),
+        {stepIndex: cur, kind: 'modifier' as const},
+      ];
+    }
+
+    // The innermost frame is positioned at the current step.
+    real[real.length - 1]!.stepIndex = cur;
+    return real.map((f) => ({stepIndex: f.stepIndex, kind: 'internal' as const}));
   }
 
   /** Resolve a single frame's contract + source position (with in-frame fallback). */
@@ -1110,6 +1375,7 @@ export class SolidityDebugSession {
     address: string,
     stepIndex: number,
     id: number,
+    kind: 'evm' | 'internal' | 'modifier' = 'evm',
   ): FrameInfo {
     const state = this.#require();
     const resolution = state.registry.get(address) ?? state.entryResolution;
@@ -1139,7 +1405,11 @@ export class SolidityDebugSession {
 
     // A constructor (init) frame has no function NAME in the AST, so label it by
     // its contract; a named function uses its own name; else the contract name.
-    const fnName = pos?.fnNode?.name;
+    // A MODIFIER frame (4b) resolves its name from the enclosing
+    // ModifierDefinition (via closestFunctionOrModifier / pos.defNode) — the
+    // function-only pos.fnNode is undefined inside a modifier body.
+    const fnName =
+      kind === 'modifier' ? pos?.defNode?.name : pos?.fnNode?.name;
     const name = isInit
       ? `${contract.name}.constructor`
       : fnName !== undefined && fnName !== ''
@@ -1159,6 +1429,7 @@ export class SolidityDebugSession {
       column: pos !== undefined ? pos.col + 1 : 1,
       name,
       fnNode: pos?.fnNode,
+      kind,
     };
   }
 
@@ -1238,6 +1509,10 @@ export class SolidityDebugSession {
         col: number;
         offset: number;
         fnNode: AstNode | undefined;
+        /** Nearest enclosing FunctionDefinition OR ModifierDefinition (4b). */
+        defNode: AstNode | undefined;
+        /** Source-map modifier depth of this step (4b). */
+        modifierDepth: number;
       }
     | undefined {
     const {pcToInstruction, sourceMap} = this.#indexFor(contract, isInit);
@@ -1250,12 +1525,16 @@ export class SolidityDebugSession {
     const p = source.offsetToPosition(entry.start);
     const node = findInnermostNode(source.ast(), entry.start, entry.length);
     const fnNode = node !== undefined ? closestFunction(node) : undefined;
+    const defNode =
+      node !== undefined ? closestFunctionOrModifier(node) : undefined;
     return {
       path: source.path,
       line: p.line,
       col: p.column,
       offset: entry.start,
       fnNode,
+      defNode,
+      modifierDepth: entry.modifierDepth,
     };
   }
 
@@ -1870,6 +2149,10 @@ export class SolidityDebugSession {
   ): DebugProtocol.Variable[] {
     const state = this.#require();
     const ms = state.cursor.at(frame.stepIndex);
+    const calldataHex = ms.calldata.startsWith('0x')
+      ? ms.calldata.slice(2)
+      : ms.calldata;
+    const calldataBytes = calldataHex.length / 2;
     return [
       {name: 'pc', value: String(ms.pc), variablesReference: 0},
       {name: 'op', value: ms.op, variablesReference: 0},
@@ -1884,15 +2167,151 @@ export class SolidityDebugSession {
         value: `${this.#evmStorageVariables(frame).length} slots`,
         variablesReference: storageRef,
       },
-      {name: 'calldata', value: ms.calldata, variablesReference: 0},
+      {
+        name: 'calldata',
+        value: calldataBytes > 0 ? `${calldataBytes} bytes` : '0x',
+        variablesReference:
+          calldataBytes > 0
+            ? this.#allocHandle({kind: 'EVMCalldata', frameId: frame.id})
+            : 0,
+      },
+      {name: 'returnData', value: ms.returnData, variablesReference: 0},
+      {
+        name: 'accounts',
+        value: `${ms.accounts.size} accounts`,
+        variablesReference:
+          ms.accounts.size > 0
+            ? this.#allocHandle({kind: 'EVMAccounts', frameId: frame.id})
+            : 0,
+      },
     ];
   }
 
-  /** The touched storage slots of the frame's account, as `slot → 0x…word`. */
-  #evmStorageVariables(frame: FrameInfo): DebugProtocol.Variable[] {
+  /**
+   * The frame's calldata decoded into a 4-byte function selector plus one row
+   * per 32-byte ABI word AFTER the selector. Rows are named by their BYTE OFFSET
+   * into the calldata: `0x00` (selector), then `0x04`, `0x24`, `0x44`, … i.e.
+   * `4 + k*32` in hex (min 2 digits). Short calldata degrades gracefully — a
+   * selector-only calldata yields just the `0x00` row, and calldata shorter than
+   * 4 bytes yields whatever selector bytes are present.
+   */
+  #evmCalldataVariables(frame: FrameInfo): DebugProtocol.Variable[] {
     const state = this.#require();
     const ms = state.cursor.at(frame.stepIndex);
-    const account = ms.accounts.get(frame.address.toLowerCase());
+    const hex = ms.calldata.startsWith('0x') ? ms.calldata.slice(2) : ms.calldata;
+    if (hex.length === 0) return [];
+    const variables: DebugProtocol.Variable[] = [];
+    const selector = hex.slice(0, 8);
+    variables.push({
+      name: '0x00',
+      value: '0x' + selector,
+      type: 'bytes4',
+      variablesReference: 0,
+    });
+    const rest = hex.slice(8);
+    for (let k = 0; k * 64 < rest.length; k++) {
+      const offset = 4 + k * 32;
+      const chunk = rest.slice(k * 64, k * 64 + 64);
+      variables.push({
+        name: '0x' + offset.toString(16).padStart(2, '0'),
+        value: '0x' + chunk,
+        variablesReference: 0,
+      });
+    }
+    return variables;
+  }
+
+  /**
+   * One row per touched account: named by its display address
+   * (`addressHex(BigInt(key))`, tolerating decimal or 0x-hex node keys),
+   * expandable into the account's fields. Preserves the Map's iteration order.
+   */
+  #evmAccountsVariables(frame: FrameInfo): DebugProtocol.Variable[] {
+    const state = this.#require();
+    const ms = state.cursor.at(frame.stepIndex);
+    const variables: DebugProtocol.Variable[] = [];
+    for (const key of ms.accounts.keys()) {
+      variables.push({
+        name: addressHex(BigInt(key)),
+        value: '',
+        variablesReference: this.#allocHandle({
+          kind: 'EVMAccount',
+          frameId: frame.id,
+          accountAddress: key,
+        }),
+      });
+    }
+    return variables;
+  }
+
+  /**
+   * The fields of one account: `address`, `balance`, `nonce`, `code` (a size
+   * summary leaf), and an expandable `storage` row. Balance/nonce show
+   * `Unavailable` when the node emitted no change for them.
+   */
+  #evmAccountVariables(
+    frame: FrameInfo,
+    accountAddress: string,
+  ): DebugProtocol.Variable[] {
+    const state = this.#require();
+    const ms = state.cursor.at(frame.stepIndex);
+    const account = ms.accounts.get(accountAddress);
+    const codeByteLen =
+      account?.code === undefined ? 0 : (account.code.length - 2) / 2;
+    const slotCount = Object.keys(account?.storage ?? {}).length;
+    return [
+      {
+        name: 'address',
+        value: addressHex(BigInt(accountAddress)),
+        type: 'address',
+        variablesReference: 0,
+      },
+      {
+        name: 'balance',
+        value:
+          account?.balance === undefined
+            ? 'Unavailable'
+            : String(BigInt(account.balance)),
+        type: 'uint256',
+        variablesReference: 0,
+      },
+      {
+        name: 'nonce',
+        value:
+          account?.nonce === undefined
+            ? 'Unavailable'
+            : String(BigInt(account.nonce)),
+        type: 'uint256',
+        variablesReference: 0,
+      },
+      {
+        name: 'code',
+        value: `${codeByteLen} bytes`,
+        variablesReference: 0,
+      },
+      {
+        name: 'storage',
+        value: `${slotCount} slots`,
+        variablesReference:
+          slotCount > 0
+            ? this.#allocHandle({
+                kind: 'EVMAccountStorage',
+                frameId: frame.id,
+                accountAddress,
+              })
+            : 0,
+      },
+    ];
+  }
+
+  /** One account's touched storage slots, as `slot → 0x…word`. */
+  #evmAccountStorageVariables(
+    frame: FrameInfo,
+    accountAddress: string,
+  ): DebugProtocol.Variable[] {
+    const state = this.#require();
+    const ms = state.cursor.at(frame.stepIndex);
+    const account = ms.accounts.get(accountAddress);
     const variables: DebugProtocol.Variable[] = [];
     for (const [slot, word] of Object.entries(account?.storage ?? {})) {
       variables.push({
@@ -1902,6 +2321,11 @@ export class SolidityDebugSession {
       });
     }
     return variables;
+  }
+
+  /** The touched storage slots of the frame's account, as `slot → 0x…word`. */
+  #evmStorageVariables(frame: FrameInfo): DebugProtocol.Variable[] {
+    return this.#evmAccountStorageVariables(frame, frame.address.toLowerCase());
   }
 
   /**
@@ -1996,6 +2420,131 @@ export class SolidityDebugSession {
       type: a.typeLabel,
       variablesReference: 0,
     }));
+  }
+
+  // ─── Globals scope (Solidity msg/tx/block/gasleft()) ────────────────────────
+
+  /**
+   * The children of one Solidity global namespace (`msg`/`tx`/`block`) at the
+   * frame's step. Availability rule: a child is rendered only when its source is
+   * defined (kontrol carries `tx.gasprice` + all `block.*`; geth leaves them
+   * `undefined`). Returns `[]` for a group with no available data.
+   */
+  #globalGroupVariables(
+    frame: FrameInfo,
+    group: 'msg' | 'tx' | 'block',
+  ): DebugProtocol.Variable[] {
+    const state = this.#require();
+    const step = state.steps[frame.stepIndex];
+    if (step === undefined) return [];
+    const ms = state.cursor.at(frame.stepIndex);
+    const vars: DebugProtocol.Variable[] = [];
+    if (group === 'msg') {
+      const calldata = ms.calldata;
+      vars.push({
+        name: 'sender',
+        value: addressHex(step.msgSender),
+        type: 'address',
+        variablesReference: 0,
+      });
+      vars.push({
+        name: 'value',
+        value: String(step.msgValue),
+        type: 'uint256',
+        variablesReference: 0,
+      });
+      vars.push({
+        name: 'data',
+        value: calldata,
+        type: 'bytes',
+        variablesReference: 0,
+      });
+      vars.push({
+        name: 'sig',
+        value: '0x' + calldata.slice(2, 10),
+        type: 'bytes4',
+        variablesReference: 0,
+      });
+    } else if (group === 'tx') {
+      vars.push({
+        name: 'origin',
+        value: addressHex(step.txOrigin),
+        type: 'address',
+        variablesReference: 0,
+      });
+      if (step.gasPrice !== undefined) {
+        vars.push({
+          name: 'gasprice',
+          value: String(step.gasPrice),
+          type: 'uint256',
+          variablesReference: 0,
+        });
+      }
+    } else {
+      if (step.blockNumber !== undefined) {
+        vars.push({
+          name: 'number',
+          value: String(step.blockNumber),
+          type: 'uint256',
+          variablesReference: 0,
+        });
+      }
+      if (step.blockTimestamp !== undefined) {
+        vars.push({
+          name: 'timestamp',
+          value: String(step.blockTimestamp),
+          type: 'uint256',
+          variablesReference: 0,
+        });
+      }
+      if (step.coinbase !== undefined) {
+        vars.push({
+          name: 'coinbase',
+          value: addressHex(step.coinbase),
+          type: 'address',
+          variablesReference: 0,
+        });
+      }
+      if (step.difficulty !== undefined) {
+        vars.push({
+          name: 'prevrandao',
+          value: String(step.difficulty),
+          type: 'uint256',
+          variablesReference: 0,
+        });
+      }
+    }
+    return vars;
+  }
+
+  /**
+   * The top-level Globals rows for a frame: the `msg`/`tx`/`block` groups that
+   * have ≥1 available child (each an expandable `GlobalGroup` handle), followed
+   * by the `gasleft()` scalar leaf (always present, both dialects).
+   */
+  #globalsVariables(frame: FrameInfo): DebugProtocol.Variable[] {
+    const state = this.#require();
+    const rows: DebugProtocol.Variable[] = [];
+    for (const group of ['msg', 'tx', 'block'] as const) {
+      if (this.#globalGroupVariables(frame, group).length === 0) continue;
+      rows.push({
+        name: group,
+        value: '',
+        variablesReference: this.#allocHandle({
+          kind: 'GlobalGroup',
+          frameId: frame.id,
+          group,
+        }),
+      });
+    }
+    const ms = state.cursor.at(frame.stepIndex);
+    rows.push({
+      name: 'gasleft()',
+      value: String(ms.gas),
+      type: 'uint256',
+      variablesReference: 0,
+    });
+    return rows;
   }
 
   // ─── helpers ───────────────────────────────────────────────────────────────

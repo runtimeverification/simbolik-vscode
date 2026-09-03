@@ -208,17 +208,19 @@ describe('SolidityDebugSession.scopes', () => {
     const frameId = session.stackTrace().stackFrames[0]!.id;
     const {scopes} = session.scopes(frameId);
 
-    // A third `EVM` scope follows State and Locals; a read-only `Events` scope
-    // is appended last.
-    expect(scopes).toHaveLength(4);
+    // Display order: Locals → State → Globals → Events → EVM.
+    expect(scopes).toHaveLength(5);
     expect(scopes.map((s) => s.name)).toEqual([
-      'State',
       'Locals',
-      'EVM',
+      'State',
+      'Globals',
       'Events',
+      'EVM',
     ]);
 
-    const [state, locals, evm] = scopes;
+    const state = scopes.find((s) => s.name === 'State');
+    const locals = scopes.find((s) => s.name === 'Locals');
+    const evm = scopes.find((s) => s.name === 'EVM');
     expect(state!.variablesReference).toBeGreaterThan(0);
     expect(locals!.variablesReference).toBeGreaterThan(0);
     expect(evm!.variablesReference).toBeGreaterThan(0);
@@ -250,8 +252,8 @@ describe('SolidityDebugSession.variables', () => {
     const {scopes} = session.scopes(frameId);
     return {
       session,
-      stateRef: scopes[0]!.variablesReference,
-      localsRef: scopes[1]!.variablesReference,
+      stateRef: scopes.find((s) => s.name === 'State')!.variablesReference,
+      localsRef: scopes.find((s) => s.name === 'Locals')!.variablesReference,
     };
   }
 
@@ -279,7 +281,9 @@ describe('SolidityDebugSession.variables', () => {
       initialStorage: {[CODE_ADDRESS.toLowerCase()]: {'0x0': '0x7b'}},
     });
     const frameId = session.stackTrace().stackFrames[0]!.id;
-    const stateRef = session.scopes(frameId).scopes[0]!.variablesReference;
+    const stateRef = session
+      .scopes(frameId)
+      .scopes.find((s) => s.name === 'State')!.variablesReference;
     const {variables} = await session.variables(stateRef);
     expect(variables[0]).toEqual({
       name: 'number',

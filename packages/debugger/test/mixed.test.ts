@@ -14,7 +14,8 @@
  *     bottom = Caller) at a depth-2 position;
  *   - apply the OPTIMIZED-frame fallback to the Callee frame — storage-only
  *     scopes `['State','EVM']` (NO Locals) — while the unoptimized Caller
- *     frame keeps `['State','Locals','EVM']`.
+ *     frame keeps its `Locals` scope. Display order is
+ *     Locals → State → Globals → Events → EVM.
  *
  * Ground-truth (confirmed against the raw trace + build-info fixtures):
  *   - 488 steps; depth-1 = Caller (0xe7f1…512), depth-2 = Callee (0x5fbd…aa3);
@@ -162,8 +163,9 @@ describe('mixed-CU scopes — per-frame optimized fallback', () => {
     // no-Locals fallback — event decoding does not rely on stack analysis).
     expect(scopeRefsFor(session, calleeFrameId).names).toEqual([
       'State',
-      'EVM',
+      'Globals',
       'Events',
+      'EVM',
     ]);
   });
 
@@ -174,10 +176,11 @@ describe('mixed-CU scopes — per-frame optimized fallback', () => {
     const frames = session.stackTrace().stackFrames;
     const callerFrameId = frames[1]!.id;
     expect(scopeRefsFor(session, callerFrameId).names).toEqual([
-      'State',
       'Locals',
-      'EVM',
+      'State',
+      'Globals',
       'Events',
+      'EVM',
     ]);
   });
 });
@@ -333,10 +336,11 @@ describe('mixed-CU registry — settings-aware CBOR is order-independent', () =>
     // pick the OPTIMIZED Caller in the first CU and drop Locals.
     // A read-only `Events` scope is appended on every frame.
     expect(scopeRefsFor(session, stackFrames[0]!.id).names).toEqual([
-      'State',
       'Locals',
-      'EVM',
+      'State',
+      'Globals',
       'Events',
+      'EVM',
     ]);
   });
 
@@ -352,8 +356,9 @@ describe('mixed-CU registry — settings-aware CBOR is order-independent', () =>
     // (independent of the optimized no-Locals fallback).
     expect(scopeRefsFor(session, stackFrames[0]!.id).names).toEqual([
       'State',
-      'EVM',
+      'Globals',
       'Events',
+      'EVM',
     ]);
   });
 });

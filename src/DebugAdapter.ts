@@ -45,12 +45,20 @@ export class SolidityDebugAdapterDescriptorFactory
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
+    // Host-side diagnostics (compilation output, chosen backend) are produced
+    // BEFORE the adapter exists, so buffer them here and flush to this session's
+    // debug console once it starts. Server-side diagnostics (RPC traffic) flow
+    // separately as DAP `output` events from the resolver.
+    const hostLog: string[] = [];
+    const log = (line: string) => hostLog.push(line);
+
     // Populate the launch config (build + method signature + payload). For
     // `attach` the configuration is already complete and passed through as-is.
     const config =
       session.configuration.request === 'launch'
         ? await populateDebugConfiguration(
-            session.configuration as PartialDebugConfiguration
+            session.configuration as PartialDebugConfiguration,
+            log
           )
         : session.configuration;
 
@@ -65,6 +73,7 @@ export class SolidityDebugAdapterDescriptorFactory
         session.id,
         full.rpcNodeType
       );
+      log(`Execution node: ${full.rpcNodeType} at ${full.jsonRpcUrl}`);
     }
 
     const mode = getConfigValue<'inline' | 'tcp'>('adapterMode', 'inline');
@@ -72,20 +81,26 @@ export class SolidityDebugAdapterDescriptorFactory
       // VSCode sends `session.configuration` as the launch arguments and talks
       // to the socket directly (no per-message adapter wrapper in tcp mode), so
       // merge the populated fields onto it in place so they reach the resolver.
+      // The host-side log can't be injected into the socket stream, so it falls
+      // back to the debug console via `activeDebugConsole` on session start.
       Object.assign(session.configuration, config);
+      this.#flushToDebugConsole(session.id, hostLog);
       return this.#createTcp();
     }
-    return this.#createInline(config);
+    // Inline: the adapter owns the emitter, so host logs stream through it as
+    // `output` events — ordered ahead of the server-side launch diagnostics.
+    return this.#createInline(config, hostLog);
   }
 
   /** Inline: load the ESM server in-process and wrap its dispatcher. */
   async #createInline(
-    config: vscode.DebugConfiguration
+    config: vscode.DebugConfiguration,
+    hostLog: string[]
   ): Promise<vscode.DebugAdapterDescriptor> {
     const server = await loadServer();
     const dispatcher = server.createDispatcher();
     return new vscode.DebugAdapterInlineImplementation(
-      new DispatcherAdapter(dispatcher, config)
+      new DispatcherAdapter(dispatcher, config, hostLog)
     );
   }
 
@@ -107,6 +122,25 @@ export class SolidityDebugAdapterDescriptorFactory
     });
     const port = await waitForPort(child, channel);
     return new vscode.DebugAdapterServer(port);
+  }
+
+  /**
+   * Flush buffered host-side diagnostics to the debug console of `sessionId`
+   * once it starts. The console only exists after the session is live, so we
+   * wait for `onDidStartDebugSession` (at which point the freshly-started session
+   * is the active one) rather than writing during adapter creation. A timeout
+   * disposes the listener if the session never starts (e.g. an early failure).
+   */
+  #flushToDebugConsole(sessionId: string, lines: string[]): void {
+    if (lines.length === 0) return;
+    const sub = vscode.debug.onDidStartDebugSession(started => {
+      if (started.id !== sessionId) return;
+      sub.dispose();
+      clearTimeout(timer);
+      const console = vscode.debug.activeDebugConsole;
+      for (const line of lines) console.appendLine(line);
+    });
+    const timer = setTimeout(() => sub.dispose(), 30_000);
   }
 
   #channel(): vscode.OutputChannel {
@@ -186,28 +220,46 @@ class DispatcherAdapter implements vscode.DebugAdapter {
    * completion, and its outputs fire, in arrival order.
    */
   #queue: Promise<void> = Promise.resolve();
+  /** Host-side diagnostics (compile output, chosen node), flushed once at launch. */
+  #hostLog: string[];
 
   constructor(
     private readonly dispatcher: DapDispatcher,
-    private readonly config: vscode.DebugConfiguration
-  ) {}
+    private readonly config: vscode.DebugConfiguration,
+    hostLog: string[] = []
+  ) {
+    this.#hostLog = hostLog;
+    // Let the dispatcher STREAM output events (live launch diagnostics) straight
+    // to VSCode as they happen, rather than only in the handle() return batch.
+    this.dispatcher.setEmitter(out =>
+      this.#emitter.fire(out as unknown as vscode.DebugProtocolMessage)
+    );
+  }
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
     const msg = message as {
       command?: string;
       arguments?: Record<string, unknown>;
     };
-    if (msg.command === 'launch' || msg.command === 'attach') {
+    const isLaunch = msg.command === 'launch' || msg.command === 'attach';
+    if (isLaunch) {
       msg.arguments = Object.assign(msg.arguments ?? {}, this.config);
     }
     // Enqueue behind any in-flight dispatch. handle() never rejects (it maps
     // failures to error responses); the catch is a defensive backstop.
     this.#queue = this.#queue
-      .then(() =>
-        this.dispatcher.handle(
+      .then(() => {
+        // Flush host-side diagnostics FIRST (streamed via the dispatcher so they
+        // share its seq sequence), so compile/node lines precede the server-side
+        // RPC lines emitted during resolve.
+        if (isLaunch && this.#hostLog.length > 0) {
+          for (const line of this.#hostLog) this.dispatcher.emitConsole(line);
+          this.#hostLog = [];
+        }
+        return this.dispatcher.handle(
           message as Parameters<DapDispatcher['handle']>[0]
-        )
-      )
+        );
+      })
       .then(outs => {
         for (const out of outs) {
           this.#emitter.fire(out as unknown as vscode.DebugProtocolMessage);

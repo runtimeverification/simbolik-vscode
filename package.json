@@ -26,7 +26,6 @@
     "*"
   ],
   "main": "./build/extension.js",
-  "browser": "./build/extension.web.js",
   "workspaces": [
     "packages/*"
   ],
@@ -53,18 +52,6 @@
     "configuration": {
       "title": "Simbolik: Solidity Debugger",
       "properties": {
-        "simbolik.api-key": {
-          "type": "string",
-          "default": "valid-api-key",
-          "description": "The API key to authenticate with the simbolik server.",
-          "order": 0
-        },
-        "simbolik.server": {
-          "type": "string",
-          "default": "wss://code.simbolik.dev",
-          "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
-          "order": 1
-        },
         "simbolik.forge-path": {
           "type": "string",
           "default": "forge",
@@ -86,12 +73,6 @@
           ],
           "description": "Chose when Simbolik should build the project.",
           "order": 3
-        },
-        "simbolik.show-sourcemaps": {
-          "type": "boolean",
-          "default": false,
-          "description": "If set to true, the debugger will include sourcemaps in the disassembly view. This is useful when debugging sourcemaps.",
-          "order": 7
         },
         "simbolik.auto-open-disassembly-view": {
           "type": "boolean",
@@ -194,8 +175,7 @@
             "required": [
               "txHash",
               "jsonRpcUrl",
-              "sourcifyUrl",
-              "clientMount"
+              "sourcifyUrl"
             ],
             "properties": {
               "txHash": {
@@ -209,20 +189,6 @@
               "sourcifyUrl": {
                 "type": "string",
                 "description": "The URL of the Sourcify server."
-              },
-              "stopAtFirstOpcode": {
-                "type": "boolean",
-                "description": "If set to true, the debugger will stop at the first opcode.",
-                "default": false
-              },
-              "showSourcemaps": {
-                "type": "boolean",
-                "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
-                "default": false
-              },
-              "clientMount": {
-                "type": "string",
-                "description": "The absolute file system path to the project root."
               },
               "chainId": {
                 "type": "number",
@@ -253,13 +219,11 @@
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
-    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-server -- --minify && npm run esbuild-base-web -- --minify",
+    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-server -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
     "esbuild-server": "esbuild ./src/server.ts       --bundle --outfile=build/server.mjs      --external:vscode --format=esm --platform=node",
-    "esbuild-base-web": "esbuild ./src/extension.web.ts --bundle --outfile=build/extension.web.js --external:vscode --format=cjs --platform=browser --target=es2020 --minify",
     "esbuild": "npm run esbuild-base -- --sourcemap && npm run esbuild-server -- --sourcemap",
     "compile": "tsc -p ./tsconfig.json",
-    "compile-web": "tsc -p ./tsconfig.web.json",
     "typecheck": "tsc -b tsconfig.packages.json && tsc -p tsconfig.server.json",
     "lint": "gts lint",
     "test": "vitest run",
@@ -296,11 +260,9 @@
     "@andrewbranch/untar.js": "^1.0.3",
     "@metamask/abi-utils": "^3.0.0",
     "@solidity-parser/parser": "^0.18.0",
-    "@types/ws": "^8.5.10",
     "fflate": "^0.8.2",
     "smol-toml": "^1.2.0",
-    "vscode-uri": "^3.0.8",
-    "ws": "^8.18.1"
+    "vscode-uri": "^3.0.8"
   },
   "husky": {
     "hooks": {

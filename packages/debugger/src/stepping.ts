@@ -30,6 +30,7 @@ import {
   findInnermostNode,
   type CompilationUnit,
   type Contract,
+  type Jump,
   type SourceMapEntry,
 } from '@simbolik/solc';
 
@@ -55,6 +56,12 @@ export interface StepMeta {
   stmtId: number | undefined;
   /** EVM depth + folded Solidity jump depth. */
   combinedDepth: number;
+  /**
+   * The source-map jump flag of THIS step's executing instruction (`'i'` into a
+   * function/modifier, `'o'` out of one, `'-'` neither). Read-only metadata used
+   * by internal-frame reconstruction; the fold above is unchanged.
+   */
+  jump: Jump;
   /** Raw EVM call depth (no folded internal jumps) — for instruction stepping. */
   depth: number;
   /** Whether this step begins a new statement (a valid stop candidate). */
@@ -161,6 +168,7 @@ export class SteppingModel {
         stmtId,
         combinedDepth,
         depth: st.depth,
+        jump: entry?.jump ?? '-',
         isStmtStart,
         isLineStart,
         optimized,

@@ -176,6 +176,17 @@ export function generateEthdebugProgram(
     if (type.encoding === 'dynamic_array' && type.base !== undefined) {
       const array = storageArrayLayout(contract, slot, type.base);
       if (array !== undefined) sv.array = array;
+    } else if (type.encoding === 'inplace' && type.base !== undefined) {
+      // A FIXED-size storage array `T[N]`: inline at consecutive slots from the
+      // declared slot (NO keccak, NO length word). Guarded by `base !== undefined`
+      // so it does not collide with the struct branch below (`members`).
+      const array = fixedStorageArrayLayout(
+        contract,
+        slot,
+        type.base,
+        type.numberOfBytes,
+      );
+      if (array !== undefined) sv.array = array;
     } else if (type.encoding === 'inplace' && type.members !== undefined) {
       if (unpackedValueStruct(type.members)) {
         sv.members = storageStructMembers(contract, slot, type.members);
@@ -254,6 +265,58 @@ function storageArrayLayout(
             name: 'element',
             location: 'storage',
             slot: {$sum: [{$keccak256: [paddedSlot]}, 'i']},
+            offset: 0,
+            length: 32,
+          },
+        },
+      },
+    ],
+  };
+  return {
+    pointer,
+    elementSolcType: baseTypeId,
+    elementTypeLabel: baseType?.label ?? baseTypeId,
+    elementNumberOfBytes,
+  };
+}
+
+/**
+ * The `List` layout of a FIXED-size STORAGE array of VALUE-TYPE elements
+ * (`T[N]`, `encoding: 'inplace'`). Unlike a dynamic array, a fixed array is stored
+ * INLINE at consecutive slots from the declared slot — NO length word, NO keccak.
+ * Element `i` lives at `slot + i` (storage is WORD-indexed), each occupying one
+ * full slot, and the count `N` is STATIC (`numberOfBytes / 32`). The pointer is a
+ * `Group` with a single `List` of `count: N` regions NAMED `'element'`.
+ *
+ * SCOPE GUARD (same contract as the dynamic path): this `slot + i` layout assumes
+ * each element occupies its OWN full slot. Returns `undefined` for a
+ * sub-word-PACKED element (`numberOfBytes <= 16`, e.g. `uint8[N]`) or a
+ * REFERENCE-type element (`T[][N]`, `struct[N]`) — a scalar-slot gap, not
+ * mis-decoded.
+ */
+function fixedStorageArrayLayout(
+  contract: Contract,
+  slot: number,
+  baseTypeId: string,
+  numberOfBytes: number,
+): ArrayLayout | undefined {
+  const baseType = contract.storageType(baseTypeId);
+  const elementNumberOfBytes = baseType?.numberOfBytes ?? 32;
+  // Fail closed: only value-type elements that occupy one full slot each.
+  if (!isValueTypeId(baseTypeId) || elementNumberOfBytes <= 16) {
+    return undefined;
+  }
+  const count = Math.floor(Number(numberOfBytes) / 32);
+  const pointer: Pointer = {
+    group: [
+      {
+        list: {
+          count,
+          each: 'i',
+          is: {
+            name: 'element',
+            location: 'storage',
+            slot: {$sum: [slot, 'i']},
             offset: 0,
             length: 32,
           },

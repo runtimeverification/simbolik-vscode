@@ -45,6 +45,12 @@ export function describeCause(err: unknown): string {
 export interface JsonRpcClientOptions {
   url: string;
   fetch?: FetchLike;
+  /**
+   * Optional observer invoked just before each request is sent. Purely for
+   * diagnostics (e.g. surfacing traffic in the debug console); it must not throw
+   * and cannot alter the request.
+   */
+  onRequest?: (method: string, params: unknown[]) => void;
 }
 
 /**
@@ -54,14 +60,17 @@ export interface JsonRpcClientOptions {
 export class JsonRpcClient {
   readonly #url: string;
   readonly #fetch: FetchLike;
+  readonly #onRequest?: (method: string, params: unknown[]) => void;
   #nextId = 0;
 
   constructor(opts: JsonRpcClientOptions) {
     this.#url = opts.url;
     this.#fetch = opts.fetch ?? fetch;
+    this.#onRequest = opts.onRequest;
   }
 
   async call<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+    this.#onRequest?.(method, params);
     const request: JsonRpcRequest = {
       jsonrpc: '2.0',
       id: this.#nextId++,

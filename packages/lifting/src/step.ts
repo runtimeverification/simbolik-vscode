@@ -29,6 +29,18 @@ export interface Step {
   /** Stack as hex words, top-of-stack LAST (verbatim from the node). */
   stack: Hex[];
 
+  // ── Block/tx context for the Solidity Globals scope ───────────────────────
+  // OPTIONAL: only the kontrol dialect carries these. A geth/anvil `Step`
+  // leaves them `undefined`, which the debugger reads as "unavailable".
+  /** `tx.gasprice` (the kontrol wire field is misnamed `gasCost`). */
+  gasPrice?: bigint;
+  /** `block.prevrandao` (post-merge; the wire field is named `difficulty`). */
+  difficulty?: bigint;
+  blockNumber?: number;
+  blockTimestamp?: number;
+  /** `block.coinbase` (an address). */
+  coinbase?: bigint;
+
   // ── Raw delta fields, exactly as emitted ──────────────────────────────────
   // `null` means "unchanged this step" (carry the parent value forward);
   // `[]` / `{}` means "empty this step". `StateCursor` resolves carry-forward.
@@ -68,6 +80,12 @@ export function normalizeKontrolTrace(trace: KontrolTrace): Step[] {
     txOrigin: toBigInt(log.txOrigin),
     statusCode: log.statusCode,
     stack: log.stack,
+    // Block/tx context (kontrol only; geth leaves these undefined).
+    gasPrice: toBigInt(log.gasCost),
+    difficulty: toBigInt(log.difficulty),
+    blockNumber: log.blockNumber,
+    blockTimestamp: log.blockTimestamp,
+    coinbase: toBigInt(log.coinbase),
     // Delta fields are carried through untouched.
     memoryChange: log.memoryChange,
     programChange: log.programChange,

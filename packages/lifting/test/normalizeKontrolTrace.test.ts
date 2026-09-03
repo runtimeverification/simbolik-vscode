@@ -138,4 +138,42 @@ describe('normalizeKontrolTrace', () => {
       expect(step.deployedCodeChanges).toEqual({});
     }
   });
+
+  // ── Block/tx context fields for the Solidity Globals scope ─────────────────
+  // The kontrol wire log carries gasCost (== tx.gasprice), difficulty
+  // (== block.prevrandao), blockNumber, blockTimestamp and coinbase
+  // (== block.coinbase). `normalizeKontrolTrace` must copy them onto the Step as
+  // OPTIONAL fields. Ground-truth read directly from step 0 of this fixture:
+  //   gasCost = 2000000000000, difficulty = 0, blockNumber = 1,
+  //   blockTimestamp = 1768610546, coinbase = 0.
+  it('copies gasPrice/difficulty/blockNumber/blockTimestamp/coinbase from step 0', () => {
+    const [s0] = normalizeKontrolTrace(trace);
+
+    // gasPrice ← log.gasCost (bigint, despite the wire name).
+    expect(s0.gasPrice).toBe(2000000000000n);
+    expect(typeof s0.gasPrice).toBe('bigint');
+
+    // difficulty (post-merge prevrandao) ← log.difficulty (bigint).
+    expect(s0.difficulty).toBe(0n);
+    expect(typeof s0.difficulty).toBe('bigint');
+
+    // blockNumber / blockTimestamp copied as plain numbers.
+    expect(s0.blockNumber).toBe(1);
+    expect(s0.blockTimestamp).toBe(1768610546);
+
+    // coinbase ← log.coinbase (bigint address; 0 here → the zero address).
+    expect(s0.coinbase).toBe(0n);
+    expect(typeof s0.coinbase).toBe('bigint');
+  });
+
+  it('populates the block/tx context fields on EVERY step (defined, not undefined)', () => {
+    const steps = normalizeKontrolTrace(trace);
+    for (const step of steps) {
+      expect(step.gasPrice).toBeDefined();
+      expect(step.difficulty).toBeDefined();
+      expect(step.blockNumber).toBeDefined();
+      expect(step.blockTimestamp).toBeDefined();
+      expect(step.coinbase).toBeDefined();
+    }
+  });
 });

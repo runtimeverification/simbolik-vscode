@@ -7,6 +7,7 @@
 export {
   AstNode,
   closestFunction,
+  closestFunctionOrModifier,
   closestStatement,
   findAstNode,
   findInnermostNode,

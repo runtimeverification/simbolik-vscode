@@ -180,19 +180,20 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
     expect(frame.name).toBe('setNumber');
     const frameId = frame.id;
 
-    // --- 5. scopes → ['State','Locals','EVM','Events'] ----------------------
+    // --- 5. scopes → ['Locals','State','Globals','Events','EVM'] ------------
     const out5 = await send(request('scopes', {frameId}));
     const scopes = (out5[0] as DebugProtocol.ScopesResponse).body.scopes;
     expect(scopes.map((s) => s.name)).toEqual([
-      'State',
       'Locals',
-      'EVM',
+      'State',
+      'Globals',
       'Events',
+      'EVM',
     ]);
     // Capture the State scope ref; the session binds handles to frame IDENTITY,
     // so this same ref re-resolves against the CURRENT step after `continue` —
     // it is reused verbatim at step 6 (entry) and step 8 (terminal).
-    const stateRef = scopes[0]!.variablesReference;
+    const stateRef = scopes.find((s) => s.name === 'State')!.variablesReference;
 
     // --- 6. variables(State) → number = '0' at entry ------------------------
     const out6 = await send(
@@ -432,5 +433,110 @@ describe('DapDispatcher — handle() never throws out', () => {
     const va = await dispatcher.handle(request('variables'));
     expect((va[0] as DebugProtocol.Response).success).toBe(true);
     expect((va[0] as DebugProtocol.VariablesResponse).body.variables).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resolver diagnostics → `output` events in the debug console
+// ---------------------------------------------------------------------------
+
+function outputEvents(
+  out: DebugProtocol.ProtocolMessage[],
+): DebugProtocol.OutputEvent[] {
+  return out.filter(
+    (m) => isEvent(m) && m.event === 'output',
+  ) as DebugProtocol.OutputEvent[];
+}
+
+describe('DapDispatcher — resolver ctx.log surfaces as output events', () => {
+  it('emits one output event per logged line, BEFORE the launch response, in order', async () => {
+    const dispatcher = new DapDispatcher(async (_args, ctx) => {
+      ctx?.log('Compiling …');
+      ctx?.log('  → eth_sendTransaction (deploy)');
+      const session = new SolidityDebugSession();
+      await session.launch(counterLaunchInputs());
+      return session;
+    });
+
+    const out = await dispatcher.handle(request('launch', {program: 'Counter'}));
+
+    const outputs = outputEvents(out);
+    expect(outputs.map((e) => e.body.output)).toEqual([
+      'Compiling …\n',
+      '  → eth_sendTransaction (deploy)\n',
+    ]);
+    // Category defaults to 'console'; a trailing newline is ensured.
+    expect(outputs[0]!.body.category).toBe('console');
+
+    // Ordering: both output events precede the launch response, which precedes
+    // the drained `stopped` entry event.
+    const kinds = out.map((m) =>
+      isEvent(m) ? `event:${m.event}` : `response:${(m as DebugProtocol.Response).command}`,
+    );
+    expect(kinds).toEqual([
+      'event:output',
+      'event:output',
+      'response:launch',
+      'event:stopped',
+    ]);
+
+    // Global invariant: strictly-increasing positive seq across the batch.
+    const seqs = out.map((m) => m.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(seqs[0]).toBeGreaterThan(0);
+  });
+
+  it('STREAMS logged lines via the emitter sink (not in the return array) when one is wired', async () => {
+    const dispatcher = new DapDispatcher(async (_args, ctx) => {
+      ctx?.log('Compiling …');
+      ctx?.log('  → eth_sendTransaction (deploy)');
+      const session = new SolidityDebugSession();
+      await session.launch(counterLaunchInputs());
+      return session;
+    });
+
+    // Wire a streaming sink BEFORE handling launch.
+    const streamed: DebugProtocol.ProtocolMessage[] = [];
+    dispatcher.setEmitter(m => streamed.push(m));
+    // Host-side diagnostics flushed via emitConsole share the same stream + seq.
+    dispatcher.emitConsole('Execution node: kontrol-node');
+
+    const out = await dispatcher.handle(request('launch', {program: 'Counter'}));
+
+    // The output events were STREAMED (fired via the sink), in order, and are
+    // therefore NOT duplicated in the launch return array.
+    expect(streamed.map(m => (m as DebugProtocol.OutputEvent).body.output)).toEqual([
+      'Execution node: kontrol-node\n',
+      'Compiling …\n',
+      '  → eth_sendTransaction (deploy)\n',
+    ]);
+    expect(outputEvents(out)).toHaveLength(0);
+    expect(out.map(m => (isEvent(m) ? `event:${m.event}` : `response:${(m as DebugProtocol.Response).command}`))).toEqual([
+      'response:launch',
+      'event:stopped',
+    ]);
+
+    // seq is shared across streamed + returned messages and strictly increasing.
+    const allSeqs = [...streamed, ...out].map(m => m.seq);
+    expect(allSeqs).toEqual([...allSeqs].sort((a, b) => a - b));
+  });
+
+  it('still emits the logged lines before the error response when the resolver fails', async () => {
+    const dispatcher = new DapDispatcher(async (_args, ctx) => {
+      ctx?.log('Compiling …');
+      ctx?.log('  → eth_sendTransaction (deploy)');
+      throw new Error('node unreachable');
+    });
+
+    const out = await dispatcher.handle(request('launch', {program: 'Counter'}));
+
+    expect(outputEvents(out).map((e) => e.body.output)).toEqual([
+      'Compiling …\n',
+      '  → eth_sendTransaction (deploy)\n',
+    ]);
+    const resp = out.find(isResponse) as DebugProtocol.Response;
+    expect(resp.command).toBe('launch');
+    expect(resp.success).toBe(false);
+    expect(resp.message).toContain('node unreachable');
   });
 });

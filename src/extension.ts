@@ -84,31 +84,6 @@ export function activate(context: vscode.ExtensionContext) {
       void nodeManager.stop(session.id);
     }
   });
-
-  vscode.debug.onDidReceiveDebugSessionCustomEvent(async event => {
-    if (event.event === 'api-key-validation-failed') {
-      const action = await vscode.window.showErrorMessage(
-        'API key validation failed',
-        'Open Settings',
-        'Learn More'
-      );
-      if (action === 'Open Settings') {
-        vscode.commands.executeCommand(
-          'workbench.action.openSettings',
-          'simbolik.api-key'
-        );
-      }
-      if (action === 'Learn More') {
-        vscode.env.openExternal(vscode.Uri.parse('https://www.simbolik.dev'));
-      }
-    }
-    if (event.event === 'api-key-sessions-limit-exceeded') {
-      await vscode.window.showErrorMessage(
-        'Too many debugging sessions running in parallel'
-      );
-    }
-    console.log(event);
-  });
 }
 
 // This method is called when your extension is deactivated

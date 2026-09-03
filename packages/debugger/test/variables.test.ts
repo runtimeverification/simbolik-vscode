@@ -101,19 +101,20 @@ describe('SolidityDebugSession.scopes (includes EVM)', () => {
     const frameId = session.stackTrace().stackFrames[0]!.id;
     const {scopes} = session.scopes(frameId);
 
-    expect(scopes).toHaveLength(4);
+    expect(scopes).toHaveLength(5);
     expect(scopes.map((s) => s.name)).toEqual([
-      'State',
       'Locals',
-      'EVM',
+      'State',
+      'Globals',
       'Events',
+      'EVM',
     ]);
 
     const refs = scopes.map((s) => s.variablesReference);
     for (const ref of refs) {
       expect(ref).toBeGreaterThan(0);
     }
-    expect(new Set(refs).size).toBe(4);
+    expect(new Set(refs).size).toBe(5);
   });
 });
 

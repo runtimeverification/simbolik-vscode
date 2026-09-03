@@ -25,3 +25,8 @@ export {
   type KontrolNodeOptions,
 } from './kontrolNode.js';
 export {fetchAttachContext, type AttachContext} from './attach.js';
+export {
+  parseStateDump,
+  type StateDump,
+  type DumpedAccount,
+} from './stateDump.js';

@@ -38,6 +38,9 @@ function encodeFrame(message: DebugProtocol.ProtocolMessage): Buffer {
  */
 function handleConnection(socket: Socket, resolve: SessionResolver): void {
   const dispatcher = new DapDispatcher(resolve);
+  // Stream output events (live launch diagnostics) straight to the socket as
+  // they happen, rather than only in the handle() return batch.
+  dispatcher.setEmitter((out) => socket.write(encodeFrame(out)));
   let buf = Buffer.alloc(0);
   let queue: Promise<void> = Promise.resolve();
 

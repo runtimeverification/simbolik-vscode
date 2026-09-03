@@ -32,6 +32,7 @@ import {
   startDapServer,
   SolidityDebugSession,
   type SessionResolver,
+  type ResolveContext,
   type DapServerHandle,
   type LaunchInputs,
 } from '@simbolik/debugger';
@@ -40,6 +41,8 @@ import {
   fetchAttachContext,
   describeCause,
   parseJsonLossless,
+  parseStateDump,
+  type StateDump,
 } from '@simbolik/engine';
 import {normalizeGethTrace, normalizeKontrolTrace} from '@simbolik/lifting';
 import {SourcifyRepository, recompile} from '@simbolik/sources';
@@ -211,6 +214,34 @@ async function waitForReceipt(
   }
 }
 
+/**
+ * A compact, one-line summary of an RPC call's params for the debug console —
+ * long hex (bytecode, calldata) is truncated and a tx object is reduced to its
+ * salient fields so the log stays readable.
+ */
+function summarizeRpcParams(method: string, params: unknown[]): string {
+  const short = (s: string): string =>
+    s.length > 14 ? `${s.slice(0, 12)}…` : s;
+  const first = params[0];
+  if (
+    (method === 'eth_sendTransaction' || method === 'eth_call') &&
+    first !== null &&
+    typeof first === 'object'
+  ) {
+    const tx = first as {to?: string; data?: string};
+    const target = tx.to ? `to=${tx.to}` : 'deploy';
+    const data =
+      typeof tx.data === 'string' && tx.data.length >= 10
+        ? ` data=${tx.data.slice(0, 10)}…`
+        : '';
+    return ` (${target}${data})`;
+  }
+  const scalars = params
+    .filter((p) => typeof p === 'string' || typeof p === 'number')
+    .map((p) => short(String(p)));
+  return scalars.length > 0 ? ` (${scalars.join(', ')})` : '';
+}
+
 /** POST a JSON-RPC call and return the RAW response body STRING (unparsed). */
 async function rawJsonRpc(
   url: string,
@@ -264,11 +295,13 @@ function deriveSourceRoot(
 
 /**
  * Resolve every distinct code address a trace executed to its build-info CU, by
- * fetching each address's on-chain runtime code (`eth_getCode`) and CBOR-matching
- * it against the loaded build-info(s). Returns an address→{buildInfoJson,
- * contractName} map the session uses to resolve callee frames (a geth trace
- * carries no per-step code, so this is the only way to identify external calls).
- * Best-effort: an address whose code can't be fetched or matched is skipped
+ * CBOR-matching each address's runtime code against the loaded build-info(s).
+ * Returns the address→{buildInfoJson, contractName} map the session uses to
+ * resolve callee frames (a geth trace carries no per-step code, so this is the
+ * only way to identify external calls) plus the full set of executed addresses
+ * (used to scope pre-state seeding). Runtime code comes from `preState` (the one
+ * `anvil_dumpState` snapshot) when available, else per-address `eth_getCode`.
+ * Best-effort: an address whose code can't be resolved or matched is skipped
  * (that frame just won't map to source) — never throws.
  */
 async function buildContractsByAddress(
@@ -277,7 +310,14 @@ async function buildContractsByAddress(
   dialect: 'kontrol' | 'geth',
   buildInfos: unknown[],
   txContext: {to: string; from: string; input: string},
-): Promise<Record<string, {buildInfoJson: unknown; contractName?: string}>> {
+  preState: StateDump | undefined,
+): Promise<{
+  contractsByAddress: Record<
+    string,
+    {buildInfoJson: unknown; contractName?: string}
+  >;
+  addresses: string[];
+}> {
   const result: Record<
     string,
     {buildInfoJson: unknown; contractName?: string}
@@ -290,7 +330,7 @@ async function buildContractsByAddress(
         ? normalizeGethTrace(envelope, txContext)
         : normalizeKontrolTrace(envelope as never);
   } catch {
-    return result; // Can't reconstruct — leave callee resolution to the session.
+    return {contractsByAddress: result, addresses: []}; // leave to the session.
   }
 
   const addresses = new Set<string>();
@@ -301,11 +341,16 @@ async function buildContractsByAddress(
 
   await Promise.all(
     [...addresses].map(async (addr) => {
-      let code: string;
-      try {
-        code = await client.call<string>('eth_getCode', [addr, 'latest']);
-      } catch {
-        return; // Node without eth_getCode (skip) — non-fatal.
+      // Runtime code: prefer the pre-state dump (no extra request); a contract
+      // CREATEd during the traced call won't be in the pre-call dump, so fall
+      // back to eth_getCode there.
+      let code = preState?.accounts[addr.toLowerCase()]?.code;
+      if (code === undefined || code.length <= 2) {
+        try {
+          code = await client.call<string>('eth_getCode', [addr, 'latest']);
+        } catch {
+          return; // Node without eth_getCode (skip) — non-fatal.
+        }
       }
       if (typeof code !== 'string' || code.length <= 2) return; // EOA / empty.
       for (const {bi, cu} of cus) {
@@ -317,7 +362,7 @@ async function buildContractsByAddress(
       }
     }),
   );
-  return result;
+  return {contractsByAddress: result, addresses: [...addresses]};
 }
 
 /** Cap on slots read per storage variable (guards against huge fixed arrays). */
@@ -400,6 +445,47 @@ async function readInitialStorage(
   return out;
 }
 
+/**
+ * Fetch the whole-chain pre-state in ONE `anvil_dumpState` call (supported by
+ * both kontrol-node and anvil, with different wire formats — see
+ * {@link parseStateDump}). Returns `undefined` on any failure (unsupported node,
+ * malformed blob) so the caller falls back to the per-slot `eth_getStorageAt`
+ * path. MUST be called at the desired pre-state point (after `setUp()`, before
+ * the traced call), since `anvil_dumpState` snapshots the CURRENT state.
+ */
+async function fetchStateDump(
+  client: JsonRpcClient,
+): Promise<StateDump | undefined> {
+  try {
+    const raw = await client.call<unknown>('anvil_dumpState', []);
+    return parseStateDump(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Build the `initialStorage` seed from a pre-state dump: for each address the
+ * trace executed, take that account's non-zero storage (already minimal-hex
+ * normalized by {@link parseStateDump}). This replaces per-slot `eth_getStorageAt`
+ * and, unlike the static-layout reader, also seeds mapping / dynamic-array slots
+ * (they are in the dump). Restricting to trace addresses keeps the seed small.
+ */
+function seedFromDump(
+  dump: StateDump,
+  traceAddresses: Iterable<string>,
+): Record<string, Record<string, `0x${string}`>> {
+  const out: Record<string, Record<string, `0x${string}`>> = {};
+  for (const addr of traceAddresses) {
+    const acct = dump.accounts[addr.toLowerCase()];
+    if (acct === undefined) continue;
+    if (Object.keys(acct.storage).length > 0) {
+      out[addr.toLowerCase()] = {...acct.storage};
+    }
+  }
+  return out;
+}
+
 /** Parse a raw `debug_traceTransaction` response STRING to its trace envelope. */
 function parseTraceEnvelope(traceJson: string): unknown {
   const parsed = parseJsonLossless(traceJson) as {result?: unknown};
@@ -468,12 +554,20 @@ function methodNameFromInput(
  * address→build-info registry → assemble {@link LaunchInputs} and launch. The
  * ENTRY contract (`txContext.to`) MUST be verified (else a clear throw).
  */
-async function attachResolver(args: LaunchArgs): Promise<SolidityDebugSession> {
+async function attachResolver(
+  args: LaunchArgs,
+  ctx?: ResolveContext,
+): Promise<SolidityDebugSession> {
   const {jsonRpcUrl, txHash} = args;
   if (!jsonRpcUrl) throw new Error('attach: missing jsonRpcUrl');
   if (!txHash) throw new Error('attach: missing txHash');
 
-  const client = new JsonRpcClient({url: jsonRpcUrl});
+  ctx?.log(`Attaching to ${txHash} at ${jsonRpcUrl} …`);
+  const client = new JsonRpcClient({
+    url: jsonRpcUrl,
+    onRequest: (method, params) =>
+      ctx?.log(`  → ${method}${summarizeRpcParams(method, params)}`),
+  });
 
   // 1. Fetch the tx context + trace envelope and classify the dialect.
   const {dialect, envelope, txContext} = await fetchAttachContext(client, txHash);
@@ -481,6 +575,8 @@ async function attachResolver(args: LaunchArgs): Promise<SolidityDebugSession> {
   // 2. The RAW trace response STRING (precision-safe) is what LaunchInputs wants:
   //    re-fetch it unparsed rather than re-stringifying the parsed envelope, so
   //    kontrol's decimal-bigint fields keep full precision.
+  ctx?.log(`Backend: ${dialect} trace dialect`);
+  ctx?.log(`  → debug_traceTransaction (${txHash.slice(0, 12)}…)`);
   const traceJson = await rawJsonRpc(jsonRpcUrl, 'debug_traceTransaction', [
     txHash,
     {},
@@ -566,8 +662,12 @@ async function attachResolver(args: LaunchArgs): Promise<SolidityDebugSession> {
     contractsByAddress,
   };
 
+  ctx?.log(
+    `Resolved ${Object.keys(contractsByAddress).length} contract(s) via Sourcify.`,
+  );
   const session = new SolidityDebugSession();
   await session.launch(inputs);
+  ctx?.log('Session ready — paused at entry.');
   return session;
 }
 
@@ -581,11 +681,11 @@ async function attachResolver(args: LaunchArgs): Promise<SolidityDebugSession> {
  * `attach` replays an already-mined tx from a generic node, resolving
  * each frame's sources via Sourcify + recompile — see {@link attachResolver}.
  */
-export const productionResolver: SessionResolver = async (rawArgs) => {
+export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   const args = (rawArgs ?? {}) as LaunchArgs;
 
   if (args.request === 'attach') {
-    return attachResolver(args);
+    return attachResolver(args, ctx);
   }
 
   // ── validate + normalize inputs ──────────────────────────────────────────
@@ -650,9 +750,21 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
   const calldata = `0x${selector}${payloadHex}`;
   const methodName = methodSignature.slice(0, methodSignature.indexOf('('));
 
-  // ── deploy + call + trace ────────────────────────────────────────────────
-  const client = new JsonRpcClient({url: jsonRpcUrl});
+  const dialect: 'kontrol' | 'geth' =
+    rpcNodeType === 'kontrol-node' ? 'kontrol' : 'geth';
+  ctx?.log(
+    `Backend: ${rpcNodeType} (${dialect} trace dialect) at ${jsonRpcUrl}`,
+  );
 
+  // ── deploy + call + trace ────────────────────────────────────────────────
+  // The RPC observer streams every request to the debug console for diagnostics.
+  const client = new JsonRpcClient({
+    url: jsonRpcUrl,
+    onRequest: (method, params) =>
+      ctx?.log(`  → ${method}${summarizeRpcParams(method, params)}`),
+  });
+
+  ctx?.log(`Deploying ${contractName} …`);
   const deployTxHash = await client.call<string>('eth_sendTransaction', [
     {from: DEFAULT_ACCOUNT, gas: TX_GAS, data: creationBytecode},
   ]);
@@ -679,6 +791,7 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
     'setUp()',
   );
   if (setUpSelector !== undefined && methodSignature !== 'setUp()') {
+    ctx?.log('Running setUp() …');
     const setUpTxHash = await client.call<string>('eth_sendTransaction', [
       {
         from: DEFAULT_ACCOUNT,
@@ -691,6 +804,14 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
     await waitForReceipt(client, setUpTxHash);
   }
 
+  // Snapshot the PRE-CALL state (after deploy + setUp, before the traced call) in
+  // ONE `anvil_dumpState` request — the source for both contract identification
+  // (runtime code) and pre-trace storage seeding, replacing N × eth_getCode +
+  // M × eth_getStorageAt. Must be taken HERE, before the call, since the dump is
+  // of the CURRENT state. `undefined` on an unsupported node → per-slot fallback.
+  const preState = await fetchStateDump(client);
+
+  ctx?.log(`Calling ${methodName}() at ${contractAddress} …`);
   const callTxHash = await client.call<string>('eth_sendTransaction', [
     {from: DEFAULT_ACCOUNT, to: contractAddress, gas: TX_GAS, data: calldata},
   ]);
@@ -702,6 +823,7 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
 
   // The RAW JSON-RPC response STRING is what LaunchInputs.traceJson wants (it
   // re-parses losslessly), so bypass the parsing client for this one call.
+  ctx?.log(`  → debug_traceTransaction (${callTxHash.slice(0, 12)}…)`);
   const traceJson = await rawJsonRpc(jsonRpcUrl, 'debug_traceTransaction', [
     callTxHash,
     {},
@@ -712,9 +834,6 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
   const sourceRoot = deriveSourceRoot(args.file, sourcePath);
 
   // ── assemble LaunchInputs + launch the session ───────────────────────────
-  const dialect: 'kontrol' | 'geth' =
-    rpcNodeType === 'kontrol-node' ? 'kontrol' : 'geth';
-
   // Resolve every EXTERNAL contract the tx touched to its CU. A geth trace has
   // no per-step code, so without this the debugger can't identify a callee (e.g.
   // an ERC20 reached via a `mint` call) and mis-maps its steps onto the ENTRY
@@ -722,21 +841,29 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
   // source-map jumps corrupt step-over too. We enumerate the distinct code
   // addresses, fetch each one's on-chain runtime code, and CBOR-match it to a
   // contract in the build-info(s) → an address→CU map the session resolves by.
-  const contractsByAddress = await buildContractsByAddress(
-    client,
-    traceJson,
-    dialect,
-    buildInfos,
-    {to: contractAddress, from: DEFAULT_ACCOUNT, input: calldata},
-  );
+  const {contractsByAddress, addresses: traceAddresses} =
+    await buildContractsByAddress(
+      client,
+      traceJson,
+      dialect,
+      buildInfos,
+      {to: contractAddress, from: DEFAULT_ACCOUNT, input: calldata},
+      preState,
+    );
 
   // Seed pre-trace storage: a delta-encoded trace omits slots that an earlier tx
   // (e.g. `setUp()`) wrote and this one only READS — SLOAD emits no delta — so
-  // fixture state would otherwise read as zero at the entry step. Read each known
-  // contract's static layout slots via `eth_getStorageAt` at the block BEFORE the
-  // traced tx (= post-`setUp()`). Best-effort: skipped if the block is unknown.
+  // fixture state would otherwise read as zero at the entry step. Preferred path:
+  // the single `anvil_dumpState` snapshot (full storage, incl. mapping / dynamic-
+  // array slots the static-layout reader cannot enumerate). Fallback (unsupported
+  // node): read each known contract's static layout slots via `eth_getStorageAt`
+  // at the block BEFORE the traced tx (= post-`setUp()`).
   let initialStorage: Record<string, Record<string, `0x${string}`>> | undefined;
-  if (callReceipt?.blockNumber !== undefined) {
+  if (preState !== undefined) {
+    // Seed the entry contract + every address the trace executed.
+    const seed = seedFromDump(preState, [contractAddress, ...traceAddresses]);
+    if (Object.keys(seed).length > 0) initialStorage = seed;
+  } else if (callReceipt?.blockNumber !== undefined) {
     let block: bigint | undefined;
     try {
       block = BigInt(callReceipt.blockNumber);
@@ -785,6 +912,7 @@ export const productionResolver: SessionResolver = async (rawArgs) => {
 
   const session = new SolidityDebugSession();
   await session.launch(inputs);
+  ctx?.log('Session ready — paused at entry.');
   return session;
 };
 

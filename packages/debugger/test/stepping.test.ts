@@ -286,8 +286,9 @@ describe('breakpoints and continue', () => {
     const {stackFrames} = session.stackTrace();
     expect(stackFrames).toHaveLength(1);
 
-    const stateRef = session.scopes(stackFrames[0]!.id).scopes[0]!
-      .variablesReference;
+    const stateRef = session
+      .scopes(stackFrames[0]!.id)
+      .scopes.find((s) => s.name === 'State')!.variablesReference;
     const {variables} = await session.variables(stateRef);
     const total = variables.find((v) => v.name === 'total');
     expect(total?.value).toBe('33');

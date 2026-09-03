@@ -458,17 +458,22 @@ function structMemberPointers(
  * The producer supplies only this LAYOUT; `@ethdebug/pointers` resolves the
  * `$read`/`$sum`/`$product` against the machine state at dereference. Returns
  * `undefined` for a non-value-type element (out of scope this cycle).
- * FIXED-size arrays (`t_array$_…_$<N>_memory_ptr`) are NOT handled here — only the
- * dynamic form is in scope; a fixed array falls through with no `array` layout.
+ *
+ * FIXED-size arrays (`t_array$_…_$<N>_memory_ptr`) are also handled here: a fixed
+ * memory `T[N]` is inline with NO length word — the stack slot points DIRECTLY at
+ * element 0, so element `i` sits at `base + i*32` and the count is the static `N`.
+ * The pointer drops the `len` region and the leading `+32` of the dynamic form.
  */
 function arrayLayout(
   arraySolcType: string,
   arrayTypeLabel: string,
   depth: number,
 ): ArrayLayout | undefined {
-  // Only dynamic memory arrays: `t_array$_<elemId>_$dyn_memory_ptr`.
-  const m = /^t_array\$_(.+)_\$dyn_memory_ptr$/.exec(arraySolcType);
+  // Dynamic OR fixed memory arrays: `t_array$_<elemId>_$(dyn|<N>)_memory_ptr`.
+  const m = /^t_array\$_(.+)_\$(dyn|\d+)_memory_ptr$/.exec(arraySolcType);
   if (m === null) return undefined;
+  const sizeToken = m[2]!;
+  const isDynamic = sizeToken === 'dyn';
   // Element type/size from the array's display label (`uint256[]` → `uint256`),
   // reusing the value-type describer. `elementSolcType` comes from the same
   // describer so it matches the value-decode path.
@@ -476,24 +481,43 @@ function arrayLayout(
   const desc = describeValueTypeString(elementTypeLabel);
   if (desc === undefined) return undefined; // reference-type elements: out of scope.
 
-  const pointer: Pointer = {
-    group: [
-      {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
-      {name: 'len', location: 'memory', offset: {$read: 'base'}, length: 32},
-      {
-        list: {
-          count: {$read: 'len'},
-          each: 'i',
-          is: {
-            name: 'element',
-            location: 'memory',
-            offset: {$sum: [{$read: 'base'}, 32, {$product: ['i', 32]}]},
-            length: 32,
+  const pointer: Pointer = isDynamic
+    ? {
+        group: [
+          {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
+          {name: 'len', location: 'memory', offset: {$read: 'base'}, length: 32},
+          {
+            list: {
+              count: {$read: 'len'},
+              each: 'i',
+              is: {
+                name: 'element',
+                location: 'memory',
+                offset: {$sum: [{$read: 'base'}, 32, {$product: ['i', 32]}]},
+                length: 32,
+              },
+            },
           },
-        },
-      },
-    ],
-  };
+        ],
+      }
+    : {
+        // Fixed `T[N]`: no `len` region, static count, element i at base + i*32.
+        group: [
+          {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
+          {
+            list: {
+              count: Number(sizeToken),
+              each: 'i',
+              is: {
+                name: 'element',
+                location: 'memory',
+                offset: {$sum: [{$read: 'base'}, {$product: ['i', 32]}]},
+                length: 32,
+              },
+            },
+          },
+        ],
+      };
   return {
     pointer,
     elementSolcType: desc.typeId,
