@@ -259,6 +259,10 @@ export class SteppingModel {
    * `next` / `stepOver`: skip descents into internal calls. Unoptimized frames
    * use statement identity; optimized frames fall back to line identity —
    * the smallest j>O at or below the origin depth whose (path, line) differs.
+   * Transient entry-prologue artifacts (see {@link #persists}) are skipped: solc
+   * can emit a later statement's source position for a single step at the
+   * caller's own depth BEFORE the real next statement, which would otherwise make
+   * step-over jump forward past several statements to that out-of-order line.
    */
   next(origin: number): number {
     const o = this.#meta[origin]!;
@@ -268,7 +272,8 @@ export class SteppingModel {
         if (
           m.isLineStart &&
           m.combinedDepth <= o.combinedDepth &&
-          (m.path !== o.path || m.line !== o.line)
+          (m.path !== o.path || m.line !== o.line) &&
+          this.#persists(j)
         ) {
           return j;
         }
@@ -277,7 +282,12 @@ export class SteppingModel {
     }
     for (let j = origin + 1; j <= this.last; j++) {
       const m = this.#meta[j]!;
-      if (m.isStmtStart && m.combinedDepth <= o.combinedDepth && m.stmtId !== o.stmtId)
+      if (
+        m.isStmtStart &&
+        m.combinedDepth <= o.combinedDepth &&
+        m.stmtId !== o.stmtId &&
+        this.#persists(j)
+      )
         return j;
     }
     return this.last;
@@ -323,12 +333,15 @@ export class SteppingModel {
     return this.last;
   }
 
-  /** `stepOut`: smallest j>O that starts a statement strictly shallower. */
+  /**
+   * `stepOut`: smallest j>O that starts a REAL statement strictly shallower.
+   * Transient entry-prologue artifacts (see {@link #persists}) are skipped.
+   */
   stepOut(origin: number): number {
     const {combinedDepth: d} = this.#meta[origin]!;
     for (let j = origin + 1; j <= this.last; j++) {
       const m = this.#meta[j]!;
-      if (m.isStmtStart && m.combinedDepth < d) return j;
+      if (m.isStmtStart && m.combinedDepth < d && this.#persists(j)) return j;
     }
     return this.last;
   }
