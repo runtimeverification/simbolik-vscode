@@ -169,6 +169,18 @@ export class AstNode {
       .map((p) => new AstNode(p, this));
   }
 
+  /**
+   * The raw `referencedDeclaration` field of an `Identifier` (or `MemberAccess`)
+   * node: the AST id of the declaration this reference resolves to (a
+   * `VariableDeclaration`, `FunctionDefinition`, …), or `undefined` when absent.
+   * Used to recognise a stack-variable READ (an `Identifier` whose referent is a
+   * known param/local) during static stack-provenance analysis.
+   */
+  get referencedDeclaration(): number | undefined {
+    const value = this.#raw.referencedDeclaration;
+    return typeof value === 'number' ? value : undefined;
+  }
+
   get srcStart(): number {
     return this.#srcStart;
   }

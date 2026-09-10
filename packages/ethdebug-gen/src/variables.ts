@@ -59,6 +59,7 @@ import {
   type LocalDescriptor,
 } from './functionLocals.js';
 import {stackHeights} from './stackHeights.js';
+import {stackProvenance} from './stackProvenance.js';
 
 /**
  * One value-type member of a reference-type variable (a memory struct),
@@ -254,11 +255,47 @@ function isValueSolcType(solcType: string): boolean {
 /** One ordered stack variable (param, return, or local) in the uniform live list. */
 interface StackVar {
   name: string;
+  /** AST declaration id — the key the stack-provenance analyzer tags slots by. */
+  declId: number;
   kind: 'parameter' | 'return' | 'local';
   solcType: string;
   typeLabel: string;
   numberOfBytes: number;
   isValueType: boolean;
+}
+
+/**
+ * Per-contract cache of the two whole-contract CFG analyzers. Both
+ * `stackProvenance` and `stackHeights` are PURE functions of the contract, so
+ * they are built ONCE per contract and reused across every `pc`. Keyed by the
+ * `Contract` object (stable within a `CompilationUnit`); a `WeakMap` lets the
+ * entry be collected with its CU when a debug session ends. Without this the
+ * full CFG analysis (O(contract size)) reran on every `variablesAt` call —
+ * ~300ms per newly-visited pc on a large viaIR contract.
+ */
+const analyzerCache = new WeakMap<
+  Contract,
+  {
+    provenance: ReturnType<typeof stackProvenance>;
+    heights: ReturnType<typeof stackHeights>;
+  }
+>();
+
+function analyzersFor(
+  cu: CompilationUnit,
+  sourcePath: string,
+  contractName: string,
+  contract: Contract,
+): {provenance: ReturnType<typeof stackProvenance>; heights: ReturnType<typeof stackHeights>} {
+  let entry = analyzerCache.get(contract);
+  if (entry === undefined) {
+    entry = {
+      provenance: stackProvenance(cu, sourcePath, contractName),
+      heights: stackHeights(cu, sourcePath, contractName),
+    };
+    analyzerCache.set(contract, entry);
+  }
+  return entry;
 }
 
 /** Resolve the enclosing function's live params+locals at `pc` to pointers. */
@@ -285,9 +322,21 @@ function stackVariables(
   const params = functionParameters(cu, sourcePath, contractName, fnName);
   const locals = functionLocals(cu, sourcePath, contractName, fnName);
 
-  const heights = stackHeights(cu, sourcePath, contractName);
+  // Value-type params/locals are located by the per-pc stack-PROVENANCE analyzer
+  // (codegen-agnostic: correct for viaIR's reordered/reused slots AND legacy). The
+  // frame-relative height model below is retained ONLY to place reference-type
+  // layouts (structs/arrays/strings), which the provenance analyzer does not track.
+  const {provenance, heights} = analyzersFor(
+    cu,
+    sourcePath,
+    contractName,
+    contract,
+  );
+  // `heightHere`/`frameBase` may be undefined (analyzer couldn't resolve this pc,
+  // or the frame couldn't be anchored). That no longer suppresses value-type
+  // variables — they come from provenance — only the reference-type layouts below.
+
   const heightHere = heights.frameRelHeightAt(pc);
-  if (heightHere === undefined) return []; // analyzer couldn't resolve → storage-only.
 
   // A frame reserves a stack slot for EACH return parameter between the params and
   // the locals (the return values, zero-initialised in the prologue). This holds
@@ -298,7 +347,8 @@ function stackVariables(
   const returnNodes = fnNode.returnParameters();
   const returnSlots = returnNodes.length;
 
-  // 3. frameBase — anchored ONCE per function via the static analyzer.
+  // 3. frameBase — anchored ONCE per function via the static analyzer (used only
+  //    for reference-type layouts; value types no longer depend on it).
   const frameBase = anchorFrameBase(
     cu,
     contract,
@@ -308,7 +358,6 @@ function stackVariables(
     returnSlots,
     heights,
   );
-  if (frameBase === undefined) return [];
 
   // 4. Uniform LIVE ordering: params (always live), then return params (always
   //    live once entered), then in-scope locals — all in declaration order;
@@ -344,13 +393,39 @@ function stackVariables(
       numberOfBytes: v.numberOfBytes,
       isValueType: v.isValueType,
     };
-    const frameRelSlot = frameBase + rank;
-    const depth = heightHere - 1 - frameRelSlot;
+    // Frame-relative fixed-slot depth (legacy codegen model). Used for value
+    // types only as a completeness FALLBACK on legacy bytecode, and for
+    // reference-type layouts.
+    const frameDepth =
+      heightHere !== undefined && frameBase !== undefined
+        ? heightHere - 1 - (frameBase + rank)
+        : undefined;
 
     if (v.isValueType) {
-      if (depth < 0) {
-        return result; // slot not on the stack yet — guard against mis-binding.
+      // PRIMARY, codegen-agnostic location: the per-pc stack-provenance analyzer
+      // (sound for viaIR's reordered/reused slots AND legacy). `undefined` means
+      // the value is not known to be on the stack here.
+      let depth = provenance.variableDepthAt(pc, v.declId);
+
+      // FALLBACK (legacy bytecode, non-parameters only): where provenance has no
+      // data-flow evidence, the classic "height − declarationRank" slot is a sound
+      // completion on the classic pipeline — it locates a value at a stable frame
+      // slot that provenance can't anchor without a read: a return parameter's
+      // reserved (still-zero) slot, or a loop variable whose value number changes
+      // each iteration. It is NOT used under viaIR (the model is invalid there),
+      // nor for value PARAMETERS (the fixed-rank model mislocated them even on
+      // legacy — provenance is authoritative for params).
+      if (
+        depth === undefined &&
+        !cu.viaIR() &&
+        v.kind !== 'parameter' &&
+        frameDepth !== undefined &&
+        frameDepth >= 0
+      ) {
+        depth = frameDepth;
       }
+
+      if (depth === undefined) return result; // unavailable at this pc → omit.
       result.pointer = {
         location: 'stack',
         slot: depth,
@@ -359,6 +434,12 @@ function stackVariables(
       };
       return result;
     }
+
+    // Reference/dynamic types still use the frame-relative fixed-slot model.
+    if (frameDepth === undefined) {
+      return result; // frame unresolved → list reference var without a layout.
+    }
+    const depth = frameDepth;
 
     // Reference/dynamic: listed, no top-level pointer (still consumed a rank).
     // A MEMORY STRUCT of value-type members is expanded into per-member
@@ -659,6 +740,7 @@ function isExternalEntry(visibility: string | undefined): boolean {
 function paramToStackVar(p: ParamDescriptor): StackVar {
   return {
     name: p.name,
+    declId: p.declId,
     kind: 'parameter',
     solcType: p.solcType,
     typeLabel: p.typeLabel,
@@ -678,6 +760,7 @@ function returnParamToStackVar(node: AstNode, name: string): StackVar {
   const desc = describeValueTypeString(typeLabel);
   return {
     name,
+    declId: node.id,
     kind: 'return',
     // Reference-type returns carry their solc structural type id.
     solcType: desc?.typeId ?? referenceTypeId(node),
@@ -690,6 +773,7 @@ function returnParamToStackVar(node: AstNode, name: string): StackVar {
 function localToStackVar(l: LocalDescriptor): StackVar {
   return {
     name: l.name,
+    declId: l.declId,
     kind: 'local',
     solcType: l.solcType,
     typeLabel: l.typeLabel,

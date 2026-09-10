@@ -66,6 +66,7 @@ interface RawBuildInfo {
     sources?: Record<string, {content?: string}>;
     settings?: {
       optimizer?: {enabled?: boolean; runs?: number};
+      viaIR?: boolean;
     };
   };
   output?: {
@@ -311,17 +312,31 @@ export class CompilationUnit {
   readonly #sources: SourceFile[];
   readonly #contracts: Contract[];
   readonly #optimizer: OptimizerSettings;
+  readonly #viaIR: boolean;
 
   constructor(
     solcVersion: string,
     sources: SourceFile[],
     contracts: Contract[],
     optimizer: OptimizerSettings = {enabled: false},
+    viaIR = false,
   ) {
     this.solcVersion = solcVersion;
     this.#sources = sources;
     this.#contracts = contracts;
     this.#optimizer = optimizer;
+    this.#viaIR = viaIR;
+  }
+
+  /**
+   * Whether this build-info was compiled through the Yul IR pipeline
+   * (`input.settings.viaIR === true`). Under viaIR the stack scheduler reorders/
+   * reuses slots per instruction, so the "height − declarationRank" fixed-slot
+   * model is invalid; consumers use it to decide whether that positional model is
+   * a safe completeness fallback (legacy only).
+   */
+  viaIR(): boolean {
+    return this.#viaIR;
   }
 
   /**
@@ -457,6 +472,7 @@ export function loadBuildInfo(json: unknown): CompilationUnit {
     sources,
     contracts,
     optimizer,
+    build.input?.settings?.viaIR ?? false,
   );
 }
 

@@ -35,6 +35,8 @@ import {describeValueTypeString} from './functionParameters.js';
 export interface LocalDescriptor {
   /** Declared variable name. */
   name: string;
+  /** AST declaration id — the key the stack-provenance analyzer tags slots by. */
+  declId: number;
   /** 0-based declaration (source) order across the whole function body. */
   index: number;
   /** solc storage-style type id, e.g. `t_uint256` (empty for reference types). */
@@ -124,6 +126,7 @@ export function functionLocals(
     const scope = enclosingScope(decl);
     return {
       name: decl.name!,
+      declId: decl.id,
       index,
       // Value types carry their storage-style id; a reference type (a memory
       // struct, or a dynamic memory array/string/bytes — so

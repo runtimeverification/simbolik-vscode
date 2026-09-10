@@ -19,6 +19,8 @@ import {referenceTypeId} from './functionLocals.js';
 export interface ParamDescriptor {
   /** Declared parameter name (or `argN` if unnamed). */
   name: string;
+  /** AST declaration id — the key the stack-provenance analyzer tags slots by. */
+  declId: number;
   /** 0-based declaration order (also the ABI/stack head index for value types). */
   index: number;
   /** solc storage-style type id, e.g. `t_uint256` (empty for reference types). */
@@ -97,6 +99,7 @@ export function functionParameters(
     const desc = describeValueTypeString(typeLabel);
     return {
       name: param.name ?? `arg${index}`,
+      declId: param.id,
       index,
       // Reference-type params carry their solc structural type id.
       solcType: desc?.typeId ?? referenceTypeId(param),
