@@ -46,10 +46,16 @@ export function devcontainerLaunch(
 /**
  * Launch recipe for a local Foundry `anvil` node with opcode-step tracing:
  *   anvil --host 127.0.0.1 --port <p> --steps-tracing
+ *     --gas-limit 10000000000 --disable-code-size-limit
  *
  * `--steps-tracing` is required or `debug_traceTransaction` returns empty
- * `structLogs`. `anvilPath` defaults to the bare command name (resolved on
- * `PATH`); override it to point at a specific binary.
+ * `structLogs`. `--gas-limit` (matching the server's `TX_GAS`) and
+ * `--disable-code-size-limit` let anvil deploy the large test contracts Foundry
+ * projects routinely produce (a `Test`/`Deployers` heir can have a >180 KB
+ * runtime, over the 24576-byte EIP-170 limit, whose code-deposit gas exceeds the
+ * default 30M block limit) — without them, the deploy silently fails and the
+ * traced call has no code to execute. `anvilPath` defaults to the bare command
+ * name (resolved on `PATH`); override it to point at a specific binary.
  */
 export function anvilLaunch(
   port: number,
@@ -58,7 +64,16 @@ export function anvilLaunch(
 ): KontrolNodeLaunch {
   return {
     command: anvilPath,
-    args: ['--host', host, '--port', String(port), '--steps-tracing'],
+    args: [
+      '--host',
+      host,
+      '--port',
+      String(port),
+      '--steps-tracing',
+      '--gas-limit',
+      '10000000000',
+      '--disable-code-size-limit',
+    ],
     env: {...process.env},
   };
 }

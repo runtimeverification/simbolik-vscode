@@ -110,7 +110,21 @@ export class SteppingModel {
     };
 
     const meta: StepMeta[] = new Array(cursor.length);
-    let jumpDepthBefore = 0;
+    // Internal-function nesting is folded PER RAW-EVM-FRAME, not globally.
+    // `frameJumps[d-1]` is the internal-call ('jump:i' minus 'jump:o') depth
+    // accrued WITHIN the frame at raw EVM depth `d`; `internalSum` is their total.
+    // combinedDepth = rawDepth + internalSum (the full logical call-stack depth).
+    // When an external CALL/CREATE returns, its frame is POPPED and its internal
+    // jumps are discarded from `internalSum` — so a callee's unbalanced fold
+    // cannot leak into the caller. A single global accumulator (the previous
+    // design) drifted upward whenever a mapped 'jump:i' had no matching mapped
+    // 'jump:o' — which happens constantly on real traces, where unmapped steps
+    // (foreign code, unidentified constructor/init code) carry 'jump:-'. That
+    // drift inflated later combinedDepths so `next`/`stepOut` (which stop at the
+    // first statement with `combinedDepth <= origin`) skipped their target and
+    // ran to the terminal step.
+    const frameJumps: number[] = [];
+    let internalSum = 0;
     let lastDefinedStmtId: number | undefined;
     let lastPath: string | undefined;
     let lastLine: number | undefined;
@@ -118,7 +132,12 @@ export class SteppingModel {
     for (let i = 0; i < cursor.length; i++) {
       const st = cursor.at(i);
       const resolution = resolve(i);
-      const combinedDepth = st.depth + jumpDepthBefore;
+      // Sync the frame stack to this step's raw EVM depth (which changes by at
+      // most 1 per step). Growing pushes fresh frames at internal-depth 0; a
+      // return pops the callee frame(s), discarding their internal-jump fold.
+      while (frameJumps.length < st.depth) frameJumps.push(0);
+      while (frameJumps.length > st.depth) internalSum -= frameJumps.pop()!;
+      const combinedDepth = st.depth + internalSum;
 
       let line: number | undefined;
       let col: number | undefined;
@@ -181,11 +200,19 @@ export class SteppingModel {
         lastPath = path;
         lastLine = line;
       }
-      // Fold this step's jump AFTER recording its depth, so the landing step
-      // (not the JUMP itself) carries the changed depth.
-      if (entry !== undefined) {
-        if (entry.jump === 'i') jumpDepthBefore += 1;
-        else if (entry.jump === 'o') jumpDepthBefore -= 1;
+      // Fold this step's jump into the CURRENT frame AFTER recording its depth,
+      // so the landing step (not the JUMP itself) carries the changed depth. A
+      // 'jump:o' is clamped at 0 so a frame that returns more than it entered
+      // (e.g. a 'jump:o' whose matching 'jump:i' was unmapped) cannot go negative.
+      if (entry !== undefined && frameJumps.length > 0) {
+        const top = frameJumps.length - 1;
+        if (entry.jump === 'i') {
+          frameJumps[top]!++;
+          internalSum++;
+        } else if (entry.jump === 'o' && frameJumps[top]! > 0) {
+          frameJumps[top]!--;
+          internalSum--;
+        }
       }
     }
 
@@ -198,10 +225,32 @@ export class SteppingModel {
     return this.#meta[index]!;
   }
 
+  /**
+   * Whether the statement starting at `index` is REAL execution rather than a
+   * compiler entry-prologue artifact. On entering a function, solc emits local-
+   * variable initialization code whose source maps point at the declaration/use
+   * statements OUT OF SOURCE ORDER — each visited for a single step before control
+   * returns to the function-definition line. Those transient visits are marked
+   * `isStmtStart` too, so a naive "first statement start" lands on the wrong
+   * (often the LAST) source line of the function.
+   *
+   * A genuine statement's execution STAYS in it (the next step carries the same
+   * `stmtId`) or DESCENDS into it (the next step is at a greater combinedDepth);
+   * a prologue init is abandoned immediately — the next step is a DIFFERENT
+   * statement (or the unmapped function-definition line) at the same-or-shallower
+   * combinedDepth. The terminal step is treated as persistent.
+   */
+  #persists(index: number): boolean {
+    if (index >= this.last) return true;
+    const cur = this.#meta[index]!;
+    const nxt = this.#meta[index + 1]!;
+    return nxt.stmtId === cur.stmtId || nxt.combinedDepth > cur.combinedDepth;
+  }
+
   /** The first statement-start step (the entry stop after launch). */
   entry(): number {
     for (let i = 0; i <= this.last; i++) {
-      if (this.#meta[i]!.isStmtStart) return i;
+      if (this.#meta[i]!.isStmtStart && this.#persists(i)) return i;
     }
     return 0;
   }
@@ -259,12 +308,17 @@ export class SteppingModel {
     return this.last;
   }
 
-  /** `stepIn`: smallest j>O that starts a different statement (any depth). */
+  /**
+   * `stepIn`: smallest j>O that starts a different, REAL statement (any depth).
+   * Entry-prologue statement-starts (see {@link #persists}) are skipped, so
+   * stepping into a function lands on its first executed statement rather than a
+   * variable-init artifact mapped to a later source line.
+   */
   stepIn(origin: number): number {
     const {stmtId: s} = this.#meta[origin]!;
     for (let j = origin + 1; j <= this.last; j++) {
       const m = this.#meta[j]!;
-      if (m.isStmtStart && m.stmtId !== s) return j;
+      if (m.isStmtStart && m.stmtId !== s && this.#persists(j)) return j;
     }
     return this.last;
   }

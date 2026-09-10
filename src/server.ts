@@ -91,8 +91,31 @@ const DEFAULT_ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
  */
 const FIRST_DEPLOY_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
 
-/** A generous gas cap for the deploy + call txs (mirrors the recorder fixture). */
-const TX_GAS = '0x1c9c37f';
+/**
+ * The gas cap for the deploy + setUp + call txs. Must be LARGE: like `forge
+ * test`, we execute real transactions against a node, and test contracts are
+ * routinely huge — a Foundry test that inherits `Test`/`Deployers` can have a
+ * >180 KB runtime, whose code-deposit cost alone (200 gas/byte) exceeds 36M, and
+ * its `setUp()` may deploy an entire protocol. The former 30M cap silently failed
+ * such deploys (receipt status 0x0, no code), yielding a 0-step trace and a
+ * debug session with no frames. kontrol-node ignores the block gas limit; the
+ * anvil backend is launched with a matching `--gas-limit` (see `anvilLaunch`).
+ * 10B mirrors Foundry's effectively-unbounded test gas and leaves ample headroom.
+ */
+const TX_GAS = '0x2540be400'; // 10_000_000_000
+
+/**
+ * The ETH balance to grant the test contract (and top up the sender) before
+ * `setUp()`, mirroring `forge test`, which pre-funds the test contract. Foundry
+ * projects routinely make value-bearing calls from the test contract — e.g.
+ * seeding a NATIVE-currency Uniswap-v4 pool sends `1 ether` from `address(this)`
+ * — which revert with a balance underflow when the contract is deployed with a
+ * plain zero-value transaction (as we do) and thus starts with 0 ETH. `uint96`
+ * max (~7.9e10 ETH) matches Foundry's default and is applied via
+ * `anvil_setBalance` (supported by both anvil and kontrol-node); best-effort, so
+ * a node without it simply keeps today's behavior.
+ */
+const TEST_BALANCE = '0xffffffffffffffffffffffff';
 
 /**
  * The DAP launch/attach argument fields the resolver reads. These are the
@@ -777,6 +800,40 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   if (deployReceipt && typeof deployReceipt.contractAddress === 'string') {
     contractAddress = deployReceipt.contractAddress;
   }
+  // A FAILED deploy (status 0x0) still returns a receipt AND a contractAddress,
+  // but deposits no code — a call to it then traces as a 0-step no-op, which used
+  // to surface only as a frameless, un-steppable session. Fail fast with an
+  // actionable message instead. The usual cause is an oversized contract whose
+  // code-deposit gas exceeds the tx gas (see TX_GAS) — report the sizes so the
+  // fix is obvious.
+  if (deployReceipt?.status === '0x0') {
+    const runtimeBytes = (contract.runtimeBytecode().length - 2) / 2;
+    const initBytes = (creationBytecode.length - 2) / 2;
+    throw new Error(
+      `Deploying ${contractName} failed (transaction reverted, status 0x0). ` +
+        `Its runtime bytecode is ${runtimeBytes} bytes (init ${initBytes} bytes); ` +
+        'depositing that much code can exceed the transaction gas limit. If you ' +
+        'are on a node that enforces the 24576-byte contract-size limit, raise ' +
+        'or disable it (anvil: --disable-code-size-limit).',
+    );
+  }
+
+  // Pre-fund the test contract (and top up the sender), like `forge test`. A
+  // Foundry test contract is deployed by us with a zero-value tx, so it holds 0
+  // ETH — yet its `setUp()`/method may make value-bearing calls (a native-
+  // currency pool seed sends `1 ether` from `address(this)`), which revert with a
+  // balance underflow. Foundry avoids this by giving the test contract a large
+  // balance; we mirror that via `anvil_setBalance`. Best-effort: a node lacking
+  // the method leaves balances unchanged (the setUp-revert warning below still
+  // fires). Cannot use a value-bearing transfer instead — a test contract is
+  // rarely `payable`, so a plain send would itself revert.
+  for (const acct of [contractAddress, DEFAULT_ACCOUNT]) {
+    try {
+      await client.call('anvil_setBalance', [acct, TEST_BALANCE]);
+    } catch {
+      // Node without anvil_setBalance — skip (non-fatal).
+    }
+  }
 
   // Foundry semantics: `setUp()` establishes the fixture state a test/debug
   // method depends on (deploy tokens, fund actors, …). Our launch calls ONE
@@ -801,7 +858,19 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
       },
     ]);
     // Ensure setUp is mined (state committed) before the debugged call runs.
-    await waitForReceipt(client, setUpTxHash);
+    const setUpReceipt = await waitForReceipt(client, setUpTxHash);
+    // A REVERTED setUp leaves the fixture state incomplete, so the debugged
+    // method will typically revert early (or read zeros). This is not fatal — we
+    // still trace the call — but the user must know their session is running
+    // against a half-initialized fixture rather than a clean one.
+    if (setUpReceipt?.status === '0x0') {
+      ctx?.log(
+        '⚠ setUp() reverted (status 0x0): the test fixture is only partially ' +
+          'initialized, so the debugged method may revert early or read zeroed ' +
+          'state. This often means the node does not support a cheatcode or ' +
+          'deployment the setUp relies on.',
+      );
+    }
   }
 
   // Snapshot the PRE-CALL state (after deploy + setUp, before the traced call) in

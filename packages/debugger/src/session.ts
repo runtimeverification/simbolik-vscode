@@ -496,6 +496,21 @@ export class SolidityDebugSession {
     } else {
       steps = normalizeKontrolTrace(parsed.result as never);
     }
+    // A trace with no steps means the traced transaction executed no EVM
+    // instructions — the target address has no code (a failed/oversized deploy,
+    // or a call to an EOA). Proceeding would build an empty stepping model whose
+    // `entry()` points past its own metadata, so the first step command throws a
+    // cryptic "Cannot destructure property 'stmtId' of undefined". Fail fast here
+    // with an explanation instead; the launch resolver's deploy-status check
+    // catches the common cause earlier, but this guards every other 0-step path.
+    if (steps.length === 0) {
+      const addr = inputs.codeAddress ?? 'the entry contract';
+      throw new Error(
+        `launch: the traced transaction executed no instructions — ${addr} ` +
+          'has no code (the deploy may have failed, e.g. an oversized contract, ' +
+          'or the call targeted an account with no code). There is nothing to debug.',
+      );
+    }
     const cursor = new StateCursor(steps, inputs.initialStorage);
 
     // The entry/launch contract, used as the ultimate resolution fallback: found

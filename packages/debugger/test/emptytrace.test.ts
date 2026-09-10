@@ -1,0 +1,64 @@
+/**
+ * Regression: a 0-step trace must fail fast with a clear, actionable error at
+ * `launch`, NOT build a degenerate stepping model that later throws a cryptic
+ * "Cannot destructure property 'stmtId' of undefined" on the first step command.
+ *
+ * The real-world trigger (found debugging uniswap-v4-core's PoolManager.clear.t):
+ * an oversized test contract (>180 KB runtime) whose deploy failed for want of
+ * gas, leaving the entry address code-less — so the traced call executed zero EVM
+ * instructions. The launch resolver now rejects the failed deploy earlier, but
+ * this guard covers every other 0-step path (geth attach, a call to an EOA, …).
+ */
+import {readFileSync} from 'node:fs';
+
+import {describe, expect, it} from 'vitest';
+
+import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+
+const BUILD_INFO_JSON: unknown = JSON.parse(
+  readFileSync(
+    new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
+    'utf8',
+  ),
+);
+
+/** A well-formed `debug_traceTransaction` response whose execution has 0 steps. */
+const EMPTY_TRACE_RAW = JSON.stringify({
+  jsonrpc: '2.0',
+  id: 1,
+  result: {structLogs: [], gas: 0, failed: false, returnValue: ''},
+});
+
+function emptyLaunchInputs(): LaunchInputs {
+  return {
+    buildInfoJson: BUILD_INFO_JSON,
+    traceJson: EMPTY_TRACE_RAW,
+    sourcePath: 'src/Counter.sol',
+    contractName: 'Counter',
+    methodName: 'setNumber',
+    codeAddress: '0x5fbdb2315678afecb367f032d93f642f64180aa3',
+  };
+}
+
+describe('SolidityDebugSession.launch with a 0-step trace', () => {
+  it('rejects with an explanatory error (not a stmtId destructure crash)', async () => {
+    const session = new SolidityDebugSession();
+    await expect(session.launch(emptyLaunchInputs())).rejects.toThrow(
+      /executed no instructions/i,
+    );
+  });
+
+  it('names the code-less entry address in the error', async () => {
+    const session = new SolidityDebugSession();
+    await expect(session.launch(emptyLaunchInputs())).rejects.toThrow(
+      /0x5fbdb2315678afecb367f032d93f642f64180aa3/,
+    );
+  });
+
+  it('does not leak the low-level "stmtId" destructure failure', async () => {
+    const session = new SolidityDebugSession();
+    await expect(session.launch(emptyLaunchInputs())).rejects.not.toThrow(
+      /stmtId/,
+    );
+  });
+});

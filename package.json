@@ -224,6 +224,7 @@
     "esbuild-server": "esbuild ./src/server.ts       --bundle --outfile=build/server.mjs      --external:vscode --format=esm --platform=node",
     "esbuild": "npm run esbuild-base -- --sourcemap && npm run esbuild-server -- --sourcemap",
     "compile": "tsc -p ./tsconfig.json",
+    "build:dev": "tsc -b tsconfig.packages.json && npm run compile && npm run esbuild-server -- --sourcemap",
     "typecheck": "tsc -b tsconfig.packages.json && tsc -p tsconfig.server.json",
     "lint": "gts lint",
     "test": "vitest run",
