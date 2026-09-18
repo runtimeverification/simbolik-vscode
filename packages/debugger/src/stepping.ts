@@ -70,6 +70,8 @@ export interface StepMeta {
   isLineStart: boolean;
   /** Whether the resolved contract's CU was compiled with the optimizer. */
   optimized: boolean;
+  /** Whether this step's opcode is a control-transfer (`JUMP`/`JUMPI`). */
+  isJump: boolean;
 }
 
 /** Per-contract source-map indexing, cached across steps. */
@@ -191,6 +193,7 @@ export class SteppingModel {
         isStmtStart,
         isLineStart,
         optimized,
+        isJump: st.op === 'JUMP' || st.op === 'JUMPI',
       };
 
       if (stmtId !== undefined) {
@@ -244,7 +247,53 @@ export class SteppingModel {
     if (index >= this.last) return true;
     const cur = this.#meta[index]!;
     const nxt = this.#meta[index + 1]!;
-    return nxt.stmtId === cur.stmtId || nxt.combinedDepth > cur.combinedDepth;
+    // One-step guard: a single-step out-of-order artifact (the next step is a
+    // DIFFERENT statement at the same-or-shallower depth) is abandoned at once.
+    if (nxt.stmtId !== cur.stmtId && nxt.combinedDepth <= cur.combinedDepth) {
+      return false;
+    }
+    // Multi-step guard: a viaIR straight-line SETUP artifact (see below).
+    return !this.#isBackwardSetupArtifact(index);
+  }
+
+  /**
+   * Whether the statement-start at `index` is a viaIR straight-line SETUP
+   * artifact rather than the statement's real execution.
+   *
+   * Under `--via-ir`, solc lays out a function's argument/return-slot setup as one
+   * contiguous straight-line block and attributes each little stack-shuffling
+   * group (typically bare `PUSH`es) to whichever statement's variables it touches
+   * — OUT OF SOURCE ORDER and possibly SEVERAL steps long, so the one-step
+   * {@link #persists} guard does not catch it. Concretely, a multi-arg statement's
+   * source position is emitted for setup instructions that physically precede an
+   * EARLIER statement's real call, then control falls straight through to that
+   * earlier statement. Stopping there strands step-into/step-over on a later
+   * source line before the real next statement has run.
+   *
+   * The run of steps that stay in this statement (same `stmtId`) at its own depth
+   * is examined: if it ever DESCENDS into a sub-call (a deeper combinedDepth) or
+   * the frame RETURNS (a shallower one), the statement does real work and is kept.
+   * Otherwise the run is flat; the step that leaves it is the exit. A genuine
+   * backward flow (loop back-edge, `continue`) reaches its target via a taken
+   * JUMP, so only a FALL-THROUGH (the last run step is not a jump) to an EARLIER
+   * statement (a smaller AST id, i.e. earlier in the frame's execution) is the
+   * artifact. Forward fall-through (ordinary sequential statements, a loop's
+   * final exit test) is real.
+   */
+  #isBackwardSetupArtifact(index: number): boolean {
+    const cur = this.#meta[index]!;
+    const s = cur.stmtId;
+    const d = cur.combinedDepth;
+    if (s === undefined) return false;
+    for (let j = index + 1; j <= this.last; j++) {
+      const m = this.#meta[j]!;
+      if (m.combinedDepth > d) return false; // descended into a sub-call
+      if (m.combinedDepth < d) return false; // frame returned (last statement)
+      if (m.stmtId === s) continue; // still inside this statement's run
+      if (this.#meta[j - 1]!.isJump) return false; // reached via a taken jump
+      return m.stmtId !== undefined && m.stmtId < s; // fall-through to an EARLIER stmt
+    }
+    return false;
   }
 
   /** The first statement-start step (the entry stop after launch). */
