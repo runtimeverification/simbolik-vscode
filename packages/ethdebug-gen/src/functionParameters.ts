@@ -11,7 +11,7 @@
  * it is a build-info-derived fact shared by the static inventory and the runtime
  * reader; the debugger re-exports {@link describeValueTypeString} from this module.
  */
-import type {CompilationUnit} from '@simbolik/solc';
+import type {AstNode, CompilationUnit} from '@simbolik/solc';
 
 import {referenceTypeId} from './functionLocals.js';
 
@@ -77,6 +77,44 @@ export function describeValueTypeString(
 }
 
 /**
+ * The value-type descriptor for a `VariableDeclaration`, resolving a USER-DEFINED
+ * VALUE TYPE (`type X is <elementary>`) to its underlying type.
+ *
+ * A UDVT variable's `typeString` is the alias name (e.g. `Currency`), which
+ * {@link describeValueTypeString} does not recognise, so such a local/param would
+ * be misclassified as a reference type and shown without a value. Its
+ * declaration's `UserDefinedTypeName` child carries a `referencedDeclaration`
+ * pointing at the `UserDefinedValueTypeDefinition` (possibly in another source),
+ * whose `ElementaryTypeName` child is the real value type (e.g. `address`). Falls
+ * back to `undefined` for genuine reference/dynamic types.
+ */
+export function describeDeclValueType(
+  decl: AstNode,
+  cu: CompilationUnit,
+): {typeId: string; numberOfBytes: number; enumName?: string} | undefined {
+  const direct = describeValueTypeString(decl.typeString ?? '');
+  if (direct !== undefined) return direct;
+  if (!(decl.typeIdentifier ?? '').startsWith('t_userDefinedValueType')) {
+    return undefined;
+  }
+  const typeName = decl
+    .children()
+    .find((c) => c.nodeType === 'UserDefinedTypeName');
+  const ref = typeName?.referencedDeclaration;
+  if (ref === undefined) return undefined;
+  const defn = cu.nodeById(ref);
+  if (defn === undefined || defn.nodeType !== 'UserDefinedValueTypeDefinition') {
+    return undefined;
+  }
+  const underlying = defn
+    .children()
+    .find((c) => c.nodeType === 'ElementaryTypeName');
+  return underlying?.typeString === undefined
+    ? undefined
+    : describeValueTypeString(underlying.typeString);
+}
+
+/**
  * The static input-parameter inventory for `contractName.methodName`, in
  * declaration order. Reference/dynamic parameters are still listed (so indices
  * stay aligned with the ABI) but carry `isValueType: false` and are skipped by
@@ -94,9 +132,24 @@ export function functionParameters(
       `function not found: ${sourcePath}:${contractName}.${methodName}`,
     );
   }
+  return parametersFromFunctionNode(fn, cu);
+}
+
+/**
+ * The static input-parameter inventory for an already-resolved
+ * `FunctionDefinition` node. Prefer this over {@link functionParameters} when the
+ * node is known (e.g. resolved from a source map at a pc): a by-name lookup is
+ * scoped to a single contract's own members, so it misses INHERITED functions
+ * (defined in a base contract) and cannot disambiguate overloads — the node is
+ * exact.
+ */
+export function parametersFromFunctionNode(
+  fn: AstNode,
+  cu: CompilationUnit,
+): ParamDescriptor[] {
   return fn.parameters().map((param, index) => {
     const typeLabel = param.typeString ?? '';
-    const desc = describeValueTypeString(typeLabel);
+    const desc = describeDeclValueType(param, cu);
     return {
       name: param.name ?? `arg${index}`,
       declId: param.id,

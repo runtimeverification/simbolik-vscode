@@ -359,6 +359,29 @@ export class CompilationUnit {
     return this.#sources.find((s) => s.path === path);
   }
 
+  /** Lazy id → AST node index across ALL sources (built once, then reused). */
+  #nodeIndex: Map<number, AstNode> | undefined;
+
+  /**
+   * The AST node with `id` anywhere in the compilation unit (any source). Solc AST
+   * ids are unique across the whole build, so a cross-source lookup resolves a
+   * reference (`referencedDeclaration`) that points into another file — e.g. a
+   * user-defined value type's definition, or an inherited declaration. The index
+   * is built lazily on first use and cached.
+   */
+  nodeById(id: number): AstNode | undefined {
+    if (this.#nodeIndex === undefined) {
+      const index = new Map<number, AstNode>();
+      const visit = (n: AstNode): void => {
+        index.set(n.id, n);
+        for (const c of n.children()) visit(c);
+      };
+      for (const s of this.#sources) visit(s.ast());
+      this.#nodeIndex = index;
+    }
+    return this.#nodeIndex.get(id);
+  }
+
   contracts(): Contract[] {
     return [...this.#contracts];
   }

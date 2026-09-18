@@ -49,12 +49,13 @@ import {
 
 import {generateEthdebugProgram} from './index.js';
 import {
+  describeDeclValueType,
   describeValueTypeString,
-  functionParameters,
+  parametersFromFunctionNode,
   type ParamDescriptor,
 } from './functionParameters.js';
 import {
-  functionLocals,
+  localsFromFunctionNode,
   referenceTypeId,
   type LocalDescriptor,
 } from './functionLocals.js';
@@ -319,8 +320,12 @@ function stackVariables(
   const fnName = fnNode?.name;
   if (fnNode === undefined || fnName === undefined) return [];
 
-  const params = functionParameters(cu, sourcePath, contractName, fnName);
-  const locals = functionLocals(cu, sourcePath, contractName, fnName);
+  // Derive params/locals from the RESOLVED function node (not a by-name lookup):
+  // the source map may resolve `pc` to a function INHERITED from a base contract,
+  // which a name lookup scoped to `contractName` would miss (degrading to
+  // storage-only), and the node also disambiguates overloads.
+  const params = parametersFromFunctionNode(fnNode, cu);
+  const locals = localsFromFunctionNode(fnNode, cu);
 
   // Value-type params/locals are located by the per-pc stack-PROVENANCE analyzer
   // (codegen-agnostic: correct for viaIR's reordered/reused slots AND legacy). The
@@ -374,7 +379,10 @@ function stackVariables(
   returnNodes.forEach((node, i) => {
     const name = node.name;
     if (name === undefined || name === '') return; // unnamed: reserved, not emitted.
-    returnRanked.push({v: returnParamToStackVar(node, name), rank: paramVars.length + i});
+    returnRanked.push({
+      v: returnParamToStackVar(node, name, cu),
+      rank: paramVars.length + i,
+    });
   });
   const localVars = locals.filter((l) => isLive(l, offset)).map(localToStackVar);
   const ranked: Array<{v: StackVar; rank: number}> = [
@@ -435,11 +443,16 @@ function stackVariables(
       return result;
     }
 
-    // Reference/dynamic types still use the frame-relative fixed-slot model.
-    if (frameDepth === undefined) {
-      return result; // frame unresolved → list reference var without a layout.
+    // Reference/dynamic types: locate the stack slot that holds the reference's
+    // handle (a MEMORY struct/array/string's memory offset) PER-PC via the
+    // provenance analyzer first — correct under viaIR's reordered/reused slots,
+    // exactly as for value types — and fall back to the legacy frame-relative slot
+    // only where provenance has no evidence (classic codegen).
+    let depth = provenance.variableDepthAt(pc, v.declId);
+    if (depth === undefined) depth = frameDepth;
+    if (depth === undefined) {
+      return result; // unresolved → list reference var without a layout.
     }
-    const depth = frameDepth;
 
     // Reference/dynamic: listed, no top-level pointer (still consumed a rank).
     // A MEMORY STRUCT of value-type members is expanded into per-member
@@ -751,13 +764,18 @@ function paramToStackVar(p: ParamDescriptor): StackVar {
 
 /**
  * A NAMED return parameter's AST node → an ordered stack variable (kind 'return'),
- * reusing the same value-type mapping as params/locals ({@link describeValueTypeString}).
+ * reusing the same value-type mapping as params/locals ({@link describeDeclValueType},
+ * so a user-defined value-type return resolves to its underlying type).
  * Reference/dynamic returns get `isValueType:false` and no pointer downstream, but
  * still consume a rank/slot.
  */
-function returnParamToStackVar(node: AstNode, name: string): StackVar {
+function returnParamToStackVar(
+  node: AstNode,
+  name: string,
+  cu: CompilationUnit,
+): StackVar {
   const typeLabel = node.typeString ?? '';
-  const desc = describeValueTypeString(typeLabel);
+  const desc = describeDeclValueType(node, cu);
   return {
     name,
     declId: node.id,

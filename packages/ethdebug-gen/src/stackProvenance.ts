@@ -34,14 +34,17 @@
  *
  * ── How a value gets identified as a variable (the anchor) ───────────────────
  * A variable READ is the anchor: when an instruction's source-map node is an
- * `Identifier` whose `referencedDeclaration` is a function param/local AND the
- * opcode is `DUPn`, the slot being duplicated (depth `n`) provably HOLDS that
- * variable's value — solc emits exactly this `DUPn` to read a value-type stack
- * variable (verified against recorded traces to read the correct value at 100% of
- * anchor pcs). We map that slot's ORIGIN to the variable. The variable is then
+ * `Identifier` whose `referencedDeclaration` is a function param/local, the slot
+ * at depth `n` holds that variable's value — for `DUPn` (a COPY read) provably
+ * (solc emits exactly this to read a value-type stack variable, verified against
+ * recorded traces at 100% of anchor pcs); for `SWAPn` (a MOVE read — a local's
+ * LAST use, the common viaIR pattern for a local passed as a call's final
+ * argument) usually, but SWAP attribution is coarse, so SWAP anchors are treated
+ * as SUBORDINATE to DUP ones (see {@link Analyzer.recordRead}). We map that slot's
+ * ORIGIN to the variable. The variable is then
  * reported at EVERY pc where a slot with that origin is live — before the read
  * (same value, e.g. a parameter from function entry) and after — because it is
- * provably the very value the read observed.
+ * the very value the read observed.
  *
  * ── Merges ───────────────────────────────────────────────────────────────────
  * At a pc reachable from multiple predecessors the incoming stacks are INTERSECTED
@@ -237,11 +240,15 @@ interface Insn {
   /** Enclosing `FunctionDefinition` AST id, or `undefined` (helper/dispatcher). */
   fnId: number | undefined;
   /**
-   * A variable-READ anchor: this is a `DUPn` whose source-map node is an
+   * A variable-READ anchor: a `DUPn`/`SWAPn` whose source-map node is an
    * `Identifier` referring to the param/local with `declId`; `depth` (= n) is the
-   * depth-from-top of the slot it duplicates, which holds that variable's value.
+   * depth-from-top of the slot it reads, which holds that variable's value. `kind`
+   * is `'dup'` (a copy read — reliable) or `'swap'` (a last-use move — subordinate:
+   * viaIR's coarse attribution can tag a stack-shuffle SWAP with an unrelated
+   * variable's Identifier, so a SWAP anchor never overrides or invalidates a DUP
+   * one; see {@link Analyzer.recordRead}).
    */
-  anchor?: {declId: number; depth: number};
+  anchor?: {declId: number; depth: number; kind: 'dup' | 'swap'};
 }
 
 /** One abstract stack slot: an optional known constant + a value-number origin. */
@@ -350,10 +357,21 @@ class Analyzer {
   private readonly conflicted = new Set<number>();
   /** AST ids of function params/locals (the taggable stack variables). */
   private readonly varDeclIds = new Set<number>();
-  /** Value number (origin) → the variable declId a read proved it to hold. */
+  /** Value number (origin) → the variable declId a DUP read proved it to hold. */
   private readonly originToDecl = new Map<number, number>();
+  /**
+   * Value number (origin) → declId claimed by a SUBORDINATE `SWAPn` last-use read,
+   * for origins no `DUPn` anchor claims. SWAP attribution is coarse under viaIR (a
+   * stack-shuffle SWAP can carry an unrelated Identifier), so these are consulted
+   * only AFTER {@link originToDecl} and never mark a DUP-claimed origin ambiguous —
+   * they add value-type locals whose ONLY read is a move (e.g. a local passed as a
+   * call's final argument) without corrupting DUP-proved variables.
+   */
+  private readonly swapOriginToDecl = new Map<number, number>();
   /** Origins a read tied to two different variables (ambiguous ⇒ never reported). */
   private readonly originAmbiguous = new Set<number>();
+  /** Origins a SWAP read tied to two different variables (dropped from SWAP map). */
+  private readonly swapOriginAmbiguous = new Set<number>();
   private readonly netCache = new Map<number, number | undefined>();
   private readonly netInProgress = new Set<number>();
 
@@ -418,7 +436,7 @@ class Analyzer {
       const entry = sourceMap[i];
       const fnId = entry ? this.attributeFunction(cu, entry) : undefined;
       const anchor =
-        entry && op >= 0x80 && op <= 0x8f
+        entry && op >= 0x80 && op <= 0x9f // DUPn (0x80–0x8f) or SWAPn (0x90–0x9f)
           ? this.readAnchor(cu, entry, op)
           : undefined;
       this.insns.set(pc, {
@@ -442,14 +460,21 @@ class Analyzer {
 
   /**
    * If `entry`'s innermost node is an `Identifier` reading a known param/local, a
-   * read anchor for a `DUPn` (`op`): the duplicated slot at depth `n = op − 0x80`
-   * holds that variable.
+   * read anchor for a `DUPn` OR `SWAPn` (`op`): the slot at depth `n` holds that
+   * variable in the INCOMING stack. For `DUPn` (`n = op − 0x80`) the value is
+   * COPIED to the top (a non-consuming read); for `SWAPn` (`n = op − 0x8f`) it is
+   * moved to the top to be consumed — solc emits this for a value-type local's
+   * LAST use under viaIR, which the DUP-only anchor missed. Either way the slot at
+   * depth `n` provably holds the variable at this pc, so anchoring its value number
+   * is sound (the value number identifies the value throughout its life, so the
+   * variable is then reported at every pc where that value is still live —
+   * including BEFORE this read).
    */
   private readAnchor(
     cu: CompilationUnit,
     entry: SourceMapEntry,
     op: number,
-  ): {declId: number; depth: number} | undefined {
+  ): {declId: number; depth: number; kind: 'dup' | 'swap'} | undefined {
     if (entry.fileId < 0) return undefined;
     const source = cu.sourceById(entry.fileId);
     if (source === undefined) return undefined;
@@ -457,7 +482,8 @@ class Analyzer {
     if (node === undefined || node.nodeType !== 'Identifier') return undefined;
     const declId = node.referencedDeclaration;
     if (declId === undefined || !this.varDeclIds.has(declId)) return undefined;
-    return {declId, depth: op - 0x80};
+    const isSwap = op >= 0x90;
+    return {declId, depth: isSwap ? op - 0x8f : op - 0x80, kind: isSwap ? 'swap' : 'dup'};
   }
 
   private attributeFunction(
@@ -488,7 +514,15 @@ class Analyzer {
     for (let depth = 0; depth < stack.length; depth++) {
       const origin = stack[stack.length - 1 - depth]!.origin;
       if (origin === undefined || this.originAmbiguous.has(origin)) continue;
+      // DUP-proved mapping is authoritative; the subordinate SWAP map fills in
+      // origins no DUP claimed (and is shadowed wherever a DUP claim exists).
       if (this.originToDecl.get(origin) === declId) return depth;
+      if (
+        !this.originToDecl.has(origin) &&
+        this.swapOriginToDecl.get(origin) === declId
+      ) {
+        return depth;
+      }
     }
     return undefined;
   }
@@ -536,7 +570,9 @@ class Analyzer {
       if (insn.anchor !== undefined) {
         const idx = cur.length - 1 - insn.anchor.depth;
         const origin = idx >= 0 ? cur[idx]!.origin : undefined;
-        if (origin !== undefined) this.recordRead(origin, insn.anchor.declId);
+        if (origin !== undefined) {
+          this.recordRead(origin, insn.anchor.declId, insn.anchor.kind);
+        }
       }
 
       if (isBlockTerminator(insn.op)) continue;
@@ -565,15 +601,38 @@ class Analyzer {
     }
   }
 
-  /** Tie a value number to the variable a read proved it to hold (guard conflicts). */
-  private recordRead(origin: number, declId: number): void {
-    if (this.originAmbiguous.has(origin)) return;
-    const prev = this.originToDecl.get(origin);
+  /**
+   * Tie a value number to the variable a read proved it to hold, guarding
+   * conflicts. `DUPn` reads (`kind: 'dup'`) are AUTHORITATIVE: they populate
+   * {@link originToDecl} and, on setting an origin, drop any subordinate SWAP claim
+   * for it. `SWAPn` reads (`kind: 'swap'`) are SUBORDINATE: they fill only origins
+   * no DUP has claimed (a DUP-claimed origin's mismatched SWAP is ignored, NOT
+   * marked ambiguous — viaIR mis-attributes stack-shuffle SWAPs), and two SWAP
+   * reads disagreeing on one origin drop it from the SWAP map.
+   */
+  private recordRead(origin: number, declId: number, kind: 'dup' | 'swap'): void {
+    if (kind === 'dup') {
+      // A DUP claim overrides any tentative SWAP claim for this origin.
+      this.swapOriginToDecl.delete(origin);
+      if (this.originAmbiguous.has(origin)) return;
+      const prev = this.originToDecl.get(origin);
+      if (prev === undefined) {
+        this.originToDecl.set(origin, declId);
+      } else if (prev !== declId) {
+        this.originAmbiguous.add(origin); // read as two variables — unsound.
+      }
+      return;
+    }
+    // SWAP: subordinate. Defer entirely to an existing DUP claim.
+    if (this.originToDecl.has(origin) || this.swapOriginAmbiguous.has(origin)) {
+      return;
+    }
+    const prev = this.swapOriginToDecl.get(origin);
     if (prev === undefined) {
-      this.originToDecl.set(origin, declId);
+      this.swapOriginToDecl.set(origin, declId);
     } else if (prev !== declId) {
-      // The same value read as two different variables — cannot both be sound.
-      this.originAmbiguous.add(origin);
+      this.swapOriginToDecl.delete(origin);
+      this.swapOriginAmbiguous.add(origin);
     }
   }
 

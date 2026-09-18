@@ -29,7 +29,7 @@
  */
 import type {AstNode, CompilationUnit} from '@simbolik/solc';
 
-import {describeValueTypeString} from './functionParameters.js';
+import {describeDeclValueType} from './functionParameters.js';
 
 /** A single function local variable's static descriptor. */
 export interface LocalDescriptor {
@@ -119,9 +119,23 @@ export function functionLocals(
       `function not found: ${sourcePath}:${contractName}.${methodName}`,
     );
   }
+  return localsFromFunctionNode(fn, cu);
+}
+
+/**
+ * The static local-variable inventory for an already-resolved
+ * `FunctionDefinition` node. Prefer this over {@link functionLocals} when the node
+ * is known (e.g. resolved from a source map at a pc): a by-name lookup is scoped
+ * to a single contract's own members, so it misses INHERITED functions (defined in
+ * a base contract) and cannot disambiguate overloads — whereas the node is exact.
+ */
+export function localsFromFunctionNode(
+  fn: AstNode,
+  cu: CompilationUnit,
+): LocalDescriptor[] {
   return collectLocalDeclarations(fn).map((decl, index) => {
     const typeLabel = decl.typeString ?? '';
-    const desc = describeValueTypeString(typeLabel);
+    const desc = describeDeclValueType(decl, cu);
     const stmt = decl.parent()!; // the VariableDeclarationStatement
     const scope = enclosingScope(decl);
     return {
