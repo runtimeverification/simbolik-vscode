@@ -2038,13 +2038,89 @@ export class SolidityDebugSession {
         variables.push({name: v.name, value, type: v.typeLabel, variablesReference: 0});
         continue;
       }
-      if (v.pointer === undefined) {
-        continue; // a reference/dynamic var still deferred (no pointer, no members).
+      if (v.pointer !== undefined) {
+        const field = await readPointerValue(v.pointer, ms);
+        if (this.#isAddressType(v.solcType)) {
+          variables.push(this.#renderContractAddress(v.name, field, v.typeLabel));
+        } else {
+          const {value, type} = this.#decodeField(
+            cu,
+            field,
+            v.solcType,
+            v.typeLabel,
+            v.numberOfBytes,
+          );
+          variables.push({name: v.name, value, type, variablesReference: 0});
+        }
+        continue;
       }
+      // Unavailable at the live pc: its stack slot has been freed/reused (common
+      // under viaIR once a value local's LAST use has passed), yet it is still in
+      // lexical scope (`variablesAt` listed it here). Show its LAST KNOWN value —
+      // decoded at the most recent earlier step of THIS SAME frame invocation where
+      // it was still locatable, and marked stale. Sound: it reads the variable's
+      // genuine historical value, never the current (reused) slot. Scalars only;
+      // a complex reference type is shown only while live.
+      const stale = await this.#lastKnownScalar(frame, cu, v.name, stepIndex);
+      if (stale !== undefined) variables.push(stale);
+    }
+    return variables;
+  }
+
+  /**
+   * The LAST KNOWN value of a scalar param/local `name` that is in scope at the
+   * current frame position but has no live location there (its slot was freed or
+   * reused). Scans backward from `curStep` — bounded to the current frame
+   * invocation via the stepping model's `combinedDepth` (a step SHALLOWER than the
+   * frame's own level ends the invocation; a DEEPER one is a sub-call, skipped) and
+   * the frame's address — for the most recent step where `variablesAt` gives `name`
+   * a concrete SCALAR pointer (value type or memory string/bytes), then decodes it
+   * against THAT step's reconstructed machine state. The value is marked stale
+   * (`… (last known)` + read-only). Returns `undefined` if the variable is never
+   * located within the invocation, or is a COMPLEX reference type (struct/array —
+   * shown only while live). NEVER reads the current step's (reused) slot, so a
+   * value shown is always one the variable genuinely held.
+   */
+  async #lastKnownScalar(
+    frame: FrameInfo,
+    cu: CompilationUnit,
+    name: string,
+    curStep: number,
+  ): Promise<DebugProtocol.Variable | undefined> {
+    const state = this.#require();
+    const {steps, model} = state;
+    const frameDepth = model.at(curStep).combinedDepth;
+    const addr = frame.address;
+    for (let j = curStep - 1; j >= 0; j--) {
+      const m = model.at(j);
+      if (m.combinedDepth < frameDepth) break; // returned out of this invocation
+      if (m.combinedDepth > frameDepth) continue; // inside a sub-call
+      if (addressHex(steps[j]!.codeAddress) !== addr) continue;
+      const v = this.#variablesFor(frame, steps[j]!.pc).find(
+        (x) =>
+          x.name === name &&
+          (x.kind === 'parameter' ||
+            x.kind === 'return' ||
+            x.kind === 'local'),
+      );
+      if (v === undefined) continue;
+      if (v.members !== undefined || v.array !== undefined) return undefined;
+      const ms = machineStateFor(state.cursor.at(j), addr);
+      if (v.bytes !== undefined) {
+        const hex = await readPointerBytes(v.bytes.pointer, ms);
+        const raw = v.bytes.isString
+          ? `"${Buffer.from(hex.slice(2), 'hex').toString('utf8')}"`
+          : hex;
+        return this.#staleVariable(v.name, raw, v.typeLabel);
+      }
+      if (v.pointer === undefined) continue; // present but unlocated here too
       const field = await readPointerValue(v.pointer, ms);
       if (this.#isAddressType(v.solcType)) {
-        variables.push(this.#renderContractAddress(v.name, field, v.typeLabel));
-        continue;
+        return this.#staleVariable(
+          v.name,
+          addressHex(field & ((1n << 160n) - 1n)),
+          v.typeLabel,
+        );
       }
       const {value, type} = this.#decodeField(
         cu,
@@ -2053,9 +2129,24 @@ export class SolidityDebugSession {
         v.typeLabel,
         v.numberOfBytes,
       );
-      variables.push({name: v.name, value, type, variablesReference: 0});
+      return this.#staleVariable(v.name, value, type);
     }
-    return variables;
+    return undefined;
+  }
+
+  /** A read-only DAP variable whose value is flagged as a stale last-known value. */
+  #staleVariable(
+    name: string,
+    value: string,
+    type: string | undefined,
+  ): DebugProtocol.Variable {
+    return {
+      name,
+      value: `${value} (last known)`,
+      type,
+      variablesReference: 0,
+      presentationHint: {attributes: ['readOnly']},
+    };
   }
 
   /**
