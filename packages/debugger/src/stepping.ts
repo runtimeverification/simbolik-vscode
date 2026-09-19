@@ -70,6 +70,13 @@ export interface StepMeta {
   isLineStart: boolean;
   /** Whether the resolved contract's CU was compiled with the optimizer. */
   optimized: boolean;
+  /**
+   * Whether the resolved CU was compiled with `--via-ir`. The out-of-order
+   * straight-line SETUP artifact ({@link #isBackwardSetupArtifact}) is a viaIR
+   * codegen phenomenon, so that heuristic is gated on this flag and never runs on
+   * classic (legacy) codegen.
+   */
+  viaIR: boolean;
   /** Whether this step's opcode is a control-transfer (`JUMP`/`JUMPI`). */
   isJump: boolean;
 }
@@ -147,6 +154,7 @@ export class SteppingModel {
       let stmtId: number | undefined;
       let entry: SourceMapEntry | undefined;
       const optimized = resolution?.optimized ?? false;
+      const viaIR = resolution?.cu.viaIR() ?? false;
 
       // A CREATE/CREATE2 frame runs the constructor's INIT code, indexed by the
       // init source map (`isInitCode`), not the runtime map. If the frame's
@@ -193,6 +201,7 @@ export class SteppingModel {
         isStmtStart,
         isLineStart,
         optimized,
+        viaIR,
         isJump: st.op === 'JUMP' || st.op === 'JUMPI',
       };
 
@@ -243,13 +252,39 @@ export class SteppingModel {
    * statement (or the unmapped function-definition line) at the same-or-shallower
    * combinedDepth. The terminal step is treated as persistent.
    */
+  /**
+   * Whether the statement at `index` reappears at the SAME combinedDepth before
+   * that depth changes — i.e. it briefly yielded to another line (viaIR call-arg
+   * setup) but resumes and keeps executing, rather than being a one-shot prologue
+   * blip. Used to keep `#persists` from discarding a real statement.
+   */
+  #resumes(index: number): boolean {
+    const s = this.#meta[index]!.stmtId;
+    const d = this.#meta[index]!.combinedDepth;
+    if (s === undefined) return false;
+    for (let k = index + 1; k <= this.last; k++) {
+      const m = this.#meta[k]!;
+      if (m.combinedDepth !== d) return false; // depth changed before it resumed
+      if (m.stmtId === s) return true; // resumed at the same depth
+    }
+    return false;
+  }
+
   #persists(index: number): boolean {
     if (index >= this.last) return true;
     const cur = this.#meta[index]!;
     const nxt = this.#meta[index + 1]!;
     // One-step guard: a single-step out-of-order artifact (the next step is a
-    // DIFFERENT statement at the same-or-shallower depth) is abandoned at once.
-    if (nxt.stmtId !== cur.stmtId && nxt.combinedDepth <= cur.combinedDepth) {
+    // DIFFERENT statement at the same-or-shallower depth) is abandoned at once —
+    // UNLESS the statement RESUMES at the same depth (it does real work after
+    // briefly yielding, e.g. a viaIR call statement whose argument setup is
+    // attributed to the function-declaration line before the call descends). A
+    // genuine prologue blip never resumes; a real statement does.
+    if (
+      nxt.stmtId !== cur.stmtId &&
+      nxt.combinedDepth <= cur.combinedDepth &&
+      !this.#resumes(index)
+    ) {
       return false;
     }
     // Multi-step guard: a viaIR straight-line SETUP artifact (see below).
@@ -282,6 +317,9 @@ export class SteppingModel {
    */
   #isBackwardSetupArtifact(index: number): boolean {
     const cur = this.#meta[index]!;
+    // This is a viaIR straight-line-setup phenomenon; classic codegen maps
+    // statements in source order, so never suppress a legacy step as an artifact.
+    if (!cur.viaIR) return false;
     const s = cur.stmtId;
     const d = cur.combinedDepth;
     if (s === undefined) return false;
@@ -291,6 +329,24 @@ export class SteppingModel {
       if (m.combinedDepth < d) return false; // frame returned (last statement)
       if (m.stmtId === s) continue; // still inside this statement's run
       if (this.#meta[j - 1]!.isJump) return false; // reached via a taken jump
+      // Fall-through to a DIFFERENT statement at the same depth. Under viaIR the
+      // argument setup of a CALL statement is attributed alternately to the
+      // statement and to its function-declaration line (a smaller AST id) before
+      // the call actually descends — so `s` briefly yields to an earlier line and
+      // then RESUMES and does its real work (e.g. a 1-line forwarder
+      // `x() { y(...); }`). Only a GENUINE blip — one that never resumes in this
+      // same-depth run — is a setup artifact. If `s` resumes, keep scanning so the
+      // descend/return checks above decide (they will see the real sub-call).
+      let resumes = false;
+      for (let k = j + 1; k <= this.last; k++) {
+        const mk = this.#meta[k]!;
+        if (mk.combinedDepth !== d) break;
+        if (mk.stmtId === s) {
+          resumes = true;
+          break;
+        }
+      }
+      if (resumes) continue;
       return m.stmtId !== undefined && m.stmtId < s; // fall-through to an EARLIER stmt
     }
     return false;

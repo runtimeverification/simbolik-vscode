@@ -23,6 +23,7 @@ import type {DebugProtocol} from '@vscode/debugprotocol';
 
 import {parseJsonLossless} from '@simbolik/engine';
 import {
+  bytesLayoutAtMemoryOffset,
   generateEthdebugProgram,
   variablesAt,
   type ArrayLayout,
@@ -383,6 +384,8 @@ const EXCEPTION_FILTER_IDS: ReadonlySet<string> = new Set(
 export class SolidityDebugSession {
   readonly #events: DebugProtocol.Event[] = [];
   #seq = 0;
+  /** Whether a `terminated` event has already been emitted this session. */
+  #endEmitted = false;
   #state: LaunchedState | undefined;
   /** Per-contract runtime source-map indexing, cached across resolutions. */
   readonly #indexCache = new Map<
@@ -473,6 +476,7 @@ export class SolidityDebugSession {
 
   /** Wire everything, position at the entry statement, and queue a `stopped` event. */
   async launch(inputs: LaunchInputs): Promise<void> {
+    this.#endEmitted = false;
     const jsons = inputs.buildInfos ?? [inputs.buildInfoJson];
     const cus = jsons
       .filter((j) => j !== undefined)
@@ -521,12 +525,21 @@ export class SolidityDebugSession {
     // in the trace (CBOR identification of each frame's runtime code).
     const registry = new Map<string, RegistryResolution>();
     const firstSeen = new Map<string, number>();
+    // A separate index of the first RUNTIME-code step per address. A contract
+    // CREATE'd during THIS transaction first appears running its INIT (creation)
+    // code, which never matches the build-info deployedBytecode — identifying from
+    // it would mark the address foreign. Identify from a deployed-runtime step so
+    // an in-tx `new C()` resolves to its CU (and its frame is steppable).
+    const firstRuntimeSeen = new Map<string, number>();
     for (let i = 0; i < steps.length; i++) {
       const addr = addressHex(steps[i]!.codeAddress);
       if (!firstSeen.has(addr)) firstSeen.set(addr, i);
+      if (!steps[i]!.isInitCode && !firstRuntimeSeen.has(addr)) {
+        firstRuntimeSeen.set(addr, i);
+      }
     }
     for (const [addr, idx] of firstSeen) {
-      const code = cursor.at(idx).bytecode;
+      const code = cursor.at(firstRuntimeSeen.get(addr) ?? idx).bytecode;
       const identified = this.#identify(cus, code);
       let resolution: RegistryResolution;
       if (identified !== undefined) {
@@ -750,30 +763,39 @@ export class SolidityDebugSession {
    */
   next(args?: StepArgs): Record<string, never> {
     const state = this.#require();
-    state.step = isInstruction(args)
-      ? state.model.nextInstruction(state.step)
-      : state.model.next(state.step);
-    this.#stop('step');
+    if (isInstruction(args)) {
+      state.step = state.model.nextInstruction(state.step);
+      this.#stop('step');
+    } else {
+      state.step = state.model.next(state.step);
+      this.#stopOrEnd('step');
+    }
     return {};
   }
 
   /** Step into. At `instruction` granularity, a single EVM opcode forward. */
   stepIn(args?: StepArgs): Record<string, never> {
     const state = this.#require();
-    state.step = isInstruction(args)
-      ? Math.min(state.step + 1, state.model.last)
-      : state.model.stepIn(state.step);
-    this.#stop('step');
+    if (isInstruction(args)) {
+      state.step = Math.min(state.step + 1, state.model.last);
+      this.#stop('step');
+    } else {
+      state.step = state.model.stepIn(state.step);
+      this.#stopOrEnd('step');
+    }
     return {};
   }
 
   /** Step out of the current call (statement- or instruction-granular). */
   stepOut(args?: StepArgs): Record<string, never> {
     const state = this.#require();
-    state.step = isInstruction(args)
-      ? state.model.stepOutInstruction(state.step)
-      : state.model.stepOut(state.step);
-    this.#stop('step');
+    if (isInstruction(args)) {
+      state.step = state.model.stepOutInstruction(state.step);
+      this.#stop('step');
+    } else {
+      state.step = state.model.stepOut(state.step);
+      this.#stopOrEnd('step');
+    }
     return {};
   }
 
@@ -811,6 +833,9 @@ export class SolidityDebugSession {
   continue(_args?: {threadId?: number}): Record<string, never> {
     const {target, reason} = this.#runToStop(this.#require(), 1);
     this.#require().step = target;
+    // NOTE: continue deliberately reports a `stopped` even at the terminal step
+    // (the state remains inspectable there), unlike an explicit step-over past
+    // the last statement, which ends the session via #stopOrEnd.
     this.#stop(reason);
     return {};
   }
@@ -2158,6 +2183,32 @@ export class SolidityDebugSession {
    * parent is re-resolved) and `location` inside the pointers; the preview
    * dereference is identical.
    */
+  /**
+   * Render the elements of a `bytes[]` / `string[]` array: each `'element'`
+   * region is the element's MEMORY OFFSET, dereferenced as a raw byte string.
+   * SHARED by the preview ({@link #renderComplex}) and the children
+   * ({@link #complexVariables}) so both stay in lock-step. `bytes` → `0x…` hex;
+   * `string` → a quoted UTF-8 string (matching the scalar string/bytes path).
+   */
+  async #bytesArrayElements(
+    array: ArrayLayout,
+    ms: import('@ethdebug/pointers').Machine.State,
+  ): Promise<string[]> {
+    const isString = array.elementBytes?.isString === true;
+    const offsets = await readPointerRegions(array.pointer, ms);
+    const values: string[] = [];
+    for (const offset of offsets) {
+      const layout = bytesLayoutAtMemoryOffset(Number(offset), isString);
+      const hex = await readPointerBytes(layout.pointer, ms);
+      values.push(
+        isString
+          ? `"${Buffer.from(hex.slice(2), 'hex').toString('utf8')}"`
+          : hex,
+      );
+    }
+    return values;
+  }
+
   async #renderComplex(
     frame: FrameInfo,
     cu: CompilationUnit,
@@ -2180,24 +2231,25 @@ export class SolidityDebugSession {
     let value: string;
     if (v.array !== undefined) {
       const {array} = v;
-      const words = await readPointerRegions(array.pointer, ms);
-      // Decode each element for the preview the SAME way its child is decoded
-      // (normalize the full word to the element type first), so it matches the
-      // expanded children for narrow / `bytesN` element types too.
-      const values = words.map((word) => {
-        const field = fieldFromAbiWord(
-          word,
-          array.elementSolcType,
-          array.elementNumberOfBytes,
-        );
-        return this.#decodeField(
-          cu,
-          field,
-          array.elementSolcType,
-          array.elementTypeLabel,
-          array.elementNumberOfBytes,
-        ).value;
-      });
+      const values =
+        array.elementBytes !== undefined
+          ? await this.#bytesArrayElements(array, ms)
+          : (await readPointerRegions(array.pointer, ms)).map((word) =>
+              // Decode each element for the preview the SAME way its child is
+              // decoded (normalize the full word to the element type first), so it
+              // matches the expanded children for narrow / `bytesN` elements too.
+              this.#decodeField(
+                cu,
+                fieldFromAbiWord(
+                  word,
+                  array.elementSolcType,
+                  array.elementNumberOfBytes,
+                ),
+                array.elementSolcType,
+                array.elementTypeLabel,
+                array.elementNumberOfBytes,
+              ).value,
+            );
       value = `[${values.join(', ')}]`;
     } else if (v.mapping !== undefined) {
       // Preview the observed entries the SAME way the children are
@@ -2328,6 +2380,17 @@ export class SolidityDebugSession {
     // A DYNAMIC ARRAY — indexed children are the decoded elements.
     if (parent.array !== undefined) {
       const {array} = parent;
+      // `bytes[]` / `string[]`: each element is itself a dynamic byte string
+      // reached through its memory offset — render each as its own leaf value.
+      if (array.elementBytes !== undefined) {
+        const values = await this.#bytesArrayElements(array, ms);
+        return values.map((value, i) => ({
+          name: String(i),
+          value,
+          type: array.elementTypeLabel,
+          variablesReference: 0,
+        }));
+      }
       const words = await readPointerRegions(array.pointer, ms);
       return words.map((word, i) => {
         // Each element region is a full 32-byte word; normalize it to the element
@@ -2898,6 +2961,35 @@ export class SolidityDebugSession {
       body: {reason, threadId: 1, allThreadsStopped: true},
     };
     this.#events.push(stopped);
+  }
+
+  /**
+   * Report the outcome of a SOURCE-level forward step. If it landed on the
+   * terminal trace step, execution has finished — the trace has no step after
+   * it, and that step is the contract's dispatch epilogue (whose source range is
+   * the whole contract, so a `stopped` there would park the client on the
+   * contract-declaration line and freeze). Emit `terminated` so the client ends
+   * the session cleanly, exactly as stepping over the last statement should.
+   * Otherwise report a normal `stopped`.
+   */
+  #stopOrEnd(reason: string): void {
+    const state = this.#state;
+    if (state !== undefined && state.step >= state.model.last) {
+      this.#terminate();
+      return;
+    }
+    this.#stop(reason);
+  }
+
+  /** Emit a `terminated` event once (idempotent within a launched session). */
+  #terminate(): void {
+    if (this.#endEmitted) return;
+    this.#endEmitted = true;
+    this.#events.push({
+      seq: this.#seq++,
+      type: 'event',
+      event: 'terminated',
+    });
   }
 
   /** The requested breakpoint lines as a path → line-set map. */
