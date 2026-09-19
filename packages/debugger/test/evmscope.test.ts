@@ -20,75 +20,56 @@
  *       MachineState.returnData becomes 0x…002b at step 374 (op ISZERO, depth 1)
  *       and persists to the terminal step 487 → the `returnData` row shows it.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
 import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixture loaders (mirroring globals.test.ts / returns.test.ts)
-// ---------------------------------------------------------------------------
-
-function solcFixture(name: string): unknown {
-  return JSON.parse(
-    readFileSync(new URL(`../../solc/test/fixtures/${name}`, import.meta.url), 'utf8'),
-  );
-}
-function dbgFixtureText(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function dbgFixtureJson<T>(name: string): T {
-  return JSON.parse(dbgFixtureText(name)) as T;
-}
-
-/** A DAP variable as the session emits it. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number;
-}
+import {
+  buildInfoOf,
+  launch,
+  metaOf,
+  readDbgFixture,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Launch inputs
 // ---------------------------------------------------------------------------
 
 const ACCT0 = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
-const COUNTER_ADDRESS = dbgFixtureJson<{contractAddress: string}>(
-  'counter-setNumber-meta.json',
-).contractAddress;
+const COUNTER_ADDRESS = metaOf('counter-setNumber-meta.json').contractAddress;
 const COUNTER_SIG = '0x3fb5c1cb';
 // setNumber(42) → the single ABI word, 42 == 0x2a.
 const COUNTER_ARG_WORD =
   '0x000000000000000000000000000000000000000000000000000000000000002a';
 
-function counterInputs(): LaunchInputs {
-  return {
-    buildInfoJson: solcFixture('counter-build-info.json'),
-    traceJson: dbgFixtureText('counter-setNumber-trace.raw.json'),
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: COUNTER_ADDRESS,
-    dialect: 'kontrol',
-  } as LaunchInputs;
-}
+const counterSpec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
-const MIXED_META = dbgFixtureJson<{callerAddress: string; calleeAddress: string}>(
-  'mixed-go-meta.json',
-);
+const MIXED_META = metaOf('mixed-go-meta.json') as {
+  callerAddress: string;
+  calleeAddress: string;
+} & Record<string, unknown>;
 // Callee.compute(21) returns 43 == 0x2b; MachineState.returnData accumulates it.
 const MIXED_RETURN_DATA =
   '0x000000000000000000000000000000000000000000000000000000000000002b';
 
+// Multi-build + codeAddress = callerAddress (not the meta's contractAddress), so
+// this stays a bespoke LaunchInputs the Spec model does not express.
 function mixedInputs(): LaunchInputs {
   return {
     buildInfos: [
-      solcFixture('caller-unopt-build-info.json'),
-      solcFixture('callee-opt-build-info.json'),
+      buildInfoOf('caller-unopt-build-info.json'),
+      buildInfoOf('callee-opt-build-info.json'),
     ],
-    traceJson: dbgFixtureText('mixed-go-trace.raw.json'),
+    traceJson: readDbgFixture('mixed-go-trace.raw.json'),
     sourcePath: 'src/Caller.sol',
     contractName: 'Caller',
     methodName: 'go',
@@ -98,22 +79,17 @@ function mixedInputs(): LaunchInputs {
 
 // Vars.setAll(7, 1000, true, 0x..aa, -5, 0x1122.., Blue) — 7 ABI word args, so
 // the decoded calldata exercises the offset-naming rule beyond the first chunk.
-const VARS_ADDRESS = dbgFixtureJson<{contractAddress: string}>(
-  'vars-setall-meta.json',
-).contractAddress;
+const VARS_ADDRESS = metaOf('vars-setall-meta.json').contractAddress;
 const VARS_SIG = '0xa6c07be9';
 
-function varsInputs(): LaunchInputs {
-  return {
-    buildInfoJson: solcFixture('vars-build-info.json'),
-    traceJson: dbgFixtureText('vars-setall-trace.raw.json'),
-    sourcePath: 'src/Vars.sol',
-    contractName: 'Vars',
-    methodName: 'setAll',
-    codeAddress: VARS_ADDRESS,
-    dialect: 'kontrol',
-  } as LaunchInputs;
-}
+const varsSpec: Spec = {
+  buildInfo: 'vars-build-info.json',
+  trace: 'vars-setall-trace.raw.json',
+  meta: 'vars-setall-meta.json',
+  sourcePath: 'src/Vars.sol',
+  contractName: 'Vars',
+  methodName: 'setAll',
+};
 
 // ---------------------------------------------------------------------------
 // EVM-scope helpers
@@ -167,8 +143,7 @@ function child(children: DapVariable[], name: string): DapVariable {
 
 describe('EVM scope — decoded Calldata (counter-setNumber)', () => {
   it('the calldata row is expandable into a selector + one 32-byte arg chunk', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const rows = await evmRows(session, frameId);
@@ -196,8 +171,7 @@ describe('EVM scope — decoded Calldata (counter-setNumber)', () => {
   });
 
   it('names multi-word args by byte offset 4 + k*32 (vars-setall, 7 words)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(varsInputs());
+    const session = await launch(varsSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const calldata = row(await evmRows(session, frameId), 'calldata');
@@ -240,8 +214,7 @@ describe('EVM scope — Return Data leaf', () => {
   });
 
   it('is 0x for a void call at entry (counter-setNumber)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const rows = await evmRows(session, frameId);
@@ -257,8 +230,7 @@ describe('EVM scope — Return Data leaf', () => {
 
 describe('EVM scope — Accounts tree (counter-setNumber)', () => {
   it('lists the touched accounts and drills into the Counter account', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     // Run past the SSTORE so the Counter's `number` slot (0x0) holds 0x2a.
     session.continue();
 

@@ -25,70 +25,39 @@
  * and over line 42 shows `_a = 0x…12` (type Token); over line 43 shows both
  * `_a = 0x…12` and `_b = 0x…23`.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {
+  breakAt,
+  launch,
+  line,
+  locals as localsAt,
+  type Spec,
+} from './support/harness.js';
 
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-}
+const spec: Spec = {
+  buildInfo: 'inheritedudvt-viair-build-info.json',
+  trace: 'inheritedudvt-viair-run-trace.raw.json',
+  meta: 'inheritedudvt-viair-run-meta.json',
+  sourcePath: 'src/InheritedUdvt.sol',
+  contractName: 'InheritedUdvt',
+  methodName: 'run',
+  dialect: 'kontrol',
+};
 
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/inheritedudvt-viair-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/inheritedudvt-viair-run-trace.raw.json', import.meta.url),
-  'utf8',
-);
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/inheritedudvt-viair-run-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
+/** Same source, compiled LEGACY (no --via-ir). */
+const legacySpec: Spec = {
+  buildInfo: 'newfixtures-legacy-build-info.json',
+  trace: 'inheritedudvt-legacy-run-trace.raw.json',
+  meta: 'inheritedudvt-legacy-run-meta.json',
+  sourcePath: 'src/InheritedUdvt.sol',
+  contractName: 'InheritedUdvt',
+  methodName: 'run',
+  dialect: 'kontrol',
+};
 
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/InheritedUdvt.sol',
-    contractName: 'InheritedUdvt',
-    methodName: 'run',
-    codeAddress: META.contractAddress,
-    dialect: 'kontrol',
-  };
-}
-
-async function launched(): Promise<SolidityDebugSession> {
-  const s = new SolidityDebugSession();
-  await s.launch(inputs());
-  return s;
-}
-
-const line = (s: SolidityDebugSession): number | undefined =>
-  s.stackTrace().stackFrames[0]?.line;
-
-async function localsAt(
-  s: SolidityDebugSession,
-): Promise<Map<string, DapVariable>> {
-  const frameId = s.stackTrace().stackFrames[0]!.id;
-  const {scopes} = s.scopes(frameId);
-  const scope =
-    scopes.find((x) => x.name === 'Locals') ??
-    scopes.find((x) => x.name === 'Parameters');
-  if (scope === undefined) return new Map();
-  const {variables} = await s.variables(scope.variablesReference);
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
+async function launched() {
+  return launch(spec);
 }
 
 describe('inherited + UDVT value-type locals (SWAP-move reads)', () => {
@@ -116,5 +85,20 @@ describe('inherited + UDVT value-type locals (SWAP-move reads)', () => {
     const locals = await localsAt(s);
     expect(BigInt(locals.get('_a')!.value)).toBe(0x12n);
     expect(BigInt(locals.get('_b')!.value)).toBe(0x23n); // mint(0x22) => 0x22 + 1
+  });
+});
+
+// The inheritance lookup + UDVT->address resolution are codegen-agnostic; prove
+// they render the same values on the LEGACY pipeline. Navigation is via a source
+// breakpoint (robust across pipelines), not the viaIR-specific step sequence.
+describe('inherited + UDVT value-type locals (legacy)', () => {
+  it('shows both UDVT locals with their address values at line 45', async () => {
+    const s = await breakAt(legacySpec, 45);
+    expect(line(s)).toBe(45);
+    const locals = await localsAt(s);
+    expect(locals.get('_a'), '_a surfaced on legacy').toBeDefined();
+    expect(BigInt(locals.get('_a')!.value)).toBe(0x12n);
+    expect(locals.get('_a')!.type).toBe('Token');
+    expect(BigInt(locals.get('_b')!.value)).toBe(0x23n);
   });
 });

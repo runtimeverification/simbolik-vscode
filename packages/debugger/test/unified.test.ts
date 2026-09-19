@@ -15,53 +15,22 @@
  * This is the GUARD that the Locals scope keeps `_b` correct when reading through
  * the real dereference stack path.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession} from '../src/index.js';
+import {children, launch, type Spec} from './support/harness.js';
 
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference?: number;
-}
-
-function readTrace(name: string): string {
-  return readFileSync(
-    new URL(`./fixtures/${name}`, import.meta.url),
-    'utf8',
-  );
-}
-
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
+const spec: Spec = {
+  buildInfo: 'vars-build-info.json',
+  trace: 'vars-setall-trace.raw.json',
+  meta: 'vars-setall-meta.json',
+  sourcePath: 'src/Vars.sol',
+  contractName: 'Vars',
+  methodName: 'setAll',
+};
 
 describe('unified path — Vars.setAll _b reads 1000 through the Locals scope', () => {
   it('exposes _b = 1000 (uint16) via scopes → Locals → variables', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch({
-      buildInfoJson: readBuildInfo('vars-build-info.json'),
-      traceJson: readTrace('vars-setall-trace.raw.json'),
-      sourcePath: 'src/Vars.sol',
-      contractName: 'Vars',
-      methodName: 'setAll',
-      codeAddress: readAddress('vars-setall-meta.json'),
-    });
+    const session = await launch(spec);
 
     // Navigate the DAP surface the same way a client would: top frame →
     // scopes → the Locals scope's variablesReference → variables.
@@ -70,8 +39,8 @@ describe('unified path — Vars.setAll _b reads 1000 through the Locals scope', 
     const locals = scopes.find((s) => s.name === 'Locals');
     expect(locals, 'a Locals scope must be exposed').toBeDefined();
 
-    const {variables} = await session.variables(locals!.variablesReference);
-    const _b = (variables as DapVariable[]).find((v) => v.name === '_b');
+    const variables = await children(session, locals!.variablesReference);
+    const _b = variables.find((v) => v.name === '_b');
     expect(_b).toBeDefined();
     // 1000 is the odd-length stack word 0x3e8 — the Part A discriminator.
     expect(_b!.value).toBe('1000');

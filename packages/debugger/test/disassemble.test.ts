@@ -3,8 +3,6 @@
  * (codeAddress, pc) ⇄ DAP-address codec, plus an end-to-end `disassemble`
  * request over the real Counter.setNumber trace/build-info.
  */
-import {readFileSync} from 'node:fs';
-
 import type {DebugProtocol} from '@vscode/debugprotocol';
 import {describe, expect, it} from 'vitest';
 
@@ -12,9 +10,9 @@ import {
   disassembleBytecode,
   encodeInstructionAddress,
   decodeInstructionAddress,
-  SolidityDebugSession,
-  type LaunchInputs,
 } from '../src/index.js';
+
+import {launch, metaOf, type Spec} from './support/harness.js';
 
 describe('disassembleBytecode', () => {
   it('decodes opcodes and swallows PUSH operands', () => {
@@ -82,38 +80,20 @@ describe('instruction address codec', () => {
 
 // --- End-to-end over the real Counter trace --------------------------------
 
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/counter-setNumber-trace.raw.json', import.meta.url),
-  'utf8',
-);
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/counter-setNumber-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
+const META = metaOf('counter-setNumber-meta.json');
 
-function launchInputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: META.contractAddress,
-  };
-}
+const spec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
 describe('SolidityDebugSession.disassemble', () => {
   it('gives each frame an instructionPointerReference and disassembles around it', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(launchInputs());
+    const session = await launch(spec);
 
     const frame = session.stackTrace().stackFrames[0]!;
     const ref = frame.instructionPointerReference!;

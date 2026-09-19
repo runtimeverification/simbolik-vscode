@@ -33,8 +33,6 @@
  *      keyed by their full 32-byte hex.
  * The expected values are pinned so the deref test is an oracle, not a tautology.
  */
-import {readFileSync} from 'node:fs';
-
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {bytesToHex, hexToBytes} from 'ethereum-cryptography/utils';
 import {describe, expect, it} from 'vitest';
@@ -44,53 +42,44 @@ import {
   generateEthdebugProgram,
   type EthdebugStorageVariable,
 } from '@simbolik/ethdebug-gen';
-import {parseJsonLossless} from '@simbolik/engine';
-import {normalizeKontrolTrace, StateCursor, type Step} from '@simbolik/lifting';
-import {loadBuildInfo, type CompilationUnit} from '@simbolik/solc';
+import {StateCursor, type Step} from '@simbolik/lifting';
 
+import {readPointerRegions, readPointerValue} from '../src/machineState.js';
 import {
-  machineStateFor,
-  readPointerRegions,
-  readPointerValue,
-} from '../src/machineState.js';
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+  breakAt as breakAtSpec,
+  children,
+  cursorFor,
+  launch,
+  loadCu,
+  loadSteps,
+  machineStateAtPc,
+  metaOf,
+  normAddr,
+  stateVars as stateMap,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function solcFixture(name: string): string {
-  return readFileSync(
-    new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-    'utf8',
-  );
-}
-function dbgFixture(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-
-function loadCu(): CompilationUnit {
-  return loadBuildInfo(JSON.parse(solcFixture('storagerefs-build-info.json')));
-}
-function loadSteps(): Step[] {
-  const parsed = parseJsonLossless(
-    dbgFixture('storagerefs-populate-trace.raw.json'),
-  ) as {result: unknown};
-  return normalizeKontrolTrace(parsed.result as never);
-}
-function contractAddress(): string {
-  const meta = JSON.parse(dbgFixture('storagerefs-populate-meta.json')) as {
-    contractAddress: string;
-  };
-  return meta.contractAddress;
-}
-/** Lowercase, 20-byte zero-padded — matches how accounts are keyed in the trace. */
-function normAddr(a: string): string {
-  return '0x' + BigInt(a).toString(16).padStart(40, '0');
-}
+const CU = 'storagerefs-build-info.json';
+const TRACE = 'storagerefs-populate-trace.raw.json';
+const META = 'storagerefs-populate-meta.json';
 
 const SRC = 'src/StorageRefs.sol';
 const NAME = 'StorageRefs';
+
+const spec: Spec = {
+  buildInfo: CU,
+  trace: TRACE,
+  meta: META,
+  sourcePath: SRC,
+  contractName: NAME,
+  methodName: 'populate',
+  dialect: 'kontrol',
+};
+const breakAt = (line: number) => breakAtSpec(spec, line);
 
 /** Clean body pc: first own-contract step of line 35, all storage writes folded. */
 const CLEAN_PC = 1064;
@@ -123,34 +112,13 @@ function membersOf(
   return (sv as unknown as {members?: StorageMemberShape[]}).members;
 }
 
-/** A DAP variable as the session emits it. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number;
-}
-
 function storageVars(): EthdebugStorageVariable[] {
-  return generateEthdebugProgram(loadCu(), SRC, NAME).storageVariables;
+  return generateEthdebugProgram(loadCu(CU), SRC, NAME).storageVariables;
 }
 function byName(
   list: EthdebugStorageVariable[],
 ): Map<string, EthdebugStorageVariable> {
   return new Map(list.map((v) => [v.name, v]));
-}
-
-/** MachineState (ethdebug adapter) at the first own-contract step whose pc is `pc`. */
-function machineStateAtPc(pc: number): import('@ethdebug/pointers').Machine.State {
-  const steps = loadSteps();
-  const cursor = new StateCursor(steps);
-  const addr = normAddr(contractAddress());
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i]!;
-    if (s.isInitCode || s.codeAddress !== BigInt(addr)) continue;
-    if (s.pc === pc) return machineStateFor(cursor.at(i), addr);
-  }
-  throw new Error(`no own-contract step at pc ${pc}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +127,8 @@ function machineStateAtPc(pc: number): import('@ethdebug/pointers').Machine.Stat
 
 describe('fixture ground truth (folded account storage)', () => {
   it('slot0=3, keccak(0)+i = 11/22/33, slot5=5, slot6=6 at the clean body pc', () => {
-    const steps = loadSteps();
-    const cursor = new StateCursor(steps);
-    const addr = normAddr(contractAddress());
+    const {steps, cursor} = cursorFor(TRACE);
+    const addr = normAddr(metaOf(META).contractAddress);
     let index = -1;
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i]!;
@@ -201,7 +168,7 @@ describe('arr storage pointer dereferences through @ethdebug/pointers', () => {
     expect(array, 'arr must carry an array structure to dereference').toBeDefined();
     expect(array!.pointer, 'the array needs a concrete storage List pointer').toBeDefined();
 
-    const ms = machineStateAtPc(CLEAN_PC);
+    const ms = machineStateAtPc(TRACE, META, CLEAN_PC);
     // readPointerRegions enumerates the `'element'` regions of the List — this
     // exercises $keccak256 on slot 0 + machineStateFor reading the big keccak slots.
     const values = await readPointerRegions(array!.pointer as Pointer, ms);
@@ -224,7 +191,7 @@ describe('pt storage member pointers dereference through @ethdebug/pointers', ()
     expect(x!.pointer, 'member x needs a storage pointer').toBeDefined();
     expect(y!.pointer, 'member y needs a storage pointer').toBeDefined();
 
-    const ms = machineStateAtPc(CLEAN_PC);
+    const ms = machineStateAtPc(TRACE, META, CLEAN_PC);
     expect(await readPointerValue(x!.pointer as Pointer, ms)).toBe(5n);
     expect(await readPointerValue(y!.pointer as Pointer, ms)).toBe(6n);
   });
@@ -233,41 +200,6 @@ describe('pt storage member pointers dereference through @ethdebug/pointers', ()
 // ---------------------------------------------------------------------------
 // 3. The session renders arr + pt as nested DAP variables (State scope)
 // ---------------------------------------------------------------------------
-
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: JSON.parse(solcFixture('storagerefs-build-info.json')),
-    traceJson: dbgFixture('storagerefs-populate-trace.raw.json'),
-    sourcePath: SRC,
-    contractName: NAME,
-    methodName: 'populate',
-    codeAddress: contractAddress(),
-    dialect: 'kontrol',
-  };
-}
-
-async function breakAt(line: number): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(inputs());
-  session.setBreakpoints({source: {path: SRC}, breakpoints: [{line}]});
-  session.continue();
-  return session;
-}
-
-/** The current frame's `State` (storage) scope variablesReference. */
-function stateRef(session: SolidityDebugSession): number {
-  const frameId = session.stackTrace().stackFrames[0]!.id;
-  const scope = session.scopes(frameId).scopes.find((s) => s.name === 'State');
-  if (scope === undefined) throw new Error('no State scope');
-  return scope.variablesReference;
-}
-
-async function stateMap(
-  session: SolidityDebugSession,
-): Promise<Map<string, DapVariable>> {
-  const {variables} = await session.variables(stateRef(session));
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
-}
 
 describe('session renders arr as a nested storage DAP variable', () => {
   it('arr has a non-zero variablesReference; children 0=11, 1=22, 2=33 (uint256)', async () => {
@@ -278,8 +210,8 @@ describe('session renders arr as a nested storage DAP variable', () => {
     expect(arr, 'arr should be surfaced as a State variable').toBeDefined();
     expect(arr!.variablesReference).not.toBe(0);
 
-    const {variables: children} = await session.variables(arr!.variablesReference);
-    const kids = (children as DapVariable[]).map((v) => ({
+    const childVars = await children(session, arr!.variablesReference);
+    const kids = childVars.map((v) => ({
       name: v.name,
       value: v.value,
     }));
@@ -288,7 +220,7 @@ describe('session renders arr as a nested storage DAP variable', () => {
       {name: '1', value: '22'},
       {name: '2', value: '33'},
     ]);
-    for (const child of children as DapVariable[]) {
+    for (const child of childVars) {
       expect(child.type).toBe('uint256');
       expect(child.variablesReference).toBe(0);
     }
@@ -303,8 +235,8 @@ describe('session renders pt as a nested storage DAP variable', () => {
     expect(pt, 'pt should be surfaced as a State variable').toBeDefined();
     expect(pt!.variablesReference).not.toBe(0);
 
-    const {variables: children} = await session.variables(pt!.variablesReference);
-    const kids = (children as DapVariable[]).map((v) => ({
+    const childVars = await children(session, pt!.variablesReference);
+    const kids = childVars.map((v) => ({
       name: v.name,
       value: v.value,
     }));
@@ -312,7 +244,7 @@ describe('session renders pt as a nested storage DAP variable', () => {
       {name: 'x', value: '5'},
       {name: 'y', value: '6'},
     ]);
-    for (const child of children as DapVariable[]) {
+    for (const child of childVars) {
       expect(child.type).toBe('uint256');
       expect(child.variablesReference).toBe(0);
     }
@@ -386,9 +318,9 @@ describe('regression: arr/pt still nested', () => {
     const arr = m.get('arr');
     expect(arr, 'arr still surfaced').toBeDefined();
     expect(arr!.variablesReference, 'arr stays nested').not.toBe(0);
-    const {variables: arrKids} = await session.variables(arr!.variablesReference);
+    const arrKids = await children(session, arr!.variablesReference);
     expect(
-      (arrKids as DapVariable[]).map((v) => ({name: v.name, value: v.value})),
+      arrKids.map((v) => ({name: v.name, value: v.value})),
     ).toEqual([
       {name: '0', value: '11'},
       {name: '1', value: '22'},
@@ -398,9 +330,9 @@ describe('regression: arr/pt still nested', () => {
     const pt = m.get('pt');
     expect(pt, 'pt still surfaced').toBeDefined();
     expect(pt!.variablesReference, 'pt stays nested').not.toBe(0);
-    const {variables: ptKids} = await session.variables(pt!.variablesReference);
+    const ptKids = await children(session, pt!.variablesReference);
     expect(
-      (ptKids as DapVariable[]).map((v) => ({name: v.name, value: v.value})),
+      ptKids.map((v) => ({name: v.name, value: v.value})),
     ).toEqual([
       {name: 'x', value: '5'},
       {name: 'y', value: '6'},
@@ -420,27 +352,17 @@ describe('regression: arr/pt still nested', () => {
 
 describe('regression: value-type storage decode unaffected', () => {
   it('Counter.setNumber: storage `number` still decodes to 42 (scalar, ref 0)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch({
-      buildInfoJson: JSON.parse(solcFixture('counter-build-info.json')),
-      traceJson: dbgFixture('counter-setNumber-trace.raw.json'),
+    const session = await launch({
+      buildInfo: 'counter-build-info.json',
+      trace: 'counter-setNumber-trace.raw.json',
+      meta: 'counter-setNumber-meta.json',
       sourcePath: 'src/Counter.sol',
       contractName: 'Counter',
       methodName: 'setNumber',
-      codeAddress: (
-        JSON.parse(dbgFixture('counter-setNumber-meta.json')) as {
-          contractAddress: string;
-        }
-      ).contractAddress,
       dialect: 'kontrol',
     });
     session.continue();
-    const frameId = session.stackTrace().stackFrames[0]!.id;
-    const ref = session
-      .scopes(frameId)
-      .scopes.find((s) => s.name === 'State')!.variablesReference;
-    const {variables} = await session.variables(ref);
-    const number = (variables as DapVariable[]).find((v) => v.name === 'number');
+    const number = (await stateMap(session)).get('number');
     expect(number).toMatchObject({value: '42', variablesReference: 0});
   });
 
@@ -493,8 +415,8 @@ function mappingValueSlot(key: bigint, baseSlot: bigint): bigint {
 
 /** Own-contract (non-init) step index whose pc is `pc`, or -1. */
 function ownStepIndexAtPc(pc: number): number {
-  const steps = loadSteps();
-  const addr = BigInt(normAddr(contractAddress()));
+  const steps = loadSteps(TRACE);
+  const addr = BigInt(normAddr(metaOf(META).contractAddress));
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i]!;
     if (s.isInitCode || s.codeAddress !== addr) continue;
@@ -512,9 +434,8 @@ describe('dereference oracle: mapping value slots read 100/250', () => {
     const index = ownStepIndexAtPc(CLEAN_PC);
     expect(index, `no own-contract step at pc ${CLEAN_PC}`).toBeGreaterThanOrEqual(0);
 
-    const steps = loadSteps();
-    const cursor = new StateCursor(steps);
-    const addr = normAddr(contractAddress());
+    const {cursor} = cursorFor(TRACE);
+    const addr = normAddr(metaOf(META).contractAddress);
     const account = cursor.at(index).accounts.get(addr.toLowerCase())!;
     const readSlot = (slot: bigint): bigint => {
       const raw = account.storage['0x' + slot.toString(16)] ?? '0x0';
@@ -581,8 +502,7 @@ describe('enumerateMappingKeys recovers observed keys from the trace', () => {
       'enumerateMappingKeys must be exported (debugger or lifting util)',
     ).toBeDefined();
 
-    const steps = loadSteps();
-    const cursor = new StateCursor(steps);
+    const {steps, cursor} = cursorFor(TRACE);
     const endIndex = ownStepIndexAtPc(CLEAN_PC);
     expect(endIndex, `no own-contract step at pc ${CLEAN_PC}`).toBeGreaterThanOrEqual(0);
 
@@ -655,10 +575,8 @@ describe('session renders balances as a nested mapping DAP variable', () => {
     expect(balances!.value).toContain('7');
     expect(balances!.value).toContain('100');
 
-    const {variables: children} = await session.variables(
-      balances!.variablesReference,
-    );
-    const kids = (children as DapVariable[]).map((v) => ({
+    const childVars = await children(session, balances!.variablesReference);
+    const kids = childVars.map((v) => ({
       name: v.name,
       value: v.value,
     }));
@@ -667,7 +585,7 @@ describe('session renders balances as a nested mapping DAP variable', () => {
       {name: '7', value: '100'},
       {name: '9', value: '250'},
     ]);
-    for (const child of children as DapVariable[]) {
+    for (const child of childVars) {
       expect(child.type).toBe('uint256');
       expect(child.variablesReference).toBe(0);
     }

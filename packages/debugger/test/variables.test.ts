@@ -14,57 +14,31 @@
  * build-info fixtures (terminal step 569, pc 315 STOP; slot0 packed word
  * `0x…aa0103e807`).
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {type SolidityDebugSession} from '../src/index.js';
+import {launch, type Spec} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures + LaunchInputs helper
 // ---------------------------------------------------------------------------
 
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/vars-setall-trace.raw.json', import.meta.url),
-  'utf8',
-);
-
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/vars-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
-
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/vars-setall-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
-
-const CODE_ADDRESS = META.contractAddress;
+const spec: Spec = {
+  buildInfo: 'vars-build-info.json',
+  trace: 'vars-setall-trace.raw.json',
+  meta: 'vars-setall-meta.json',
+  sourcePath: 'src/Vars.sol',
+  contractName: 'Vars',
+  methodName: 'setAll',
+};
 
 /** The confirmed packed word committed to slot 0 at the terminal step. */
 const SLOT0_WORD =
   '0x00000000000000000000000000000000000000000000000000000000aa0103e807';
 
-function launchInputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/Vars.sol',
-    contractName: 'Vars',
-    methodName: 'setAll',
-    codeAddress: CODE_ADDRESS,
-  };
-}
-
 /** Launch a fresh session positioned at entry. */
 async function launchedSession(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(launchInputs());
-  return session;
+  return launch(spec);
 }
 
 /**

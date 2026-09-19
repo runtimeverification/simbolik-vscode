@@ -17,70 +17,39 @@
  * doubled/tripled alongside x & tmp; at line 17 `local` reads 6 (not the reserved
  * return slot's 12) and `out` is present — guarding the internal-return-slot bug.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {type SolidityDebugSession} from '../src/index.js';
+import {
+  breakAt as breakAtSpec,
+  scopeVars,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(new URL(`../../solc/test/fixtures/${name}`, import.meta.url), 'utf8'),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
+const spec: Spec = {
+  buildInfo: 'returns-build-info.json',
+  trace: 'returns-calc-trace.raw.json',
+  meta: 'returns-calc-meta.json',
+  sourcePath: 'src/Returns.sol',
+  contractName: 'Returns',
+  methodName: 'calc',
+  dialect: 'kontrol',
+};
 
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-}
-
-function returnsInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('returns-build-info.json'),
-    traceJson: readTrace('returns-calc-trace.raw.json'),
-    sourcePath: 'src/Returns.sol',
-    contractName: 'Returns',
-    methodName: 'calc',
-    dialect: 'kontrol',
-    codeAddress: readAddress('returns-calc-meta.json'),
-  };
-}
-
-function scopeRef(session: SolidityDebugSession): number {
+/** Read the current frame's parameter/locals scope (accepts either label). */
+async function varsAt(session: SolidityDebugSession): Promise<Map<string, DapVariable>> {
   const frameId = session.stackTrace().stackFrames[0]!.id;
   const {scopes} = session.scopes(frameId);
-  const scope =
-    scopes.find((s) => s.name === 'Parameters') ??
-    scopes.find((s) => s.name === 'Locals');
-  if (scope === undefined) throw new Error('no parameter/locals scope');
-  return scope.variablesReference;
+  const scopeName =
+    scopes.find((s) => s.name === 'Parameters')?.name ??
+    scopes.find((s) => s.name === 'Locals')?.name;
+  if (scopeName === undefined) throw new Error('no parameter/locals scope');
+  const variables = await scopeVars(session, scopeName);
+  return new Map(variables.map((v) => [v.name, v]));
 }
 
-async function varsAt(session: SolidityDebugSession): Promise<Map<string, DapVariable>> {
-  const {variables} = await session.variables(scopeRef(session));
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
-}
-
-async function breakAt(line: number): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(returnsInputs());
-  session.setBreakpoints({
-    source: {path: 'src/Returns.sol'},
-    breakpoints: [{line}],
-  });
-  session.continue();
-  return session;
-}
+const breakAt = (line: number) => breakAtSpec(spec, line);
 
 describe('Returns — named return params surface in the Locals scope', () => {
   it('calc @ line 11: doubled=10 and tripled=17 alongside x=5 and tmp=12', async () => {

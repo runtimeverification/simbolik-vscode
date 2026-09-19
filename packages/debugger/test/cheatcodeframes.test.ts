@@ -25,52 +25,29 @@
  * The negative/regression test (no cheatcode frame at a non-cheatcode step)
  * already passes today and must NOT regress.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
 
-// ── fixture loaders (mirrors modifierframes.test.ts) ────────────────────────
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
+import {launch, type Spec} from './support/harness.js';
 
-function prankInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('prank-build-info.json'),
-    traceJson: readTrace('prank-run-trace.raw.json'),
-    sourcePath: 'src/Prank.sol',
-    contractName: 'Prank',
-    methodName: 'run',
-    dialect: 'kontrol',
-    codeAddress: readAddress('prank-run-meta.json'),
-  };
-}
+const spec: Spec = {
+  buildInfo: 'prank-build-info.json',
+  trace: 'prank-run-trace.raw.json',
+  meta: 'prank-run-meta.json',
+  sourcePath: 'src/Prank.sol',
+  contractName: 'Prank',
+  methodName: 'run',
+};
 
 const START_PRANK_STEP = 574;
 const START_PRANK_LINE = 37;
 
 /** Navigate a freshly launched session exactly onto the startPrank CALL step. */
 async function sessionAtStartPrank(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(prankInputs());
+  const session = await launch(spec);
   session.setBreakpoints({
-    source: {path: 'src/Prank.sol'},
+    source: {path: spec.sourcePath},
     breakpoints: [{line: START_PRANK_LINE}],
   });
   session.continue(); // → step 479, line 37
@@ -111,8 +88,7 @@ describe('cheatcode frame — synthetic top frame at the cheatcode CALL', () => 
   });
 
   it('NEGATIVE: no cheatcode frame at a non-cheatcode step (right after launch)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(prankInputs());
+    const session = await launch(spec);
     // Launch pauses at step 128 (line 33) — an ordinary statement, not a
     // cheatcode CALL. The top frame must be the real `run` frame.
     expect(session.currentStepIndex).toBe(128);

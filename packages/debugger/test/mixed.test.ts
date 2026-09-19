@@ -24,46 +24,24 @@
  *     332 onward. Caller `result` = 0x2b = 43 at the terminal step.
  *   - Callee compute maps to src/Callee.sol (line 7+); line 8 = `stored = x*2`.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
 import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+
+import {buildInfoOf, metaOf, readDbgFixture} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures + LaunchInputs helper
 // ---------------------------------------------------------------------------
 
-const MIXED_TRACE_RAW = readFileSync(
-  new URL('./fixtures/mixed-go-trace.raw.json', import.meta.url),
-  'utf8',
-);
+const MIXED_TRACE_RAW = readDbgFixture('mixed-go-trace.raw.json');
 
-const CALLER_UNOPT_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/caller-unopt-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
+const CALLER_UNOPT_JSON: unknown = buildInfoOf('caller-unopt-build-info.json');
 
-const CALLEE_OPT_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/callee-opt-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
+const CALLEE_OPT_JSON: unknown = buildInfoOf('callee-opt-build-info.json');
 
 const MIXED_META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/mixed-go-meta.json', import.meta.url),
-    'utf8',
-  ),
+  readDbgFixture('mixed-go-meta.json'),
 ) as {callerAddress: string; calleeAddress: string};
 
 const CALLER_PATH = 'src/Caller.sol';
@@ -265,22 +243,9 @@ describe('mixed-CU registry — per-step contract resolution', () => {
 // ---------------------------------------------------------------------------
 
 describe('mixed-CU launch — single-CU back-compat via buildInfos', () => {
-  const COUNTER_TRACE_RAW = readFileSync(
-    new URL('./fixtures/counter-setNumber-trace.raw.json', import.meta.url),
-    'utf8',
-  );
-  const COUNTER_JSON: unknown = JSON.parse(
-    readFileSync(
-      new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
-      'utf8',
-    ),
-  );
-  const COUNTER_META = JSON.parse(
-    readFileSync(
-      new URL('./fixtures/counter-setNumber-meta.json', import.meta.url),
-      'utf8',
-    ),
-  ) as {contractAddress: string};
+  const COUNTER_TRACE_RAW = readDbgFixture('counter-setNumber-trace.raw.json');
+  const COUNTER_JSON: unknown = buildInfoOf('counter-build-info.json');
+  const COUNTER_META = metaOf('counter-setNumber-meta.json');
 
   it('launches a single-CU trace through buildInfos:[one] and reads a State var', async () => {
     const session = new SolidityDebugSession();

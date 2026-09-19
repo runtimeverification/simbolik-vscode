@@ -37,14 +37,11 @@
  * `0x06447d56` (canonical keccak selector), not `0xca669fa7`, or it will not
  * match this fixture.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {bytesToHex, utf8ToBytes} from 'ethereum-cryptography/utils';
 
-import {parseJsonLossless} from '@simbolik/engine';
-import {normalizeKontrolTrace, StateCursor, type Step} from '@simbolik/lifting';
+import {StateCursor, type Step} from '@simbolik/lifting';
 
 // The proposed pure module — does NOT exist yet (this import is why the suite
 // fails today). API surface the implementer should build to:
@@ -67,25 +64,12 @@ import {
   decodeCheatcodeCall,
 } from '../src/cheatcodes.js';
 
-// ── fixture loaders ─────────────────────────────────────────────────────────
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
+import {loadSteps} from './support/harness.js';
 
 // The kontrol trace carries DECIMAL bigints for some fields, so it MUST be
-// loaded through the lossless parser + normalizer (never JSON.parse).
-function loadSteps(): Step[] {
-  const parsed = parseJsonLossless(
-    readTrace('prank-run-trace.raw.json'),
-  ) as {result: unknown};
-  return normalizeKontrolTrace(parsed.result as never);
-}
-
-/** Load + normalize any kontrol trace fixture by file name (lossless). */
-function loadTrace(name: string): Step[] {
-  const parsed = parseJsonLossless(readTrace(name)) as {result: unknown};
-  return normalizeKontrolTrace(parsed.result as never);
-}
+// loaded through the lossless parser + normalizer (never JSON.parse); the
+// harness `loadSteps` does exactly that.
+const PRANK_TRACE = 'prank-run-trace.raw.json';
 
 const START_PRANK_STEP = 574;
 const STOP_PRANK_STEP = 917;
@@ -102,25 +86,25 @@ describe('cheatcodes — CHEATCODE_ADDRESS', () => {
 
 describe('cheatcodes — isCheatcodeCall', () => {
   it('true at the startPrank CALL (step 574) and stopPrank CALL (step 917)', () => {
-    const steps = loadSteps();
+    const steps = loadSteps(PRANK_TRACE);
     expect(isCheatcodeCall(steps[START_PRANK_STEP]!)).toBe(true);
     expect(isCheatcodeCall(steps[STOP_PRANK_STEP]!)).toBe(true);
   });
 
   it('false at an ordinary external CALL (step 205 → Target, not the cheatcode addr)', () => {
-    const steps = loadSteps();
+    const steps = loadSteps(PRANK_TRACE);
     expect(isCheatcodeCall(steps[ORDINARY_CALL_STEP]!)).toBe(false);
   });
 
   it('false at a plain non-CALL step (step 573 = GAS)', () => {
-    const steps = loadSteps();
+    const steps = loadSteps(PRANK_TRACE);
     expect(isCheatcodeCall(steps[PLAIN_STEP]!)).toBe(false);
   });
 });
 
 describe('cheatcodes — decodeCheatcodeCall', () => {
   it('startPrank(address): selector 0x06447d56, name startPrank, address arg deadbeef…', () => {
-    const steps = loadSteps();
+    const steps = loadSteps(PRANK_TRACE);
     const cursor = new StateCursor(steps);
     const decoded = decodeCheatcodeCall(
       steps[START_PRANK_STEP]!,
@@ -142,7 +126,7 @@ describe('cheatcodes — decodeCheatcodeCall', () => {
   });
 
   it('stopPrank(): selector 0x90c5013b, name stopPrank, no args', () => {
-    const steps = loadSteps();
+    const steps = loadSteps(PRANK_TRACE);
     const cursor = new StateCursor(steps);
     const decoded = decodeCheatcodeCall(
       steps[STOP_PRANK_STEP]!,
@@ -312,7 +296,7 @@ describe('cheatcodes — dynamic arg decoding (4c: bytes / string)', () => {
   const ADDR_BEEF = '0x000000000000000000000000000000000000beef';
 
   it('bytes decode — etchraw step 191: short bytes decoded in full', () => {
-    const steps = loadTrace('etchraw-run-trace.raw.json');
+    const steps = loadSteps('etchraw-run-trace.raw.json');
     const cursor = new StateCursor(steps);
     const decoded = decodeCheatcodeCall(steps[191]!, cursor.at(191));
 
@@ -330,7 +314,7 @@ describe('cheatcodes — dynamic arg decoding (4c: bytes / string)', () => {
   });
 
   it('bytes decode — etch step 274: long bytes carried in full, summarized in display', () => {
-    const steps = loadTrace('etch-run-trace.raw.json');
+    const steps = loadSteps('etch-run-trace.raw.json');
     const cursor = new StateCursor(steps);
     const decoded = decodeCheatcodeCall(steps[274]!, cursor.at(274));
 

@@ -12,47 +12,28 @@
  *
  * A light back-compat test confirms a kontrol launch (no `dialect`) still works.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
 import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
+import {buildInfoOf, metaOf, readDbgFixture} from './support/harness.js';
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 /** REAL recorded anvil (geth) `debug_traceTransaction` response STRING. */
-const ANVIL_TRACE_RAW = readFileSync(
-  new URL('./fixtures/anvil-setNumber-trace.raw.json', import.meta.url),
-  'utf8',
-);
+const ANVIL_TRACE_RAW = readDbgFixture('anvil-setNumber-trace.raw.json');
 
 /** REAL recorded kontrol Counter trace STRING (back-compat). */
-const KONTROL_TRACE_RAW = readFileSync(
-  new URL('./fixtures/counter-setNumber-trace.raw.json', import.meta.url),
-  'utf8',
-);
+const KONTROL_TRACE_RAW = readDbgFixture('counter-setNumber-trace.raw.json');
 
 /** solc standard-json build-info — Counter compiled from the SAME bytecode. */
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
+const BUILD_INFO_JSON: unknown = buildInfoOf('counter-build-info.json');
 
 const ANVIL_META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/anvil-setNumber-meta.json', import.meta.url),
-    'utf8',
-  ),
+  readDbgFixture('anvil-setNumber-meta.json'),
 ) as {contractAddress: string; txFrom: string; txTo: string; txInput: string};
 
-const KONTROL_META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/counter-setNumber-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
+const KONTROL_META = metaOf('counter-setNumber-meta.json');
 
 // ── LaunchInputs builders ─────────────────────────────────────────────────────
 

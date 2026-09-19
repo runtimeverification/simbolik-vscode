@@ -22,52 +22,24 @@
  * Ground truth (fixed model): entry = line 29; step-over 29 → 30 → 31; step-into
  * line 29 descends into `mk` at line 20 (`out0 += seed;`).
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
+import {launch, line, type Spec} from './support/harness.js';
 
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/twocalls-viair-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/twocalls-viair-run-trace.raw.json', import.meta.url),
-  'utf8',
-);
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/twocalls-viair-run-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
-
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/TwoCalls.sol',
-    contractName: 'TwoCalls',
-    methodName: 'run',
-    codeAddress: META.contractAddress,
-    dialect: 'kontrol',
-  };
-}
+const spec: Spec = {
+  buildInfo: 'twocalls-viair-build-info.json',
+  trace: 'twocalls-viair-run-trace.raw.json',
+  meta: 'twocalls-viair-run-meta.json',
+  sourcePath: 'src/TwoCalls.sol',
+  contractName: 'TwoCalls',
+  methodName: 'run',
+  dialect: 'kontrol',
+};
 
 async function launched(): Promise<SolidityDebugSession> {
-  const s = new SolidityDebugSession();
-  await s.launch(inputs());
-  return s;
+  return launch(spec);
 }
-
-const line = (s: SolidityDebugSession): number | undefined =>
-  s.stackTrace().stackFrames[0]?.line;
 
 describe('viaIR straight-line SETUP artifact (out-of-order statement position)', () => {
   it('enters on the first statement (line 29), not the tuple-assign line', async () => {

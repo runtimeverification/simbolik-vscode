@@ -20,37 +20,19 @@
  *   - anvil-setNumber (geth): NO block context → `block` group + `tx.gasprice`
  *     omitted; `msg`(sender/value/data/sig), `tx.origin`, `gasleft()` present.
  */
-import {readFileSync} from 'node:fs';
-
-import {parseJsonLossless} from '@simbolik/engine';
-import {normalizeKontrolTrace, type Step} from '@simbolik/lifting';
 import {describe, expect, it} from 'vitest';
 
 import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixture loaders (mirroring events.test.ts / mixed.test.ts)
-// ---------------------------------------------------------------------------
-
-function solcFixture(name: string): unknown {
-  return JSON.parse(
-    readFileSync(new URL(`../../solc/test/fixtures/${name}`, import.meta.url), 'utf8'),
-  );
-}
-function dbgFixtureText(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function dbgFixtureJson<T>(name: string): T {
-  return JSON.parse(dbgFixtureText(name)) as T;
-}
-
-/** A DAP variable as the session emits it. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number;
-}
+import {
+  buildInfoOf,
+  launch,
+  loadSteps,
+  metaOf,
+  readDbgFixture,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
 /** The Globals scope rows for a frame; throws if the scope is absent. */
 async function globalsRows(
@@ -98,33 +80,25 @@ const COUNTER_CALLDATA =
   '0x3fb5c1cb000000000000000000000000000000000000000000000000000000000000002a';
 const COUNTER_SIG = '0x3fb5c1cb';
 
-function counterInputs(): LaunchInputs {
-  return {
-    buildInfoJson: solcFixture('counter-build-info.json'),
-    traceJson: dbgFixtureText('counter-setNumber-trace.raw.json'),
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: dbgFixtureJson<{contractAddress: string}>(
-      'counter-setNumber-meta.json',
-    ).contractAddress,
-    dialect: 'kontrol',
-  } as LaunchInputs;
-}
+const counterSpec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
 /** All distinct `gas` values in the kontrol counter trace (for gasleft() checks). */
 function counterGasValues(): Set<number> {
-  const parsed = parseJsonLossless(
-    dbgFixtureText('counter-setNumber-trace.raw.json'),
-  ) as {result: unknown};
-  const steps: Step[] = normalizeKontrolTrace(parsed.result as never);
-  return new Set(steps.map((s) => s.gas));
+  return new Set(
+    loadSteps('counter-setNumber-trace.raw.json').map((s) => s.gas),
+  );
 }
 
 describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
   it('scopes() includes a read-only Globals scope', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const {scopes} = session.scopes(frameId);
@@ -135,8 +109,7 @@ describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
   });
 
   it('lists groups msg, tx, block and a scalar gasleft()', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const rows = await globalsRows(session, frameId);
@@ -159,8 +132,7 @@ describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
   });
 
   it('msg group: sender/value/data/sig from the fixture', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const msg = await groupChildren(session, await globalsRows(session, frameId), 'msg');
@@ -185,8 +157,7 @@ describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
   });
 
   it('tx group: origin + gasprice from the fixture', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const tx = await groupChildren(session, await globalsRows(session, frameId), 'tx');
@@ -202,8 +173,7 @@ describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
   });
 
   it('block group: number/timestamp/coinbase/prevrandao from the fixture', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const frameId = session.stackTrace().stackFrames[0]!.id;
 
     const block = await groupChildren(
@@ -234,19 +204,20 @@ describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
 // B) kontrol, multi-frame — mixed-go: Globals is PER-FRAME
 // ===========================================================================
 
-const MIXED_META = dbgFixtureJson<{callerAddress: string; calleeAddress: string}>(
-  'mixed-go-meta.json',
-);
+const MIXED_META = metaOf('mixed-go-meta.json') as {
+  callerAddress: string;
+  calleeAddress: string;
+} & Record<string, unknown>;
 const CALLER_PATH = 'src/Caller.sol';
 const CALLEE_PATH = 'src/Callee.sol';
 
 function mixedInputs(): LaunchInputs {
   return {
     buildInfos: [
-      solcFixture('caller-unopt-build-info.json'),
-      solcFixture('callee-opt-build-info.json'),
+      buildInfoOf('caller-unopt-build-info.json'),
+      buildInfoOf('callee-opt-build-info.json'),
     ],
-    traceJson: dbgFixtureText('mixed-go-trace.raw.json'),
+    traceJson: readDbgFixture('mixed-go-trace.raw.json'),
     sourcePath: CALLER_PATH,
     contractName: 'Caller',
     methodName: 'go',
@@ -325,19 +296,19 @@ describe('Globals scope — kontrol multi-frame (mixed-go), per-frame msg.sender
 // C) geth/anvil — anvil-setNumber: block group + tx.gasprice OMITTED
 // ===========================================================================
 
-const ANVIL_META = dbgFixtureJson<{
+const ANVIL_META = metaOf('anvil-setNumber-meta.json') as {
   contractAddress: string;
   txFrom: string;
   txTo: string;
   txInput: string;
-}>('anvil-setNumber-meta.json');
+} & Record<string, unknown>;
 
 function anvilInputs(): LaunchInputs {
   return {
     dialect: 'geth',
     txContext: {to: ANVIL_META.txTo, from: ANVIL_META.txFrom, input: ANVIL_META.txInput},
-    buildInfoJson: solcFixture('counter-build-info.json'),
-    traceJson: dbgFixtureText('anvil-setNumber-trace.raw.json'),
+    buildInfoJson: buildInfoOf('counter-build-info.json'),
+    traceJson: readDbgFixture('anvil-setNumber-trace.raw.json'),
     sourcePath: 'src/Counter.sol',
     contractName: 'Counter',
     methodName: 'setNumber',

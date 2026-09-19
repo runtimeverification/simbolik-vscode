@@ -19,7 +19,6 @@ import * as net from 'node:net';
 
 import type {DebugProtocol} from '@vscode/debugprotocol';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {readFileSync} from 'node:fs';
 
 // `startDapServer` + `DapServerHandle` are the units under test.
 import {
@@ -30,38 +29,24 @@ import {
   type LaunchInputs,
 } from '../src/index.js';
 
+import {toLaunchInputs, type Spec} from './support/harness.js';
+
 // ---------------------------------------------------------------------------
 // Fixtures + fake SessionResolver (mirrors dispatcher.test.ts)
 // ---------------------------------------------------------------------------
 
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/counter-setNumber-trace.raw.json', import.meta.url),
-  'utf8',
-);
-
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
-
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/counter-setNumber-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
+/** The Counter fixture bundle + entry coordinates the resolver launches. */
+const counterSpec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
 function counterLaunchInputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: META.contractAddress,
-  };
+  return toLaunchInputs(counterSpec);
 }
 
 /** Fake resolver: builds + launches a Counter session, ignoring the args. */

@@ -24,49 +24,27 @@
  * assertion fails for the RIGHT reason. The "frame beneath is run" assertion
  * already holds and must NOT regress.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
 
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
+import {launch, type Spec} from './support/harness.js';
 
-function etchrawInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('etchraw-build-info.json'),
-    traceJson: readTrace('etchraw-run-trace.raw.json'),
-    sourcePath: 'src/EtchRaw.sol',
-    contractName: 'EtchRaw',
-    methodName: 'run',
-    dialect: 'kontrol',
-    codeAddress: readAddress('etchraw-run-meta.json'),
-  };
-}
+const spec: Spec = {
+  buildInfo: 'etchraw-build-info.json',
+  trace: 'etchraw-run-trace.raw.json',
+  meta: 'etchraw-run-meta.json',
+  sourcePath: 'src/EtchRaw.sol',
+  contractName: 'EtchRaw',
+  methodName: 'run',
+};
 
 const ETCH_STEP = 191;
 const ETCH_LINE = 23;
 
 /** Instruction-step a freshly launched session onto the vm.etch CALL step. */
 async function sessionAtEtch(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(etchrawInputs());
+  const session = await launch(spec);
   let guard = 0;
   while (session.currentStepIndex < ETCH_STEP && guard++ < 3000) {
     session.stepInstruction();

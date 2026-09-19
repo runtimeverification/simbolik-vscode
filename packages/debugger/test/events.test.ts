@@ -21,47 +21,32 @@
  * The dereference-oracle (independent keccak recompute + topic/data read from the
  * raw trace) is a genuine anchor, not a tautology.
  */
-import {readFileSync} from 'node:fs';
-
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {bytesToHex, utf8ToBytes} from 'ethereum-cryptography/utils';
 import {describe, expect, it} from 'vitest';
 
-import {parseJsonLossless} from '@simbolik/engine';
-import {normalizeKontrolTrace, StateCursor, type Step} from '@simbolik/lifting';
+import {StateCursor, type Step} from '@simbolik/lifting';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
+
+import {
+  children,
+  launch,
+  loadSteps,
+  metaOf,
+  normAddr,
+  scopeRef,
+  scopeVars,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
-// Fixtures (loaded EXACTLY as storage-refs.test.ts)
+// Fixtures (loaded EXACTLY as storage-refs.test.ts, via the shared harness)
 // ---------------------------------------------------------------------------
 
-function solcFixture(name: string): string {
-  return readFileSync(
-    new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-    'utf8',
-  );
-}
-function dbgFixture(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function loadSteps(): Step[] {
-  const parsed = parseJsonLossless(
-    dbgFixture('storagerefs-populate-trace.raw.json'),
-  ) as {result: unknown};
-  return normalizeKontrolTrace(parsed.result as never);
-}
-function contractAddress(): string {
-  const meta = JSON.parse(dbgFixture('storagerefs-populate-meta.json')) as {
-    contractAddress: string;
-  };
-  return meta.contractAddress;
-}
-/** Lowercase, 20-byte zero-padded — matches how accounts / codeAddress are keyed. */
-function normAddr(a: string): string {
-  return '0x' + BigInt(a).toString(16).padStart(40, '0');
-}
-
+const TRACE = 'storagerefs-populate-trace.raw.json';
+const META = 'storagerefs-populate-meta.json';
 const SRC = 'src/StorageRefs.sol';
 const NAME = 'StorageRefs';
 
@@ -73,25 +58,14 @@ const NAME = 'StorageRefs';
 const SELECTOR =
   '0xd78a0cb8bb633d06981248b816e7bd33c2a35a6089241d099fa519e361cab902';
 
-/** A DAP variable as the session emits it. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number;
-}
-
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: JSON.parse(solcFixture('storagerefs-build-info.json')),
-    traceJson: dbgFixture('storagerefs-populate-trace.raw.json'),
-    sourcePath: SRC,
-    contractName: NAME,
-    methodName: 'populate',
-    codeAddress: contractAddress(),
-    dialect: 'kontrol',
-  };
-}
+const spec: Spec = {
+  buildInfo: 'storagerefs-build-info.json',
+  trace: TRACE,
+  meta: META,
+  sourcePath: SRC,
+  contractName: NAME,
+  methodName: 'populate',
+};
 
 /**
  * A session run to the TERMINAL step. The LOG2 is at idx 970, the last body
@@ -101,8 +75,7 @@ function inputs(): LaunchInputs {
  * observable up to the frame's own step.
  */
 async function terminalSession(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(inputs());
+  const session = await launch(spec);
   session.continue();
   return session;
 }
@@ -114,7 +87,7 @@ async function terminalSession(): Promise<SolidityDebugSession> {
 
 describe('dereference oracle: LOG2 selector + topic1/data', () => {
   it('one LOG2 at idx 970; topic0==keccak(sig), topic1=7, data=100', () => {
-    const steps = loadSteps();
+    const steps = loadSteps(TRACE);
 
     // Exactly one LOG op in the whole trace, and it is the LOG2 at idx 970.
     const logIndices = steps
@@ -127,7 +100,7 @@ describe('dereference oracle: LOG2 selector + topic1/data', () => {
     expect(s.depth).toBe(1);
     expect(s.isInitCode).toBe(false);
     // Attributed to the emitting (own) contract.
-    expect('0x' + s.codeAddress.toString(16)).toBe(normAddr(contractAddress()));
+    expect('0x' + s.codeAddress.toString(16)).toBe(normAddr(metaOf(META).contractAddress));
 
     // Stack top-of-stack LAST: offset=stack[-1], size=stack[-2],
     // topic0=stack[-3], topic1=stack[-4] (n = 2 topics → LOG2).
@@ -211,9 +184,9 @@ async function loadEnumerateEvents(): Promise<EnumerateEventsFn | undefined> {
     '../src/mappings.js',
     '../src/machineState.js',
   ];
-  for (const spec of candidates) {
+  for (const candidate of candidates) {
     try {
-      const mod = (await import(spec)) as Record<string, unknown>;
+      const mod = (await import(candidate)) as Record<string, unknown>;
       const fn = mod['enumerateEvents'];
       if (typeof fn === 'function') return fn as unknown as EnumerateEventsFn;
     } catch {
@@ -231,9 +204,9 @@ describe('enumerateEvents decodes the LOG2 into Updated(7, 100)', () => {
       'enumerateEvents must be exported (debugger events helper)',
     ).toBeDefined();
 
-    const steps = loadSteps();
+    const steps = loadSteps(TRACE);
     const cursor = new StateCursor(steps);
-    const addr = normAddr(contractAddress());
+    const addr = normAddr(metaOf(META).contractAddress);
 
     // Up to the terminal step (past the LOG2 at idx 970) → exactly one event.
     const decoded = enumerate!(steps, cursor, addr, steps.length - 1, EVENT_DEFS);
@@ -322,17 +295,12 @@ describe('regression: Events is appended to State/Locals/EVM', () => {
 async function eventsOf(
   session: SolidityDebugSession,
 ): Promise<DapVariable[]> {
-  const frameId = session.stackTrace().stackFrames[0]!.id;
-  const ref = session
-    .scopes(frameId)
-    .scopes.find((s) => s.name === 'Events')!.variablesReference;
-  return (await session.variables(ref)).variables as DapVariable[];
+  return scopeVars(session, 'Events');
 }
 
 describe('Events view — global, current-step-bounded, emitter-labelled', () => {
   it('is empty at entry (LOG not yet executed) and populated at the terminal', async () => {
-    const atEntry = new SolidityDebugSession();
-    await atEntry.launch(inputs());
+    const atEntry = await launch(spec);
     // At the entry stop the emit has NOT run, so the global Events view is empty.
     expect(await eventsOf(atEntry)).toEqual([]);
 
@@ -350,12 +318,7 @@ describe('Events view — global, current-step-bounded, emitter-labelled', () =>
     const session = await terminalSession();
     const frames = session.stackTrace().stackFrames;
     const lists = await Promise.all(
-      frames.map(async (f) => {
-        const ref = session
-          .scopes(f.id)
-          .scopes.find((s) => s.name === 'Events')!.variablesReference;
-        return (await session.variables(ref)).variables as DapVariable[];
-      }),
+      frames.map((f) => children(session, scopeRef(session, 'Events', f.id))),
     );
     for (const list of lists) {
       expect(list.map((v) => v.value)).toEqual(lists[0]!.map((v) => v.value));

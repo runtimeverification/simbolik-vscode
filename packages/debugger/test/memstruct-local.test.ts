@@ -17,88 +17,39 @@
  * salt:0x…07}. Stepping into `run` and over the constructor lands on line 37 with
  * `params` expandable to those four members.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {
+  children,
+  launch,
+  localVar,
+  stepToLine,
+  type Spec,
+} from './support/harness.js';
 
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference?: number;
-}
-
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/memstruct-viair-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/memstruct-viair-run-trace.raw.json', import.meta.url),
-  'utf8',
-);
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/memstruct-viair-run-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
-
-async function launched(): Promise<SolidityDebugSession> {
-  const s = new SolidityDebugSession();
-  const inputs: LaunchInputs = {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/MemStruct.sol',
-    contractName: 'MemStruct',
-    methodName: 'run',
-    codeAddress: META.contractAddress,
-    dialect: 'kontrol',
-  };
-  await s.launch(inputs);
-  return s;
-}
-
-const line = (s: SolidityDebugSession): number | undefined =>
-  s.stackTrace().stackFrames[0]?.line;
-
-/** Step forward (over) until stopped on `targetLine`, or throw. */
-function stepToLine(s: SolidityDebugSession, targetLine: number): void {
-  for (let k = 0; k < 8 && line(s) !== targetLine; k++) s.next();
-  if (line(s) !== targetLine) {
-    throw new Error(`never reached line ${targetLine} (at ${line(s)})`);
-  }
-}
-
-async function localVar(
-  s: SolidityDebugSession,
-  name: string,
-): Promise<DapVariable | undefined> {
-  const frameId = s.stackTrace().stackFrames[0]!.id;
-  const {scopes} = s.scopes(frameId);
-  const scope = scopes.find((x) => x.name === 'Locals');
-  if (scope === undefined) return undefined;
-  const {variables} = await s.variables(scope.variablesReference);
-  return (variables as DapVariable[]).find((v) => v.name === name);
-}
+const spec: Spec = {
+  buildInfo: 'memstruct-viair-build-info.json',
+  trace: 'memstruct-viair-run-trace.raw.json',
+  meta: 'memstruct-viair-run-meta.json',
+  sourcePath: 'src/MemStruct.sol',
+  contractName: 'MemStruct',
+  methodName: 'run',
+  dialect: 'kontrol',
+};
 
 describe('memory struct local located per-pc (viaIR)', () => {
   it('shows `params` with its four member values at its use (line 37)', async () => {
-    const s = await launched();
+    const s = await launch(spec);
     stepToLine(s, 37);
     const params = await localVar(s, 'params');
     expect(params).toBeDefined();
     expect(params!.variablesReference).toBeGreaterThan(0); // expandable struct
 
-    const {variables} = await s.variables(params!.variablesReference!);
     const members = new Map(
-      (variables as DapVariable[]).map((m) => [m.name, m.value]),
+      (await children(s, params!.variablesReference)).map((m) => [
+        m.name,
+        m.value,
+      ]),
     );
     expect(BigInt(members.get('tickLower')!)).toBe(-120n);
     expect(BigInt(members.get('tickUpper')!)).toBe(120n);

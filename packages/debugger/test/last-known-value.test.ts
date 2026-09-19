@@ -20,66 +20,23 @@
  * back OUT lands on line 45 again, now past their last use — where they are still
  * in scope but their slots are gone. Ground truth: mint(0x11)=0x12, mint(0x22)=0x23.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
+import {launch, line, locals, type Spec} from './support/harness.js';
 
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  presentationHint?: {attributes?: string[]};
-}
-
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/inheritedudvt-viair-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/inheritedudvt-viair-run-trace.raw.json', import.meta.url),
-  'utf8',
-);
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/inheritedudvt-viair-run-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
+const spec: Spec = {
+  buildInfo: 'inheritedudvt-viair-build-info.json',
+  trace: 'inheritedudvt-viair-run-trace.raw.json',
+  meta: 'inheritedudvt-viair-run-meta.json',
+  sourcePath: 'src/InheritedUdvt.sol',
+  contractName: 'InheritedUdvt',
+  methodName: 'run',
+  dialect: 'kontrol',
+};
 
 async function launched(): Promise<SolidityDebugSession> {
-  const s = new SolidityDebugSession();
-  const inputs: LaunchInputs = {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/InheritedUdvt.sol',
-    contractName: 'InheritedUdvt',
-    methodName: 'run',
-    codeAddress: META.contractAddress,
-    dialect: 'kontrol',
-  };
-  await s.launch(inputs);
-  return s;
-}
-
-const line = (s: SolidityDebugSession): number | undefined =>
-  s.stackTrace().stackFrames[0]?.line;
-
-async function locals(
-  s: SolidityDebugSession,
-): Promise<Map<string, DapVariable>> {
-  const frameId = s.stackTrace().stackFrames[0]!.id;
-  const {scopes} = s.scopes(frameId);
-  const scope = scopes.find((x) => x.name === 'Locals');
-  if (scope === undefined) return new Map();
-  const {variables} = await s.variables(scope.variablesReference);
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
+  return launch(spec);
 }
 
 /** Into `setupTokens`, forward to line 45 with `_a`/`_b` still live. */

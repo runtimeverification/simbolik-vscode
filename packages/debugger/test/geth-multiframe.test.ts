@@ -33,47 +33,25 @@
  * `src/Callee.sol`, and reads `stored`=14. `contractsByAddress` is an optional
  * field on the launch object.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
 import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+
+import {buildInfoOf, readDbgFixture} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 /** REAL recorded anvil (geth) `debug_traceTransaction` response STRING. */
-const CALLER_GO_TRACE_RAW = readFileSync(
-  new URL('./fixtures/caller-go-anvil-trace.raw.json', import.meta.url),
-  'utf8',
-);
+const CALLER_GO_TRACE_RAW = readDbgFixture('caller-go-anvil-trace.raw.json');
 
-const CALLER_BI_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/caller-geth-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
+const CALLER_BI_JSON: unknown = buildInfoOf('caller-geth-build-info.json');
 
-const CALLEE_BI_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/callee-geth-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
+const CALLEE_BI_JSON: unknown = buildInfoOf('callee-geth-build-info.json');
 
 const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/caller-go-anvil-meta.json', import.meta.url),
-    'utf8',
-  ),
+  readDbgFixture('caller-go-anvil-meta.json'),
 ) as {callerAddress: string; calleeAddress: string; goCalldata: string};
 
 /** anvil dev account #0 — the tx sender. */

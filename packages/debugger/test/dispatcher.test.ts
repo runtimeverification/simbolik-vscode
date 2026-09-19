@@ -7,8 +7,6 @@
  * invariants: strictly-increasing positive `seq`, `request_seq`/`command`
  * correlation, and single-emission of each session event across launch/continue.
  */
-import {readFileSync} from 'node:fs';
-
 import type {DebugProtocol} from '@vscode/debugprotocol';
 import {describe, expect, it} from 'vitest';
 
@@ -19,40 +17,24 @@ import {
   type LaunchInputs,
 } from '../src/index.js';
 
+import {toLaunchInputs, type Spec} from './support/harness.js';
+
 // ---------------------------------------------------------------------------
 // Fixtures + LaunchInputs (mirrors session.test.ts exactly)
 // ---------------------------------------------------------------------------
 
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/counter-setNumber-trace.raw.json', import.meta.url),
-  'utf8',
-);
-
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
-
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/counter-setNumber-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
-
-const CODE_ADDRESS = META.contractAddress;
+/** The Counter fixture bundle + entry coordinates the resolver launches. */
+const counterSpec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
 function counterLaunchInputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: CODE_ADDRESS,
-  };
+  return toLaunchInputs(counterSpec);
 }
 
 // ---------------------------------------------------------------------------

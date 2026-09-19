@@ -21,57 +21,27 @@
  * `reverseContinue`, `setBreakpoints`) and the `currentStepIndex` accessor on
  * `SolidityDebugSession`, with `launch` positioned at the entry statement.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
+import {launch, line as currentLine, type Spec} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures + LaunchInputs helper
 // ---------------------------------------------------------------------------
 
-/** Raw `debug_traceTransaction` JSON-RPC response STRING — parsed by launch. */
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/stepper-run-trace.raw.json', import.meta.url),
-  'utf8',
-);
-
-/** solc standard-json build-info for the unoptimized Stepper (solc 0.8.35). */
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/stepper-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
-
-/** Recorded meta: the running contract address, calldata, terminal storage. */
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/stepper-run-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
-
-const CODE_ADDRESS = META.contractAddress;
-
-/** Build the `LaunchInputs` the whole suite drives against. */
-function stepperInputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/Stepper.sol',
-    contractName: 'Stepper',
-    methodName: 'run',
-    codeAddress: CODE_ADDRESS,
-  };
-}
+const spec: Spec = {
+  buildInfo: 'stepper-build-info.json',
+  trace: 'stepper-run-trace.raw.json',
+  meta: 'stepper-run-meta.json',
+  sourcePath: 'src/Stepper.sol',
+  contractName: 'Stepper',
+  methodName: 'run',
+};
 
 /** Launch a fresh, entry-positioned Stepper session. */
 async function launchedStepper(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(stepperInputs());
-  return session;
+  return launch(spec);
 }
 
 /** Shape of a queued DAP `stopped` event. */
@@ -86,9 +56,9 @@ function lastStopped(session: SolidityDebugSession): StoppedEvent | undefined {
   return stopped[stopped.length - 1] as StoppedEvent | undefined;
 }
 
-/** The current source line, via the single stack frame. */
-function currentLine(session: SolidityDebugSession): number {
-  return session.stackTrace().stackFrames[0]!.line;
+/** Whether a `terminated` event has been queued (the session ended). */
+function terminated(session: SolidityDebugSession): boolean {
+  return session.events.some((e) => e.event === 'terminated');
 }
 
 // The confirmed step indices behind the source lines (used for the exact
@@ -182,16 +152,20 @@ describe('statement stepping transitions', () => {
     expect(lastStopped(session)!.body.reason).toBe('step');
   });
 
-  it('next past the last statement (line 10) falls through to the terminal', async () => {
+  it('step-over past the last statement (line 10) ENDS the session', async () => {
     const session = await launchedStepper();
     await session.next(); // → line 9 (175)
     await session.next(); // → line 10 (269), skipping double
+    expect(terminated(session)).toBe(false);
 
-    // No later statement-start exists, so the model targets the terminal step.
+    // No later statement-start exists: the function returns to the EVM dispatch
+    // epilogue (whose source range is the whole contract). A `stopped` there
+    // would park the client on the contract-declaration line and freeze it, so
+    // step-over past the last statement must END the session instead.
     await session.next();
 
     expect(session.currentStepIndex).toBe(TERMINAL);
-    expect(lastStopped(session)!.body.reason).toBe('step');
+    expect(terminated(session)).toBe(true);
   });
 
   it('stepBack from line 10 → line 9, then → line 14', async () => {

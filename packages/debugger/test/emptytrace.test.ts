@@ -9,18 +9,13 @@
  * instructions. The launch resolver now rejects the failed deploy earlier, but
  * this guard covers every other 0-step path (geth attach, a call to an EOA, …).
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
 import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../solc/test/fixtures/counter-build-info.json', import.meta.url),
-    'utf8',
-  ),
-);
+import {buildInfoOf} from './support/harness.js';
+
+const BUILD_INFO_JSON: unknown = buildInfoOf('counter-build-info.json');
 
 /** A well-formed `debug_traceTransaction` response whose execution has 0 steps. */
 const EMPTY_TRACE_RAW = JSON.stringify({

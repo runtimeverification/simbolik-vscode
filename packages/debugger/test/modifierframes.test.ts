@@ -27,47 +27,23 @@
  * fails for the right reason. Test 2 (function body → [bump@18]) already passes
  * today — 4a yields it — and 4b must not regress it.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {breakAt, launch, type Spec} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
-// Fixture loaders (copied verbatim from internalframes.test.ts)
+// Fixture spec — pointed at the Modifiers fixture.
 // ---------------------------------------------------------------------------
 
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
-
-// LaunchInputs — mirrors internalframes.test.ts, pointed at the Modifiers
-// fixture.
-function modifiersInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('modifiers-build-info.json'),
-    traceJson: readTrace('modifiers-bump-trace.raw.json'),
-    sourcePath: 'src/Modifiers.sol',
-    contractName: 'Modifiers',
-    methodName: 'bump',
-    dialect: 'kontrol',
-    codeAddress: readAddress('modifiers-bump-meta.json'),
-  };
-}
+const modifiersSpec: Spec = {
+  buildInfo: 'modifiers-build-info.json',
+  trace: 'modifiers-bump-trace.raw.json',
+  meta: 'modifiers-bump-meta.json',
+  sourcePath: 'src/Modifiers.sol',
+  contractName: 'Modifiers',
+  methodName: 'bump',
+  dialect: 'kontrol',
+};
 
 // ---------------------------------------------------------------------------
 // 1. Modifier frame at launch — paused inside the modifier body.
@@ -75,8 +51,7 @@ function modifiersInputs(): LaunchInputs {
 
 describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier body', () => {
   it('launch opens paused inside the modifier body (step 110, line 12)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(modifiersInputs());
+    const session = await launch(modifiersSpec);
 
     // FIRST confirm WHERE we paused (observed by running the session): the
     // launch opens inside the modifier body, not the function body.
@@ -90,8 +65,7 @@ describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier 
   });
 
   it('pausing inside the modifier shows a 2-frame stack [onlyPositive@12, bump@17]', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(modifiersInputs());
+    const session = await launch(modifiersSpec);
     const {stackFrames} = session.stackTrace();
 
     expect(stackFrames).toHaveLength(2);
@@ -115,13 +89,7 @@ describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier 
 
 describe('Modifiers function body — modifier suspended → [bump@18]', () => {
   it('breakpoint on line 18 + continue → length-1 stack [bump@18]', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(modifiersInputs());
-    session.setBreakpoints({
-      source: {path: 'src/Modifiers.sol'},
-      breakpoints: [{line: 18}],
-    });
-    await session.continue();
+    const session = await breakAt(modifiersSpec, 18);
 
     expect(session.currentStepIndex).toBe(197); // inside the function body
     const {stackFrames} = session.stackTrace();
@@ -142,8 +110,7 @@ describe('Modifiers function body — modifier suspended → [bump@18]', () => {
 
 describe('Modifiers modifier frame is addressable via scopes()', () => {
   it('scopes(modifierFrame.id) returns a scope list including State and EVM', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(modifiersInputs());
+    const session = await launch(modifiersSpec);
     const {stackFrames} = session.stackTrace();
 
     // The modifier frame is [0] (top). Its id must resolve to a real scope list.
@@ -167,13 +134,8 @@ describe('Modifiers modifier frame is addressable via scopes()', () => {
 
 describe('Modifiers resume — onlyPositive reappears after the function body', () => {
   it('modifier frame is re-emitted on resume (step 264, line 11)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(modifiersInputs());
-    session.setBreakpoints({
-      source: {path: 'src/Modifiers.sol'},
-      breakpoints: [{line: 19}], // `stored = r;` — function body, step 258
-    });
-    await session.continue();
+    // Breakpoint on line 19 (`stored = r;` — function body, step 258).
+    const session = await breakAt(modifiersSpec, 19);
     // Instruction-step into the modifier's closing block (resume: modDepth 1→0).
     for (let i = 0; i < 6; i++) session.stepInstruction();
     expect(session.currentStepIndex).toBe(264);
@@ -198,8 +160,7 @@ describe('Modifiers resume — onlyPositive reappears after the function body', 
 
 describe('Modifiers — stack holds across the modifier’s unmapped helper region', () => {
   it('mid checked-mul helper (step 150) still shows [onlyPositive@12, bump@17]', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(modifiersInputs()); // entry = step 110 (line 12)
+    const session = await launch(modifiersSpec); // entry = step 110 (line 12)
     for (let i = 0; i < 40; i++) session.stepInstruction();
     expect(session.currentStepIndex).toBe(150); // deep in the unmapped helper
 

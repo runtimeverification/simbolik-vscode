@@ -66,54 +66,29 @@
  * frame carries NO Solidity `source`, and the parent frame is uncorrupted — are
  * pinned firmly; the display name is checked with substrings.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
 
-// ── fixture loaders (mirrors modifierframes.test.ts / cheatcodeframes.test.ts) ─
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
+import {breakAt, launch, type Spec} from './support/harness.js';
 
-function etchInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('etch-build-info.json'),
-    traceJson: readTrace('etch-run-trace.raw.json'),
-    sourcePath: 'src/Etch.sol',
-    contractName: 'Etch',
-    methodName: 'run',
-    dialect: 'kontrol',
-    codeAddress: readAddress('etch-run-meta.json'),
-  };
-}
+const etchSpec: Spec = {
+  buildInfo: 'etch-build-info.json',
+  trace: 'etch-run-trace.raw.json',
+  meta: 'etch-run-meta.json',
+  sourcePath: 'src/Etch.sol',
+  contractName: 'Etch',
+  methodName: 'run',
+};
 
-function etchRawInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('etchraw-build-info.json'),
-    traceJson: readTrace('etchraw-run-trace.raw.json'),
-    sourcePath: 'src/EtchRaw.sol',
-    contractName: 'EtchRaw',
-    methodName: 'run',
-    dialect: 'kontrol',
-    codeAddress: readAddress('etchraw-run-meta.json'),
-  };
-}
+const etchRawSpec: Spec = {
+  buildInfo: 'etchraw-build-info.json',
+  trace: 'etchraw-run-trace.raw.json',
+  meta: 'etchraw-run-meta.json',
+  sourcePath: 'src/EtchRaw.sol',
+  contractName: 'EtchRaw',
+  methodName: 'run',
+};
 
 // ---------------------------------------------------------------------------
 // 1. KNOWN etch resolves to the etched contract's source (regression).
@@ -122,13 +97,8 @@ function etchRawInputs(): LaunchInputs {
 
 describe('Etch known-etch frame — resolves to Impl.setStored source (regression)', () => {
   it('bp on Impl body (line 20) + continue → [setStored@Etch.sol:20, run@Etch.sol:35]', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(etchInputs());
-    session.setBreakpoints({
-      source: {path: 'src/Etch.sol'},
-      breakpoints: [{line: 20}], // `stored = v * 2;` — inside Impl.setStored
-    });
-    await session.continue();
+    // line 20 = `stored = v * 2;` — inside Impl.setStored.
+    const session = await breakAt(etchSpec, 20);
 
     // Landed inside the depth-2 etched region (region = steps 397–652).
     expect(session.currentStepIndex).toBe(506);
@@ -168,13 +138,7 @@ const RAW_REGION_HI = 283; // last step of the raw depth-2 region
 
 /** Navigate a fresh EtchRaw session into the raw depth-2 region (278–283). */
 async function sessionInRawRegion(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(etchRawInputs());
-  session.setBreakpoints({
-    source: {path: 'src/EtchRaw.sol'},
-    breakpoints: [{line: RAW_CALL_LINE}],
-  });
-  session.continue(); // → step 202, run@EtchRaw.sol:24
+  const session = await breakAt(etchRawSpec, RAW_CALL_LINE); // → step 202, run@EtchRaw.sol:24
   // Instruction-step onto the first raw depth-2 step (frozen trace).
   let guard = 0;
   while (session.currentStepIndex < RAW_REGION_LO && guard++ < 2000) {
@@ -246,13 +210,7 @@ describe('EtchRaw unidentifiable-etch frame — FOREIGN, no source, parent intac
 
 describe('EtchRaw parent step-over — advances past the etched subcall at depth 1', () => {
   it('bp on line 24 + continue, then next() → run@EtchRaw.sol:25 (single frame)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(etchRawInputs());
-    session.setBreakpoints({
-      source: {path: 'src/EtchRaw.sol'},
-      breakpoints: [{line: RAW_CALL_LINE}],
-    });
-    await session.continue();
+    const session = await breakAt(etchRawSpec, RAW_CALL_LINE);
     expect(session.currentStepIndex).toBe(202);
     expect(session.stackTrace().stackFrames[0]!.line).toBe(RAW_CALL_LINE);
 

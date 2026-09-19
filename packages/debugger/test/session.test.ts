@@ -16,12 +16,9 @@
  * All ground-truth values below were verified against the real trace +
  * build-info fixtures.
  */
-import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import * as nodePath from 'node:path';
 
-import {parseJsonLossless} from '@simbolik/engine';
-import {normalizeKontrolTrace, StateCursor} from '@simbolik/lifting';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -31,57 +28,41 @@ import {
   type LaunchInputs,
 } from '../src/index.js';
 
+import {
+  cursorFor,
+  launch,
+  metaOf,
+  toLaunchInputs,
+  type Spec,
+} from './support/harness.js';
+
 // ---------------------------------------------------------------------------
 // Fixtures + LaunchInputs helper
 // ---------------------------------------------------------------------------
 
-/** Raw `debug_traceTransaction` JSON-RPC response — parsed losslessly by launch. */
-const TRACE_RAW = readFileSync(
-  new URL(
-    './fixtures/counter-setNumber-trace.raw.json',
-    import.meta.url,
-  ),
-  'utf8',
-);
-
-/** solc standard-json build-info (reused from the solc package fixtures). */
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/counter-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
+const TRACE = 'counter-setNumber-trace.raw.json';
 
 /** Recorded meta: the running contract address, calldata, terminal storage. */
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/counter-setNumber-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string};
+const CODE_ADDRESS = metaOf('counter-setNumber-meta.json').contractAddress;
 
-const CODE_ADDRESS = META.contractAddress;
+/** The fixture bundle + entry coordinates the whole suite drives against. */
+const spec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: TRACE,
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
 /** Build the `LaunchInputs` the whole suite drives against. */
 function launchInputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: CODE_ADDRESS,
-  };
+  return toLaunchInputs(spec);
 }
 
 /** Launch a fresh, positioned session. */
 async function launchedSession(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(launchInputs());
-  return session;
+  return launch(spec);
 }
 
 // ---------------------------------------------------------------------------
@@ -345,9 +326,7 @@ describe('SolidityDebugSession.disconnect', () => {
 
 describe('machineStateFor + readPointerValue (terminal step 117)', () => {
   it('reads storage slot 0 and calldata[4:36] as 42n', async () => {
-    const trace = (parseJsonLossless(TRACE_RAW) as {result: unknown}).result;
-    const steps = normalizeKontrolTrace(trace as never);
-    const cursor = new StateCursor(steps);
+    const {cursor} = cursorFor(TRACE);
     expect(cursor.length).toBe(118);
 
     const state = cursor.at(117);

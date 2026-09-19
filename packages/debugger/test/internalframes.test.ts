@@ -21,84 +21,56 @@
  * stack is length 1 inside an internal function, so there is no `[1]` caller
  * frame. Test 3 (no-internal regression) MUST PASS already.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
+import {
+  breakAt,
+  children,
+  launch,
+  scopeRef,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
-// Fixture loaders (copied verbatim from returns.test.ts / parameters.test.ts)
+// Fixture specs (per contract)
 // ---------------------------------------------------------------------------
 
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
-
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-}
-
-// LaunchInputs — copied from the existing tests so the fixture/breakpoint
-// pattern is identical.
-function returnsInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('returns-build-info.json'),
-    traceJson: readTrace('returns-calc-trace.raw.json'),
-    sourcePath: 'src/Returns.sol',
-    contractName: 'Returns',
-    methodName: 'calc',
-    dialect: 'kontrol',
-    codeAddress: readAddress('returns-calc-meta.json'),
-  };
-}
-function stepperInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('stepper-build-info.json'),
-    traceJson: readTrace('stepper-run-trace.raw.json'),
-    sourcePath: 'src/Stepper.sol',
-    contractName: 'Stepper',
-    methodName: 'run',
-    codeAddress: readAddress('stepper-run-meta.json'),
-  };
-}
-function counterInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('counter-build-info.json'),
-    traceJson: readTrace('counter-setNumber-trace.raw.json'),
-    sourcePath: 'src/Counter.sol',
-    contractName: 'Counter',
-    methodName: 'setNumber',
-    codeAddress: readAddress('counter-setNumber-meta.json'),
-  };
-}
-function nestedInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('nestedcalls-build-info.json'),
-    traceJson: readTrace('nestedcalls-outer-trace.raw.json'),
-    sourcePath: 'src/NestedCalls.sol',
-    contractName: 'NestedCalls',
-    methodName: 'outer',
-    dialect: 'kontrol',
-    codeAddress: readAddress('nestedcalls-outer-meta.json'),
-  };
-}
+const returnsSpec: Spec = {
+  buildInfo: 'returns-build-info.json',
+  trace: 'returns-calc-trace.raw.json',
+  meta: 'returns-calc-meta.json',
+  sourcePath: 'src/Returns.sol',
+  contractName: 'Returns',
+  methodName: 'calc',
+  dialect: 'kontrol',
+};
+const stepperSpec: Spec = {
+  buildInfo: 'stepper-build-info.json',
+  trace: 'stepper-run-trace.raw.json',
+  meta: 'stepper-run-meta.json',
+  sourcePath: 'src/Stepper.sol',
+  contractName: 'Stepper',
+  methodName: 'run',
+};
+const counterSpec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
+const nestedSpec: Spec = {
+  buildInfo: 'nestedcalls-build-info.json',
+  trace: 'nestedcalls-outer-trace.raw.json',
+  meta: 'nestedcalls-outer-meta.json',
+  sourcePath: 'src/NestedCalls.sol',
+  contractName: 'NestedCalls',
+  methodName: 'outer',
+  dialect: 'kontrol',
+};
 
 // ---------------------------------------------------------------------------
 // Per-frame variable helper — the `Locals` scope holds a frame's own
@@ -109,17 +81,8 @@ async function localsOf(
   session: SolidityDebugSession,
   frameId: number,
 ): Promise<Map<string, DapVariable>> {
-  const {scopes} = session.scopes(frameId);
-  const locals = scopes.find((s) => s.name === 'Locals');
-  if (locals === undefined) {
-    throw new Error(
-      `no Locals scope for frame ${frameId}; scopes were: ${scopes
-        .map((s) => s.name)
-        .join(', ')}`,
-    );
-  }
-  const {variables} = await session.variables(locals.variablesReference);
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
+  const vars = await children(session, scopeRef(session, 'Locals', frameId));
+  return new Map(vars.map((v) => [v.name, v]));
 }
 
 // ---------------------------------------------------------------------------
@@ -128,14 +91,7 @@ async function localsOf(
 
 describe('Returns internal frame — [helper, calc] with per-frame variables', () => {
   async function insideHelper(): Promise<SolidityDebugSession> {
-    const session = new SolidityDebugSession();
-    await session.launch(returnsInputs());
-    session.setBreakpoints({
-      source: {path: 'src/Returns.sol'},
-      breakpoints: [{line: 17}],
-    });
-    await session.continue();
-    return session;
+    return breakAt(returnsSpec, 17);
   }
 
   it('pausing inside helper shows a 2-frame stack [helper@17, calc@9]', async () => {
@@ -185,14 +141,7 @@ describe('Stepper internal frame — [double, run] with stack param v', () => {
   // Reach INSIDE double the way parameters.test.ts / stepping.test.ts do:
   // breakpoint on line 14 + continue lands on step 182, inside double.
   async function insideDouble(): Promise<SolidityDebugSession> {
-    const session = new SolidityDebugSession();
-    await session.launch(stepperInputs());
-    session.setBreakpoints({
-      source: {path: 'src/Stepper.sol'},
-      breakpoints: [{line: 14}],
-    });
-    await session.continue();
-    return session;
+    return breakAt(stepperSpec, 14);
   }
 
   it('pausing inside double shows a 2-frame stack [double@14, run@9]', async () => {
@@ -224,8 +173,7 @@ describe('Stepper internal frame — [double, run] with stack param v', () => {
 
 describe('No-internal regression — Counter.setNumber is a single frame', () => {
   it('at entry the stack is length 1 and the top frame is setNumber', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(counterInputs());
+    const session = await launch(counterSpec);
     const {stackFrames} = session.stackTrace();
 
     expect(stackFrames).toHaveLength(1);
@@ -239,8 +187,7 @@ describe('No-internal regression — Counter.setNumber is a single frame', () =>
 
 describe('stepOut consistency — internal frame collapses back to the caller', () => {
   it('inside double the stack is 2 deep; stepOut returns to run (length 1)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(stepperInputs());
+    const session = await launch(stepperSpec);
 
     // Drive INSIDE double exactly as stepping.test.ts does:
     //   next (entry line 8 → line 9), stepIn (line 9 → line 14 inside double).
@@ -269,13 +216,8 @@ describe('stepOut consistency — internal frame collapses back to the caller', 
 
 describe('NestedCalls — nested + sequential internal frames', () => {
   it('inside level2 shows a 3-frame stack [level2@23, level1@18, outer@11]', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(nestedInputs());
-    session.setBreakpoints({
-      source: {path: 'src/NestedCalls.sol'},
-      breakpoints: [{line: 23}], // `return z * 2;` inside level2 (deepest)
-    });
-    await session.continue();
+    // Breakpoint on line 23 (`return z * 2;` inside level2, the deepest).
+    const session = await breakAt(nestedSpec, 23);
 
     const {stackFrames} = session.stackTrace();
     expect(stackFrames).toHaveLength(3);
@@ -300,13 +242,8 @@ describe('NestedCalls — nested + sequential internal frames', () => {
   });
 
   it('inside leaf shows [leaf@27, outer@12] — level1/level2 popped (sequential)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch(nestedInputs());
-    session.setBreakpoints({
-      source: {path: 'src/NestedCalls.sol'},
-      breakpoints: [{line: 27}], // `return w + 100;` inside leaf
-    });
-    await session.continue();
+    // Breakpoint on line 27 (`return w + 100;` inside leaf).
+    const session = await breakAt(nestedSpec, 27);
 
     const {stackFrames} = session.stackTrace();
     // level1 + level2 have returned before leaf is called → NOT on the stack.

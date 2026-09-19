@@ -34,101 +34,57 @@
  * read by the statement), so the array is fully populated and its pointer is
  * resolvable — a robust, stable stopping point.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {type SolidityDebugSession} from '../src/index.js';
+import {
+  breakAt as breakAtSpec,
+  children as childrenOfRef,
+  launch,
+  locals as rowsLocals,
+  stateVars,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures + LaunchInputs (mirrors arrays.test.ts / variables.test.ts)
 // ---------------------------------------------------------------------------
 
-function solcFixture(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function dbgFixtureText(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-function contractAddress(): string {
-  const meta = JSON.parse(
-    dbgFixtureText('fixedarrays-fill-meta.json'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
+const spec: Spec = {
+  buildInfo: 'fixedarrays-build-info.json',
+  trace: 'fixedarrays-fill-trace.raw.json',
+  meta: 'fixedarrays-fill-meta.json',
+  sourcePath: 'src/FixedArrays.sol',
+  contractName: 'FixedArrays',
+  methodName: 'fill',
+  dialect: 'kontrol',
+};
 
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: solcFixture('fixedarrays-build-info.json'),
-    traceJson: dbgFixtureText('fixedarrays-fill-trace.raw.json'),
-    sourcePath: 'src/FixedArrays.sol',
-    contractName: 'FixedArrays',
-    methodName: 'fill',
-    codeAddress: contractAddress(),
-    dialect: 'kontrol',
-  };
-}
-
-/** A DAP variable as the session emits it. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number;
-}
-
-function scopeRef(session: SolidityDebugSession, name: string): number {
-  const frameId = session.stackTrace().stackFrames[0]!.id;
-  const {scopes} = session.scopes(frameId);
-  const scope = scopes.find((s) => s.name === name);
-  if (scope === undefined) {
-    throw new Error(
-      `no '${name}' scope; scopes were ${scopes.map((s) => s.name).join(', ')}`,
-    );
-  }
-  return scope.variablesReference;
-}
-
+/** The variables in a named scope (`State` or `Locals`) keyed by name. */
 async function rows(
   session: SolidityDebugSession,
   scopeName: string,
 ): Promise<Map<string, DapVariable>> {
-  const {variables} = await session.variables(scopeRef(session, scopeName));
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
+  return scopeName === 'State' ? stateVars(session) : rowsLocals(session);
 }
 
 async function children(
   session: SolidityDebugSession,
   parent: DapVariable,
 ): Promise<DapVariable[]> {
-  const {variables} = await session.variables(parent.variablesReference);
-  return variables as DapVariable[];
+  return childrenOfRef(session, parent.variablesReference);
 }
 
 /** Terminal step: all storage committed. */
 async function terminalSession(): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(inputs());
+  const session = await launch(spec);
   await session.continue(); // no breakpoints → run to terminal
   return session;
 }
 
 /** Break on `line` (source breakpoint) and continue to the first stop there. */
-async function breakAt(line: number): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(inputs());
-  session.setBreakpoints({
-    source: {path: 'src/FixedArrays.sol'},
-    breakpoints: [{line}],
-  });
-  session.continue();
-  return session;
-}
+const breakAt = (line: number) => breakAtSpec(spec, line);
 
 // ---------------------------------------------------------------------------
 // 1. STORAGE fixed array — `fixedArr` = [111, 222, 333] at slots 0/1/2

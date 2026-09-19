@@ -21,84 +21,33 @@
  * hash=0x1122, color=Blue, tail=18, loop sum 0→36 (steps 11,12,13),
  * inner=72 → sum=108, total=126.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {
+  breakAt as breakAtSpec,
+  locals as varsAt,
+  readDbgFixture,
+  type Spec,
+} from './support/harness.js';
 
-function readTrace(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
 /** The raw EVM stack length at a given trace step (top-of-stack last). */
 const RAW_STACK_LENGTHS: number[] = (
-  JSON.parse(readTrace('locals-compute-trace.raw.json')) as {
+  JSON.parse(readDbgFixture('locals-compute-trace.raw.json')) as {
     result: {structLogs: {stack: string[]}[]};
   }
 ).result.structLogs.map((l) => l.stack.length);
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
 
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-}
-
-function localsInputs(): LaunchInputs {
-  return {
-    buildInfoJson: readBuildInfo('locals-build-info.json'),
-    traceJson: readTrace('locals-compute-trace.raw.json'),
-    sourcePath: 'src/Locals.sol',
-    contractName: 'Locals',
-    methodName: 'compute',
-    codeAddress: readAddress('locals-compute-meta.json'),
-  };
-}
-
-/** Locate the current frame's variable scope (accepts `Parameters` or `Locals`). */
-function scopeRef(session: SolidityDebugSession): number {
-  const frameId = session.stackTrace().stackFrames[0]!.id;
-  const {scopes} = session.scopes(frameId);
-  const scope =
-    scopes.find((s) => s.name === 'Parameters') ??
-    scopes.find((s) => s.name === 'Locals');
-  if (scope === undefined) {
-    throw new Error('no parameter/locals scope');
-  }
-  return scope.variablesReference;
-}
-
-async function varsAt(
-  session: SolidityDebugSession,
-): Promise<Map<string, DapVariable>> {
-  const {variables} = await session.variables(scopeRef(session));
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
-}
+const spec: Spec = {
+  buildInfo: 'locals-build-info.json',
+  trace: 'locals-compute-trace.raw.json',
+  meta: 'locals-compute-meta.json',
+  sourcePath: 'src/Locals.sol',
+  contractName: 'Locals',
+  methodName: 'compute',
+};
 
 /** Launch and continue to the first stop on `line`. */
-async function breakAt(line: number): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(localsInputs());
-  session.setBreakpoints({
-    source: {path: 'src/Locals.sol'},
-    breakpoints: [{line}],
-  });
-  session.continue();
-  return session;
-}
+const breakAt = (line: number) => breakAtSpec(spec, line);
 
 // ---------------------------------------------------------------------------
 // 1. All value-type locals decode at the top-level function scope (line 37)

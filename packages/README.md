@@ -83,8 +83,15 @@ The `Counter.setNumber(42)`, `Stepper.run(10)`, `Vars.setAll(...)`, and `Caller.
 ## Test fixtures
 
 Real compiler/engine output, committed so the core suite needs no toolchain:
-- `test/fixtures/counter/` — a Foundry project (unoptimized Counter). `forge build` output is gitignored; the build-info + artifact are copied into `packages/solc/test/fixtures/`.
+- `test/fixtures/counter/` — a Foundry project. `forge build` output is gitignored; the build-info + artifact are copied into `packages/solc/test/fixtures/`. Contracts are compiled **legacy** (`forge build`) or **viaIR** (`forge build --via-ir`); the debugger must support both.
 - `packages/engine/test/fixtures/` — a recorded kontrol-node `debug_traceTransaction` (Counter deploy).
+
+The debugger suite shares one harness (`packages/debugger/test/support/harness.ts`;
+`launch`/`stepToLine`/`locals`/`children`, and `eachMode` for viaIR×legacy) and its
+**viaIR × legacy coverage matrix** is documented in
+[`packages/debugger/test/COVERAGE.md`](debugger/test/COVERAGE.md). New fixtures are
+recorded live on kontrol-node via `scratchpad/record-dualmode.mjs` (see the
+`kontrol-node-live` memory for the procedure).
 
 ## Development
 

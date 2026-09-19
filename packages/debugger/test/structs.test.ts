@@ -26,52 +26,28 @@
  *      + a `Point` summary, whose children are `x=11`, `y=7`.
  *   3. Regression: the value locals still decode and `nums`/`label` are surfaced.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
 import type {Pointer} from '@ethdebug/pointers';
 import {variablesAt, type ResolvedVariable} from '@simbolik/ethdebug-gen';
-import {parseJsonLossless} from '@simbolik/engine';
-import {normalizeKontrolTrace, StateCursor, type Step} from '@simbolik/lifting';
-import {loadBuildInfo, type CompilationUnit} from '@simbolik/solc';
 
-import {machineStateFor, readPointerValue} from '../src/machineState.js';
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {readPointerValue} from '../src/machineState.js';
+import {
+  breakAt as breakAtSpec,
+  children,
+  loadCu,
+  locals as localsMap,
+  machineStateAtPc,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function solcFixture(name: string): string {
-  return readFileSync(
-    new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-    'utf8',
-  );
-}
-function dbgFixture(name: string): string {
-  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-}
-
-function loadCu(): CompilationUnit {
-  return loadBuildInfo(JSON.parse(solcFixture('locals-build-info.json')));
-}
-function loadSteps(): Step[] {
-  const parsed = parseJsonLossless(
-    dbgFixture('locals-compute-trace.raw.json'),
-  ) as {result: unknown};
-  return normalizeKontrolTrace(parsed.result as never);
-}
-function contractAddress(): string {
-  const meta = JSON.parse(dbgFixture('locals-compute-meta.json')) as {
-    contractAddress: string;
-  };
-  return meta.contractAddress;
-}
-/** Lowercase, 20-byte zero-padded — matches how accounts are keyed in the trace. */
-function normAddr(a: string): string {
-  return '0x' + BigInt(a).toString(16).padStart(40, '0');
-}
+const CU = 'locals-build-info.json';
+const TRACE = 'locals-compute-trace.raw.json';
+const META = 'locals-compute-meta.json';
 
 /** The per-member descriptor under `ResolvedVariable.members`. */
 interface StructMemberShape {
@@ -86,13 +62,15 @@ function membersOf(v: ResolvedVariable): StructMemberShape[] | undefined {
   return (v as unknown as {members?: StructMemberShape[]}).members;
 }
 
-/** A DAP variable as the session emits it. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number;
-}
+const spec: Spec = {
+  buildInfo: CU,
+  trace: TRACE,
+  meta: META,
+  sourcePath: 'src/Locals.sol',
+  contractName: 'Locals',
+  methodName: 'compute',
+};
+const breakAt = (line: number) => breakAtSpec(spec, line);
 
 // ---------------------------------------------------------------------------
 // 1. Member pointers dereference to their recorded values (11, 7)
@@ -100,10 +78,7 @@ interface DapVariable {
 
 describe('struct member pointers dereference through @ethdebug/pointers', () => {
   it('pt.x reads 11 and pt.y reads 7 at pc 436 via machineStateFor + readPointerValue', async () => {
-    const cu = loadCu();
-    const steps = loadSteps();
-    const cursor = new StateCursor(steps);
-    const addr = normAddr(contractAddress());
+    const cu = loadCu(CU);
 
     const pt = variablesAt(cu, 'src/Locals.sol', 'Locals', 436).find(
       (v) => v.name === 'pt',
@@ -117,17 +92,7 @@ describe('struct member pointers dereference through @ethdebug/pointers', () => 
     expect(y!.pointer, 'member y needs a pointer').toBeDefined();
 
     // MachineState at the first own-contract step whose pc is 436.
-    let index = -1;
-    for (let i = 0; i < steps.length; i++) {
-      const s = steps[i]!;
-      if (s.isInitCode || s.codeAddress !== BigInt(addr)) continue;
-      if (s.pc === 436) {
-        index = i;
-        break;
-      }
-    }
-    expect(index, 'no own-contract step at pc 436').toBeGreaterThanOrEqual(0);
-    const ms = machineStateFor(cursor.at(index), addr);
+    const ms = machineStateAtPc(TRACE, META, 436);
 
     // The pointers resolve their memory offset from pt's stack slot at dereference.
     expect(await readPointerValue(x!.pointer as Pointer, ms)).toBe(11n);
@@ -138,48 +103,6 @@ describe('struct member pointers dereference through @ethdebug/pointers', () => 
 // ---------------------------------------------------------------------------
 // 2. The session renders pt as a nested variable
 // ---------------------------------------------------------------------------
-
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: JSON.parse(solcFixture('locals-build-info.json')),
-    traceJson: dbgFixture('locals-compute-trace.raw.json'),
-    sourcePath: 'src/Locals.sol',
-    contractName: 'Locals',
-    methodName: 'compute',
-    codeAddress: contractAddress(),
-    dialect: 'kontrol',
-  };
-}
-
-async function breakAt(line: number): Promise<SolidityDebugSession> {
-  const session = new SolidityDebugSession();
-  await session.launch(inputs());
-  session.setBreakpoints({
-    source: {path: 'src/Locals.sol'},
-    breakpoints: [{line}],
-  });
-  session.continue();
-  return session;
-}
-
-/** The current frame's `Locals` scope variablesReference. */
-function localsRef(session: SolidityDebugSession): number {
-  const frameId = session.stackTrace().stackFrames[0]!.id;
-  const scope = session
-    .scopes(frameId)
-    .scopes.find((s) => s.name === 'Locals');
-  if (scope === undefined) {
-    throw new Error('no Locals scope');
-  }
-  return scope.variablesReference;
-}
-
-async function localsMap(
-  session: SolidityDebugSession,
-): Promise<Map<string, DapVariable>> {
-  const {variables} = await session.variables(localsRef(session));
-  return new Map((variables as DapVariable[]).map((v) => [v.name, v]));
-}
 
 describe('session renders pt as a nested DAP variable', () => {
   it('pt has a non-zero variablesReference + a Point summary; children are x=11, y=7', async () => {
@@ -197,8 +120,8 @@ describe('session renders pt as a nested DAP variable', () => {
     ).toBe(true);
 
     // Expanding the handle yields the decoded members.
-    const {variables: children} = await session.variables(pt!.variablesReference);
-    const kids = (children as DapVariable[]).map((v) => ({
+    const childVars = await children(session, pt!.variablesReference);
+    const kids = childVars.map((v) => ({
       name: v.name,
       value: v.value,
     }));
@@ -207,7 +130,7 @@ describe('session renders pt as a nested DAP variable', () => {
       {name: 'y', value: '7'},
     ]);
     // Members carry their solc type for display.
-    const x = (children as DapVariable[]).find((v) => v.name === 'x');
+    const x = childVars.find((v) => v.name === 'x');
     expect(x!.type).toBe('uint256');
   });
 });

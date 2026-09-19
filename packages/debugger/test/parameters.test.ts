@@ -23,46 +23,47 @@
  * The internal `v = 11` case is the key check: the `double` frame's param scope
  * reads `v = 11` from the stack, not `v = 10` from `run`'s calldata.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import {type SolidityDebugSession} from '../src/index.js';
+import {
+  breakAt as breakAtSpec,
+  children,
+  launch,
+  type DapVariable,
+  type Spec,
+} from './support/harness.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function readTrace(name: string): string {
-  return readFileSync(
-    new URL(`./fixtures/${name}`, import.meta.url),
-    'utf8',
-  );
-}
+const stepperSpec: Spec = {
+  buildInfo: 'stepper-build-info.json',
+  trace: 'stepper-run-trace.raw.json',
+  meta: 'stepper-run-meta.json',
+  sourcePath: 'src/Stepper.sol',
+  contractName: 'Stepper',
+  methodName: 'run',
+};
 
-function readBuildInfo(name: string): unknown {
-  return JSON.parse(
-    readFileSync(
-      new URL(`../../solc/test/fixtures/${name}`, import.meta.url),
-      'utf8',
-    ),
-  );
-}
+const counterSpec: Spec = {
+  buildInfo: 'counter-build-info.json',
+  trace: 'counter-setNumber-trace.raw.json',
+  meta: 'counter-setNumber-meta.json',
+  sourcePath: 'src/Counter.sol',
+  contractName: 'Counter',
+  methodName: 'setNumber',
+};
 
-function readAddress(metaName: string): string {
-  const meta = JSON.parse(
-    readFileSync(new URL(`./fixtures/${metaName}`, import.meta.url), 'utf8'),
-  ) as {contractAddress: string};
-  return meta.contractAddress;
-}
-
-/** Minimal DAP Variable shape used by the assertions below. */
-interface DapVariable {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference?: number;
-}
+const varsSpec: Spec = {
+  buildInfo: 'vars-build-info.json',
+  trace: 'vars-setall-trace.raw.json',
+  meta: 'vars-setall-meta.json',
+  sourcePath: 'src/Vars.sol',
+  contractName: 'Vars',
+  methodName: 'setAll',
+};
 
 /**
  * The variablesReference of the CURRENT frame's parameter scope. Value-type
@@ -91,9 +92,7 @@ function paramsScopeRef(session: SolidityDebugSession): number {
 async function readParams(
   session: SolidityDebugSession,
 ): Promise<DapVariable[]> {
-  const ref = paramsScopeRef(session);
-  const {variables} = await session.variables(ref);
-  return variables as DapVariable[];
+  return children(session, paramsScopeRef(session));
 }
 
 // ---------------------------------------------------------------------------
@@ -101,27 +100,9 @@ async function readParams(
 // ---------------------------------------------------------------------------
 
 describe('Stepper internal frame — stack param v inside double', () => {
-  function stepperInputs(): LaunchInputs {
-    return {
-      buildInfoJson: readBuildInfo('stepper-build-info.json'),
-      traceJson: readTrace('stepper-run-trace.raw.json'),
-      sourcePath: 'src/Stepper.sol',
-      contractName: 'Stepper',
-      methodName: 'run',
-      codeAddress: readAddress('stepper-run-meta.json'),
-    };
-  }
-
   /** Launch, break on line 14 (inside double), continue → step 182. */
   async function insideDouble(): Promise<SolidityDebugSession> {
-    const session = new SolidityDebugSession();
-    await session.launch(stepperInputs());
-    session.setBreakpoints({
-      source: {path: 'src/Stepper.sol'},
-      breakpoints: [{line: 14}],
-    });
-    await session.continue();
-    return session;
+    return breakAtSpec(stepperSpec, 14);
   }
 
   it('reaches line 14 inside double (step 182)', async () => {
@@ -181,15 +162,7 @@ describe('Stepper internal frame — stack param v inside double', () => {
 
 describe('Stepper external frame — calldata param x at run entry', () => {
   it('parameter scope shows x = 10 (uint256)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch({
-      buildInfoJson: readBuildInfo('stepper-build-info.json'),
-      traceJson: readTrace('stepper-run-trace.raw.json'),
-      sourcePath: 'src/Stepper.sol',
-      contractName: 'Stepper',
-      methodName: 'run',
-      codeAddress: readAddress('stepper-run-meta.json'),
-    });
+    const session = await launch(stepperSpec);
     const params = await readParams(session);
     const x = params.find((p) => p.name === 'x');
     expect(x).toMatchObject({value: '10', type: 'uint256'});
@@ -202,15 +175,7 @@ describe('Stepper external frame — calldata param x at run entry', () => {
 
 describe('Counter external frame — calldata param newNumber', () => {
   it('parameter scope shows newNumber = 42 (uint256)', async () => {
-    const session = new SolidityDebugSession();
-    await session.launch({
-      buildInfoJson: readBuildInfo('counter-build-info.json'),
-      traceJson: readTrace('counter-setNumber-trace.raw.json'),
-      sourcePath: 'src/Counter.sol',
-      contractName: 'Counter',
-      methodName: 'setNumber',
-      codeAddress: readAddress('counter-setNumber-meta.json'),
-    });
+    const session = await launch(counterSpec);
     const params = await readParams(session);
     const newNumber = params.find((p) => p.name === 'newNumber');
     expect(newNumber).toMatchObject({value: '42', type: 'uint256'});
@@ -223,15 +188,7 @@ describe('Counter external frame — calldata param newNumber', () => {
 
 describe('Vars external frame — calldata params setAll (7 value types)', () => {
   async function setAllParams(): Promise<Map<string, DapVariable>> {
-    const session = new SolidityDebugSession();
-    await session.launch({
-      buildInfoJson: readBuildInfo('vars-build-info.json'),
-      traceJson: readTrace('vars-setall-trace.raw.json'),
-      sourcePath: 'src/Vars.sol',
-      contractName: 'Vars',
-      methodName: 'setAll',
-      codeAddress: readAddress('vars-setall-meta.json'),
-    });
+    const session = await launch(varsSpec);
     return new Map((await readParams(session)).map((p) => [p.name, p]));
   }
 

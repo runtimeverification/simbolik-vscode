@@ -19,51 +19,28 @@
  * (line 26) → 303 (line 27); terminal step = 312. Pre-fix, the second step-over
  * landed on 312 (line 24, the function's closing) instead of 303.
  */
-import {readFileSync} from 'node:fs';
-
 import {describe, expect, it} from 'vitest';
 
-import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+import type {SolidityDebugSession} from '../src/index.js';
+import {launch, line, metaOf, type Spec} from './support/harness.js';
 
-const BUILD_INFO_JSON: unknown = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../solc/test/fixtures/revertstep-build-info.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-);
-const TRACE_RAW = readFileSync(
-  new URL('./fixtures/revertstep-run-trace.raw.json', import.meta.url),
-  'utf8',
-);
-const META = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/revertstep-run-meta.json', import.meta.url),
-    'utf8',
-  ),
-) as {contractAddress: string; traceStepCount: number};
+const spec: Spec = {
+  buildInfo: 'revertstep-build-info.json',
+  trace: 'revertstep-run-trace.raw.json',
+  meta: 'revertstep-run-meta.json',
+  sourcePath: 'src/RevertStep.sol',
+  contractName: 'RevertStep',
+  methodName: 'run',
+};
 
-function inputs(): LaunchInputs {
-  return {
-    buildInfoJson: BUILD_INFO_JSON,
-    traceJson: TRACE_RAW,
-    sourcePath: 'src/RevertStep.sol',
-    contractName: 'RevertStep',
-    methodName: 'run',
-    codeAddress: META.contractAddress,
-  };
-}
+const META = metaOf('revertstep-run-meta.json') as {
+  contractAddress: string;
+  traceStepCount: number;
+};
 
 async function launched(): Promise<SolidityDebugSession> {
-  const s = new SolidityDebugSession();
-  await s.launch(inputs());
-  return s;
+  return launch(spec);
 }
-
-const line = (s: SolidityDebugSession): number | undefined =>
-  s.stackTrace().stackFrames[0]?.line;
 
 describe('step-over across a reverting external call (combinedDepth drift)', () => {
   it('enters at statement 1 (line 25, a = 1)', async () => {
