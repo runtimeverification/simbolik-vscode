@@ -83,7 +83,12 @@ interface RawContract {
   };
   evm?: {
     bytecode?: {object?: string; sourceMap?: string};
-    deployedBytecode?: {object?: string; sourceMap?: string};
+    deployedBytecode?: {
+      object?: string;
+      sourceMap?: string;
+      /** AST-id → byte ranges patched at deploy time (immutable values). */
+      immutableReferences?: Record<string, {start: number; length: number}[]>;
+    };
   };
 }
 
@@ -200,6 +205,18 @@ export class Contract {
 
   runtimeBytecode(): Hex {
     return ensureHexPrefix(this.#raw.evm?.deployedBytecode?.object ?? '');
+  }
+
+  /**
+   * Byte ranges in the RUNTIME bytecode that hold immutable values (patched at
+   * deploy time). The deployed code differs from {@link runtimeBytecode} only in
+   * these ranges, so masking them lets identification match a deployed contract
+   * to its build-info even when immutables (and library addresses) are filled in.
+   * Flattened across all AST ids; offsets/lengths are in bytes.
+   */
+  immutableRanges(): {start: number; length: number}[] {
+    const refs = this.#raw.evm?.deployedBytecode?.immutableReferences ?? {};
+    return Object.values(refs).flat();
   }
 
   initSourceMap(): SourceMapEntry[] {
