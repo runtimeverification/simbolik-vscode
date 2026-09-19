@@ -24,6 +24,7 @@ export {functionLocals, type LocalDescriptor} from './functionLocals.js';
 export {stackHeights, type StackHeights} from './stackHeights.js';
 export {
   variablesAt,
+  bytesLayoutAtMemoryOffset,
   type ResolvedVariable,
   type StructMember,
   type ArrayLayout,

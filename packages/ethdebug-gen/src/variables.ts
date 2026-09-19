@@ -97,6 +97,14 @@ export interface ArrayLayout {
   elementTypeLabel: string;
   /** Element size in bytes (1..32). */
   elementNumberOfBytes: number;
+  /**
+   * For an array of DYNAMIC-BYTES elements (`bytes[]` / `string[]`), each
+   * `'element'` region is NOT a value word but the element's MEMORY OFFSET; the
+   * consumer dereferences it as a raw byte string via
+   * {@link bytesLayoutAtMemoryOffset} (`isString` selects UTF-8 vs `0x…`).
+   * Absent for value-type element arrays (the `'element'` word IS the value).
+   */
+  elementBytes?: {isString: boolean};
 }
 
 /**
@@ -449,6 +457,17 @@ function stackVariables(
     // exactly as for value types — and fall back to the legacy frame-relative slot
     // only where provenance has no evidence (classic codegen).
     let depth = provenance.variableDepthAt(pc, v.declId);
+    // FALLBACK (both pipelines, INTENTIONALLY ungated — unlike the value-type
+    // gate above): for a reference type the stack slot holds a MEMORY OFFSET, and
+    // provenance is deliberately incomplete for it — a memory struct/array is
+    // often materialised only near its use, and a fixed-size memory array has no
+    // DUP/SWAP-anchored read to value-number. So under viaIR the frame-relative
+    // slot is the only way to locate these (verified load-bearing by the
+    // memstruct/memrefs viaIR fixtures: fixed3 and the late-materialised struct
+    // resolve ONLY through it). It is a best-effort completion: the theoretical
+    // unsoundness under viaIR (a reused slot could hold an unrelated word, yielding
+    // a garbage memory offset) is a known limitation whose sound fix is extending
+    // stack-provenance to reference handles — NOT disabling the fallback.
     if (depth === undefined) depth = frameDepth;
     if (depth === undefined) {
       return result; // unresolved → list reference var without a layout.
@@ -484,6 +503,15 @@ function stackVariables(
         result.bytes = bytesLayout(v.solcType.startsWith('t_string'), depth);
       }
     }
+    // KNOWN GAP: a CALLDATA dynamic bytes/string (`bytes calldata` / `string
+    // calldata` param) is listed but NOT given a layout. Under viaIR it is a
+    // 2-slot value (calldata offset + byte length), and — verified across Uniswap
+    // frames — the offset can sit ABOVE or BELOW the length on the stack (e.g.
+    // off@slot2/len@slot1 in `PoolManager.unlock` but off@slot0/len@slot1 in
+    // `ActionsRouter`-style callees), so a single provenance-anchored slot plus a
+    // fixed direction picks the wrong slot and decodes GARBAGE. Fail-safe: show
+    // nothing (rather than a wrong value) until stackProvenance identifies BOTH
+    // slots of a calldata slice. See the calldatafwd fixture.
     return result;
   });
 }
@@ -567,14 +595,23 @@ function arrayLayout(
   const m = /^t_array\$_(.+)_\$(dyn|\d+)_memory_ptr$/.exec(arraySolcType);
   if (m === null) return undefined;
   const sizeToken = m[2]!;
+  const elementId = m[1]!;
   const isDynamic = sizeToken === 'dyn';
   // Element type/size from the array's display label (`uint256[]` → `uint256`),
   // reusing the value-type describer. `elementSolcType` comes from the same
   // describer so it matches the value-decode path.
   const elementTypeLabel = arrayTypeLabel.replace(/\[\d*\]\s*(memory|calldata|storage)?\s*$/, '').trim();
   const desc = describeValueTypeString(elementTypeLabel);
-  if (desc === undefined) return undefined; // reference-type elements: out of scope.
+  // A DYNAMIC-BYTES element (`bytes[]` / `string[]`): each element slot holds a
+  // memory OFFSET to the element's bytes, so the value describer returns nothing.
+  // Other reference-type elements (nested structs/arrays) stay out of scope.
+  const bytesElement = /^t_(bytes|string)_memory_ptr$/.exec(elementId);
+  if (desc === undefined && bytesElement === null) return undefined;
 
+  // The element `List` reads each element's 32-byte word (element `i` at
+  // `base + 32 + i*32` for dynamic, `base + i*32` for fixed). For value-type
+  // elements that word IS the value; for bytes/string elements it is the memory
+  // offset the consumer dereferences.
   const pointer: Pointer = isDynamic
     ? {
         group: [
@@ -612,6 +649,16 @@ function arrayLayout(
           },
         ],
       };
+  if (desc === undefined) {
+    // bytes/string element array: element regions are memory offsets.
+    return {
+      pointer,
+      elementSolcType: elementId,
+      elementTypeLabel,
+      elementNumberOfBytes: 32,
+      elementBytes: {isString: bytesElement![1] === 'string'},
+    };
+  }
   return {
     pointer,
     elementSolcType: desc.typeId,
@@ -638,6 +685,31 @@ function bytesLayout(isString: boolean, depth: number): BytesLayout {
       {
         location: 'memory',
         offset: {$sum: [{$read: 'base'}, 32]},
+        length: {$read: 'len'},
+      },
+    ],
+  };
+  return {pointer, isString};
+}
+
+/**
+ * The raw-byte layout of a memory string/bytes whose data lives at a KNOWN
+ * absolute memory offset (rather than behind a stack slot). Used for each element
+ * of a `bytes[]`/`string[]`: the array's element word IS the element's memory
+ * offset, resolved at render time, so this takes the concrete offset directly.
+ * The byte length is the memory word at `memOffset`; the raw bytes follow at
+ * `memOffset + 32` (the FINAL region, read as bytes by the consumer).
+ */
+export function bytesLayoutAtMemoryOffset(
+  memOffset: number,
+  isString: boolean,
+): BytesLayout {
+  const pointer: Pointer = {
+    group: [
+      {name: 'len', location: 'memory', offset: memOffset, length: 32},
+      {
+        location: 'memory',
+        offset: memOffset + 32,
         length: {$read: 'len'},
       },
     ],
