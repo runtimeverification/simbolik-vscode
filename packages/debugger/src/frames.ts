@@ -209,6 +209,46 @@ export function reconstructFrames(trace: Trace, stop: Stop): FrameInfo[] {
   return frames;
 }
 
+/** A frame's identity for stack comparison: which call it is, not where it is. */
+function frameKey(f: FrameInfo): string {
+  return `${f.depth}:${f.address}:${f.kind}:${f.fnNode?.id ?? f.name}`;
+}
+
+/** How many leading frames `from` and `to` share. */
+function commonFrames(from: FrameInfo[], to: FrameInfo[]): number {
+  let common = 0;
+  while (
+    common < from.length &&
+    common < to.length &&
+    frameKey(from[common]!) === frameKey(to[common]!)
+  ) {
+    common++;
+  }
+  return common;
+}
+
+/**
+ * Step-into's target, limited to entering ONE frame. When `target` would push
+ * several frames at once — the first statement of a call lies in a further
+ * nested call (a constructor whose body is its base-constructor invocation,
+ * `new X()` whose first code is inherited, …) — stop instead where the first
+ * new frame makes that nested call: there the stack holds exactly that one new
+ * frame, positioned on the call it is about to make.
+ */
+export function oneFrameDeeper(trace: Trace, origin: Stop, target: Stop): Stop {
+  const from = reconstructFrames(trace, origin);
+  let stop = target;
+  for (let guard = 0; guard < 8; guard++) {
+    const to = reconstructFrames(trace, stop);
+    const common = commonFrames(from, to);
+    if (to.length - common <= 1) return stop;
+    const callSite = to[common]!.stepIndex;
+    if (callSite <= origin.step || callSite >= stop.step) return stop;
+    stop = {step: callSite, beforeModifier: false};
+  }
+  return stop;
+}
+
 /** `frame` repositioned to a 0-based-column source position. */
 function atPosition(
   frame: FrameInfo,
@@ -436,11 +476,15 @@ function buildFrame(
   // function-only `fnNode` is undefined inside a modifier body); else the
   // function's own name, falling back to the contract name.
   const fnName = kind === 'modifier' ? pos?.defNode?.name : pos?.fnNode?.name;
-  const name = trace.steps[stepIndex]!.isInitCode
-    ? `${contract.name}.constructor`
-    : fnName !== undefined && fnName !== ''
+  // In init code a nameless function is a constructor — possibly a BASE
+  // contract's, so it is named after the contract that declares it.
+  const ctorOf = pos?.fnNode?.parent();
+  const name =
+    fnName !== undefined && fnName !== ''
       ? fnName
-      : contract.name;
+      : trace.steps[stepIndex]!.isInitCode
+        ? `${ctorOf?.nodeType === 'ContractDefinition' && ctorOf.name ? ctorOf.name : contract.name}.constructor`
+        : contract.name;
 
   return {
     id,

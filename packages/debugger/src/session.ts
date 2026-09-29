@@ -32,7 +32,7 @@ import {
   evmVariables,
   memoryVariables,
 } from './evmScope.js';
-import {reconstructFrames, type FrameInfo} from './frames.js';
+import {oneFrameDeeper, reconstructFrames, type FrameInfo} from './frames.js';
 import {globalGroupVariables, globalsVariables} from './globalsScope.js';
 import {HandleTable, type Handle} from './handles.js';
 import type {LaunchInputs} from './launchInputs.js';
@@ -212,11 +212,12 @@ export class SolidityDebugSession {
 
   /** Step into. At `instruction` granularity, a single EVM opcode forward. */
   stepIn(args?: StepArgs): Record<string, never> {
-    const {model} = this.#require().trace;
+    const {trace} = this.#require();
+    const {model} = trace;
     return this.#forward(
       args,
       step => Math.min(step + 1, model.last),
-      stop => model.stepInStop(stop)
+      stop => oneFrameDeeper(trace, stop, model.stepInStop(stop))
     );
   }
 
