@@ -144,7 +144,15 @@ export class SolidityVariables {
       const label = contract.storageType(sv.solcType)?.label;
       if (isArrayOrStruct(sv) || sv.mapping !== undefined) {
         variables.push(
-          await this.#complex(frame, cu, sv.name, sv.solcType, sv, ms, 'state')
+          await this.#complex(
+            frame,
+            cu,
+            sv.name,
+            label ?? sv.solcType,
+            sv,
+            ms,
+            'state'
+          )
         );
       } else if (sv.bytesStorage !== undefined) {
         const value = await this.#storageBytes(sv.bytesStorage, ms);

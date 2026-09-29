@@ -234,6 +234,9 @@ describe('session renders pt as a nested storage DAP variable', () => {
     const pt = (await stateMap(session)).get('pt');
     expect(pt, 'pt should be surfaced as a State variable').toBeDefined();
     expect(pt!.variablesReference).not.toBe(0);
+    // Summarized by its source-level name, not the storage type id
+    // (`t_struct(Point)…_storage`).
+    expect(pt!.value).toBe('Point {…}');
 
     const childVars = await children(session, pt!.variablesReference);
     const kids = childVars.map((v) => ({
