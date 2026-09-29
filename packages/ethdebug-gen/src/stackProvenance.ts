@@ -162,8 +162,10 @@ function mergeStack(a: Stack, b: Stack, pc: number): Stack {
 // Value-number ranges, pairwise disjoint:
 //   freshOrigin       ≥ 0
 //   below-entry       (−2^32, 0)   (see baseStack; for any real contract size)
+//   inlinedArgOrigin  (−2^40, −2^36]
 //   phiOrigin         (−2^44, −2^40]
 //   callReturnOrigin  ≤ −2^44
+const INLINED_ARG_BASE = -(2 ** 36);
 const PHI_BASE = -(2 ** 40);
 const CALL_RETURN_BASE = -(2 ** 44);
 
@@ -187,13 +189,24 @@ function callReturnOrigin(returnPc: number, k: number): number {
   return CALL_RETURN_BASE - (returnPc * 4096 + k);
 }
 
-/** The pc at which a value number was created (fresh, φ or call-return), if any. */
+/**
+ * The value number of the argument slot at `depth` on arrival at an INLINED
+ * function's entry `pc` (see {@link Analyzer.inlinedEntryParams}).
+ */
+function inlinedArgOrigin(pc: number, depth: number): number {
+  return INLINED_ARG_BASE - (pc * 64 + depth);
+}
+
+/** The pc at which a value number was created (fresh, φ, call-return or inlined arg), if any. */
 function originBirthPc(origin: number): number | undefined {
   if (origin >= 0) return Math.floor(origin / 8);
   if (origin <= CALL_RETURN_BASE) {
     return Math.floor((CALL_RETURN_BASE - origin) / 4096);
   }
   if (origin <= PHI_BASE) return Math.floor((PHI_BASE - origin) / 1024);
+  if (origin <= INLINED_ARG_BASE) {
+    return Math.floor((INLINED_ARG_BASE - origin) / 64);
+  }
   return undefined; // below-entry (caller) slot
 }
 
@@ -350,6 +363,20 @@ class Analyzer {
     {declId: number; depth: number}[]
   >();
   /**
+   * Entry pc of each INLINED function (a base constructor legacy codegen inlines
+   * into the derived constructor — see `Program.frameEntries`) → its parameters'
+   * depths and total slot count. The derived code pushes the arguments in order
+   * and falls through, so on arrival param i sits at depth Σ(slots of params
+   * after i). An argument is typically a DUP copy of a derived-constructor
+   * variable — the SAME value number, which a read of both variables would mark
+   * ambiguous — so the argument slots are given value numbers of their own on
+   * arrival ({@link inlinedArgOrigin}) and claimed by the calling convention.
+   */
+  private readonly inlinedEntryParams = new Map<
+    number,
+    {claims: {declId: number; depth: number}[]; slots: number}
+  >();
+  /**
    * pc → local declared by the single-variable `VariableDeclarationStatement`
    * (with an initializer) whose code falls through to that pc. On arrival the
    * initializer's value — the new local — is on top of the stack. The only anchor
@@ -380,13 +407,14 @@ class Analyzer {
     this.program = new Program(cu, contract, stackDelta, kind);
     this.flow = new StackFlow(this.program, provenanceDomain);
     this.collectAnchors();
+    this.collectInlinedEntryParams();
     this.dropShuffleSwaps();
     if (cu.viaIR()) {
       this.collectParamEntryClaims();
       this.collectDeclEndClaims();
       this.collectInitCallDecls();
     }
-    for (const entryPc of this.program.entryByFn.values()) {
+    for (const entryPc of this.program.frameEntries) {
       this.propagateFunction(entryPc);
     }
   }
@@ -591,6 +619,25 @@ class Analyzer {
     }
   }
 
+  /** See {@link inlinedEntryParams}. */
+  private collectInlinedEntryParams(): void {
+    for (const [fnId, entryPc] of this.program.entryByFn) {
+      if (this.program.insns.get(entryPc)?.frameFnId === fnId) continue;
+      const params = this.cu.nodeById(fnId)?.parameters() ?? [];
+      const slotsOf = params.map(p => stackSlotsOf(p.typeIdentifier));
+      let depth = slotsOf.reduce((a, b) => a + b, 0);
+      const slots = depth;
+      const claims: {declId: number; depth: number}[] = [];
+      params.forEach((p, i) => {
+        depth -= slotsOf[i]!;
+        if (slotsOf[i] === 1 && this.varDeclIds.has(p.id)) {
+          claims.push({declId: p.id, depth});
+        }
+      });
+      if (slots > 0) this.inlinedEntryParams.set(entryPc, {claims, slots});
+    }
+  }
+
   /** Entry depth of each single-slot parameter of function `fnId` (viaIR layout). */
   private entryDepths(
     fnId: number
@@ -722,7 +769,7 @@ class Analyzer {
   // -------------------------------------------------------------------------
 
   private propagateFunction(entryPc: number): void {
-    const fnId = this.program.insns.get(entryPc)?.fnId;
+    const fnId = this.program.insns.get(entryPc)?.frameFnId;
     /** `from`: the predecessor pc this state flows from (−1 for the entry). */
     const work: {pc: number; stack: Stack; from: number}[] = [
       {pc: entryPc, stack: baseStack(entryPc), from: -1},
@@ -736,6 +783,18 @@ class Analyzer {
       const insn = this.program.insns.get(pc);
       if (insn === undefined) continue; // into push data / past end.
       if (this.conflicted.has(pc)) continue;
+      const inlined = this.inlinedEntryParams.get(pc);
+      if (inlined !== undefined) {
+        for (let depth = 0; depth < inlined.slots; depth++) {
+          const k = incoming.length - 1 - depth;
+          if (k >= 0) {
+            incoming[k] = {
+              ...incoming[k]!,
+              origin: inlinedArgOrigin(pc, depth),
+            };
+          }
+        }
+      }
       const cur = this.arrive(pc, incoming, from);
       if (cur === undefined) continue; // conflicted, or no new information.
 
@@ -798,7 +857,10 @@ class Analyzer {
 
     // viaIR function entry: the parameter slots are proved by the calling
     // convention — authoritative, like a DUP read.
-    for (const {declId, depth} of this.paramEntryClaims.get(insn.pc) ?? []) {
+    for (const {declId, depth} of [
+      ...(this.paramEntryClaims.get(insn.pc) ?? []),
+      ...(this.inlinedEntryParams.get(insn.pc)?.claims ?? []),
+    ]) {
       const origin = originAt(depth);
       if (origin !== undefined) this.recordRead(origin, declId, 'dup');
     }

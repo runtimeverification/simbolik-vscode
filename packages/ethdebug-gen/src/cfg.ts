@@ -34,6 +34,7 @@ import {
   JUMPDEST,
   JUMPI,
   hexToBytes,
+  endsBlock,
   isBlockTerminator,
   isPushN,
 } from './opcodes.js';
@@ -53,6 +54,12 @@ export interface Insn {
   node: AstNode | undefined;
   /** Enclosing `FunctionDefinition` AST id, or `undefined` (helper/dispatcher). */
   fnId: number | undefined;
+  /**
+   * The function whose stack FRAME the instruction executes in: `fnId`, except
+   * in a base-constructor body that legacy codegen INLINED into the derived
+   * constructor's init code (see {@link Program.frameEntries}).
+   */
+  frameFnId: number | undefined;
   /**
    * For a `JUMP [in]`: how many values the call returns (from the call's AST
    * type) — used when the target is DYNAMIC (a call through a function pointer).
@@ -87,6 +94,16 @@ export class Program {
   readonly jumpdests = new Set<number>();
   /** Function id → its body-entry pc (lowest attributed pc). */
   readonly entryByFn = new Map<number, number>();
+  /**
+   * The body-entry pc of each function that owns its own stack frame — every
+   * function but an INLINED one. Legacy codegen inlines a base constructor into
+   * the derived constructor's init code: its body is entered by FALLING THROUGH
+   * from the derived prologue (viaIR calls it by JUMP instead), so it shares the
+   * derived frame and heights continue across it. Analyzing it as a separate
+   * frame from height 0 would conflict with the fall-through flow at every pc
+   * both reach.
+   */
+  readonly frameEntries: readonly number[];
 
   constructor(
     cu: CompilationUnit,
@@ -126,6 +143,7 @@ export class Program {
         jump: entry?.jump ?? '-',
         node,
         fnId,
+        frameFnId: fnId,
         ...(callRets !== undefined ? {callRets} : {}),
       });
       if (fnId !== undefined) {
@@ -133,18 +151,55 @@ export class Program {
         if (prev === undefined || pc < prev) this.entryByFn.set(fnId, pc);
       }
     }
+    this.frameEntries =
+      kind === 'init'
+        ? this.attributeInlinedFrames()
+        : [...this.entryByFn.values()];
+  }
+
+  /**
+   * Attribute each inlined function's instructions to the frame it falls
+   * through from ({@link frameEntries}), returning the frame-owning entries. A
+   * function is inlined when the instruction just before its entry belongs to
+   * another function and falls through into it (no jump, no terminator).
+   * Entries are visited in pc order, so a chain of inlined bases (A's body
+   * falling through into B's) resolves to the first frame.
+   */
+  private attributeInlinedFrames(): number[] {
+    const frameOf = new Map<number, number>();
+    const roots: number[] = [];
+    const entries = [...this.entryByFn].sort((x, y) => x[1] - y[1]);
+    for (const [fnId, entryPc] of entries) {
+      const i = this.pcs.indexOf(entryPc);
+      const prev = i > 0 ? this.insns.get(this.pcs[i - 1]!) : undefined;
+      if (
+        prev?.fnId !== undefined &&
+        prev.fnId !== fnId &&
+        !endsBlock(prev.op)
+      ) {
+        frameOf.set(fnId, frameOf.get(prev.fnId) ?? prev.fnId);
+      } else {
+        roots.push(entryPc);
+      }
+    }
+    for (const insn of this.insns.values()) {
+      if (insn.fnId !== undefined && frameOf.has(insn.fnId)) {
+        insn.frameFnId = frameOf.get(insn.fnId);
+      }
+    }
+    return roots;
   }
 
   /**
    * Is this JUMP a call into another subroutine (vs an intra-function jump)?
    * A call is a solc `PUSH <returnTag> … PUSH <funcTag> JUMP` marked `jump: 'i'`
-   * whose target is NOT the current function. The extra function-id guard is
+   * whose target is NOT the current function's frame. The extra frame guard is
    * needed because an external function's ABI wrapper enters its OWN body via a
    * `jump: 'i'` (same function id) — that must stay an internal jump.
    */
   isCall(insn: Insn, fnId: number | undefined, target: number): boolean {
     if (insn.jump !== 'i') return false;
-    const targetFn = this.insns.get(target)?.fnId;
+    const targetFn = this.insns.get(target)?.frameFnId;
     const sameFunction =
       fnId !== undefined && targetFn !== undefined && fnId === targetFn;
     return !sameFunction;
@@ -157,25 +212,38 @@ export class Program {
    * args, so it sits just below `argSlots` argument slots; scanning down from the
    * top finds it.
    *
-   * When the call site is inside a `FunctionDefinition` (`ownerFnId` defined),
-   * the return tag MUST be a JUMPDEST of that same function — the point control
+   * When the call site is inside a `FunctionDefinition` (`ownerFnId` defined:
+   * its frame's function id), the return tag MUST be a JUMPDEST of that same
+   * frame (including a base constructor inlined into it) — the point control
    * resumes at is, by construction, the caller's own code. This guard is
    * essential: an argument value can coincide with an unrelated JUMPDEST pc
    * (e.g. `0x40`), and only the same-function filter distinguishes it from the
    * genuine return tag. For helper subroutines (`ownerFnId` undefined, no AST
    * function) we fall back to the topmost JUMPDEST-valued constant.
+   *
+   * The filter alone is not enough once a frame spans several functions (an
+   * inlined base constructor): a data constant can then equal a JUMPDEST of
+   * the same frame and sit ABOVE the real tag. solc places the return tag right
+   * after the call, so a candidate equal to the call's fall-through pc
+   * (`fallthroughPc`) wins over the topmost one.
    */
   returnTagDepth(
     length: number,
     constAt: (depth: number) => number | undefined,
-    ownerFnId: number | undefined
+    ownerFnId: number | undefined,
+    fallthroughPc?: number
   ): number | undefined {
+    if (fallthroughPc !== undefined && this.jumpdests.has(fallthroughPc)) {
+      for (let depth = 1; depth < length; depth++) {
+        if (constAt(depth) === fallthroughPc) return depth;
+      }
+    }
     for (let depth = 1; depth < length; depth++) {
       const value = constAt(depth);
       if (value === undefined || !this.jumpdests.has(value)) continue;
       if (
         ownerFnId !== undefined &&
-        this.insns.get(value)?.fnId !== ownerFnId
+        this.insns.get(value)?.frameFnId !== ownerFnId
       ) {
         continue;
       }
@@ -289,7 +357,7 @@ export class StackFlow<S> {
         // return tag; never propagate into the callee's body.
         const net = this.netEffect(target);
         if (net === undefined) return []; // callee never returns ⇒ dead resume.
-        const call = this.returnSite(stack, fnId);
+        const call = this.returnSite(stack, insn, fnId);
         if (call === undefined) return [];
         // The call consumes funcTag + args + returnTag (depth + 1 top slots) and
         // leaves the callee's return values; net = returnSlots − argSlots − 2, so
@@ -337,7 +405,7 @@ export class StackFlow<S> {
     fnId: number | undefined
   ): Successor<S> | undefined {
     if (insn.jump !== 'i' || insn.callRets === undefined) return undefined;
-    const call = this.returnSite(stack, fnId);
+    const call = this.returnSite(stack, insn, fnId);
     if (call === undefined) return undefined;
     const resumed = this.domain.clone(stack);
     this.domain.pop(resumed, call.depth + 1);
@@ -349,16 +417,18 @@ export class StackFlow<S> {
     };
   }
 
-  /** The return tag of a call on `stack`: its depth and the pc it resumes at. */
+  /** The return tag of the call `insn` on `stack`: its depth and the pc it resumes at. */
   private returnSite(
     stack: S,
+    insn: Insn,
     fnId: number | undefined
   ): {depth: number; returnPc: number} | undefined {
     const d = this.domain;
     const depth = this.program.returnTagDepth(
       d.length(stack),
       k => d.constAt(stack, k),
-      fnId
+      fnId,
+      insn.pc + insn.size
     );
     if (depth === undefined) return undefined;
     const returnPc = d.constAt(stack, depth);
@@ -409,7 +479,7 @@ export class StackFlow<S> {
         else hret ??= height;
         continue;
       }
-      for (const next of this.successors(insn, stack, insn.fnId)) {
+      for (const next of this.successors(insn, stack, insn.frameFnId)) {
         work.push({
           pc: next.pc,
           height: height + next.delta,

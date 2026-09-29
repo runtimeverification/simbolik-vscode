@@ -17,6 +17,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   buildInfoOf,
+  eachMode,
   launch,
   locals,
   metaOf,
@@ -79,28 +80,13 @@ async function walk(s: Session): Promise<void> {
   }
 }
 
+// Legacy INLINES the base constructor into the derived one (no call): its body
+// shares the derived frame, and its param is a DUP copy of the derived `b` —
+// the two must still be told apart. viaIR calls it as a separate function.
 describe('constructor locals — CtorFactory.run', () => {
-  describe('viair', () => {
+  eachMode({viair: spec('viair'), legacy: spec('legacy')}, (_mode, sp) => {
     it('shows constructor params and locals', async () => {
-      await walk(await launch(spec('viair')));
-    });
-  });
-
-  describe('legacy', () => {
-    // KNOWN GAP: legacy codegen INLINES the base constructor into the derived
-    // one (no call boundary), so the height analyzer's separate propagation from
-    // CtorBase's entry conflicts with Ctor's fall-through flow and every pc
-    // reachable from both loses its height ⇒ no constructor-body locals. Flip to
-    // `it` once the analyzer treats inlined base-constructor bodies as part of
-    // the enclosing frame.
-    it.fails('shows constructor params and locals', async () => {
-      await walk(await launch(spec('legacy')));
-    });
-
-    it('shows the init-code copy of an internal function', async () => {
-      const s = await launch(spec('legacy'));
-      stepInTo(s, '_scale:39');
-      expect(await values(s)).toMatchObject({x: '12', k: '3'});
+      await walk(await launch(sp));
     });
   });
 });

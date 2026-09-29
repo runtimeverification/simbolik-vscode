@@ -129,7 +129,7 @@ class Analyzer {
   constructor(cu: CompilationUnit, contract: Contract, kind: CodeKind) {
     this.program = new Program(cu, contract, heightDelta, kind);
     this.flow = new StackFlow(this.program, constantsDomain);
-    for (const entryPc of this.program.entryByFn.values()) {
+    for (const entryPc of this.program.frameEntries) {
       this.propagateFunction(entryPc);
     }
   }
@@ -147,7 +147,7 @@ class Analyzer {
    * recorded in {@link conflicted} rather than crashing the analysis.
    */
   private propagateFunction(entryPc: number): void {
-    const fnId = this.program.insns.get(entryPc)?.fnId;
+    const fnId = this.program.insns.get(entryPc)?.frameFnId;
     const work = [
       {pc: entryPc, height: 0, stack: constantsDomain.base(entryPc)},
     ];

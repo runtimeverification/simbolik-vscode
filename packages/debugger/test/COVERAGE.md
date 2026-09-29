@@ -39,7 +39,7 @@ And two scenarios are pipeline-*specific* by nature:
 
 ## Matrix
 
-Legend: ✅ covered · ➖ intentionally not covered (reason in the notes above) · ❌ known gap.
+Legend: ✅ covered · ➖ intentionally not covered (reason in the notes above).
 
 ### Variable location / rendering
 
@@ -54,7 +54,7 @@ Legend: ✅ covered · ➖ intentionally not covered (reason in the notes above)
 | `bytes[]` / `string[]` memory | ✅ | ✅ | `bytesarray` / `bytesarray` |
 | inherited-function locals | ✅ | ✅ | `inheritedudvt` / `inheritedudvt` |
 | user-defined value type (UDVT) | ✅ | ✅ | `inheritedudvt` / `inheritedudvt` |
-| constructor (init-code) params/locals | ✅ | ❌² | `ctor` / `ctor` |
+| constructor (init-code) params/locals | ✅ | ✅ | `ctor`, `factory` / `ctor`, `factory` |
 | last-known value (freed but in scope) | ✅ | ➖ | `inheritedudvt` / — |
 | storage dyn array / struct / string / bytes | ➖ | ✅ | — / `storagerefs` |
 | mappings | ➖ | ✅ | — / `storagerefs` |
@@ -72,10 +72,6 @@ Legend: ✅ covered · ➖ intentionally not covered (reason in the notes above)
 | cheatcode frames (detect / etch / prank) | ➖ | ✅ | — / `etch`, `etchraw`, `prank` |
 | events (LOG decoding) | ➖ | ✅ | — / `storagerefs` |
 | multi-frame geth / mixed-optimization | ➖ | ✅ | — / `caller`+`callee` |
-
-² Known gap, not by design: legacy inlines the base constructor into the derived
-one, which the stack-height analyzer can't model yet. `ctor.test.ts` keeps an
-`it.fails` tripwire (init-code copies of internal functions do resolve on legacy).
 
 ¹ The artifact is viaIR-only; `stepstress-local.test.ts` (legacy) asserts the
 suppression heuristic does not fire on classic codegen (`stepstress` fixture).
