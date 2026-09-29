@@ -26,8 +26,10 @@
 import type {StateCursor} from '@simbolik/lifting';
 import {
   buildInstructionIndex,
+  closestFunctionOrModifier,
   closestStatement,
   findInnermostNode,
+  type AstNode,
   type CompilationUnit,
   type Contract,
   type Jump,
@@ -79,6 +81,43 @@ export interface StepMeta {
   viaIR: boolean;
   /** Whether this step's opcode is a control-transfer (`JUMP`/`JUMPI`). */
   isJump: boolean;
+  /** Whether this step's opcode is a `JUMPDEST`. */
+  isJumpdest: boolean;
+  /** Whether this step's opcode is a `PUSHn`. */
+  isPush: boolean;
+  /**
+   * `[start, end)` source range + path of this step's statement (for source-order
+   * and containment tests), or undefined.
+   */
+  stmtRange: {path: string; start: number; end: number} | undefined;
+  /** The statement's AST node type (e.g. `IfStatement`), or undefined. */
+  stmtType: string | undefined;
+  /** A `jump:'o'` out of a USER function (not the dispatcher / a contract-level routine). */
+  returnsFromUser: boolean;
+  /** viaIR: mapped to a function/modifier HEADER (its parameter/return lists). */
+  inHeader: boolean;
+  /** viaIR: the landing step of a `jump:'i'` that maps to the callee's definition. */
+  fnEntry: boolean;
+  /** Mapped to a modifier's `_;` (PlaceholderStatement). */
+  placeholder: boolean;
+}
+
+/** Whether `node` lies in a function/modifier's parameter or return list. */
+function inParameterList(node: AstNode): boolean {
+  for (let c: AstNode | undefined = node; c !== undefined; c = c.parent()) {
+    const t = c.nodeType;
+    if (t === 'ParameterList') return true;
+    if (
+      t === 'Block' ||
+      t === 'FunctionDefinition' ||
+      t === 'ModifierDefinition' ||
+      t === 'ContractDefinition' ||
+      t === 'SourceUnit'
+    ) {
+      return false;
+    }
+  }
+  return false;
 }
 
 /** Per-contract source-map indexing, cached across steps. */
@@ -132,8 +171,18 @@ export class SteppingModel {
     // drift inflated later combinedDepths so `next`/`stepOut` (which stop at the
     // first statement with `combinedDepth <= origin`) skipped their target and
     // ran to the terminal step.
-    const frameJumps: number[] = [];
+    //
+    // Each frame keeps a STACK of the weights of its open internal calls, so a
+    // 'jump:o' removes exactly what its 'jump:i' added. Under viaIR a modifier is
+    // its own Yul function and its `_;` is a 'jump:i' into the function body;
+    // those jumps weigh 0 so a modified function's body (and its modifiers) sit
+    // at the function's own level — as on legacy, which inlines modifiers.
+    // Otherwise `next` from a modifier line would step over the whole body.
+    // A 'jump:i' is weighed when its LANDING step is known (it decides whether
+    // the jump enters a modifier), hence `pendingCall`.
+    const frameJumps: number[][] = [];
     let internalSum = 0;
+    let pendingCall: {frame: number; weightless: boolean} | undefined;
     let lastDefinedStmtId: number | undefined;
     let lastPath: string | undefined;
     let lastLine: number | undefined;
@@ -144,15 +193,18 @@ export class SteppingModel {
       // Sync the frame stack to this step's raw EVM depth (which changes by at
       // most 1 per step). Growing pushes fresh frames at internal-depth 0; a
       // return pops the callee frame(s), discarding their internal-jump fold.
-      while (frameJumps.length < st.depth) frameJumps.push(0);
-      while (frameJumps.length > st.depth) internalSum -= frameJumps.pop()!;
-      const combinedDepth = st.depth + internalSum;
+      while (frameJumps.length < st.depth) frameJumps.push([]);
+      while (frameJumps.length > st.depth) {
+        for (const w of frameJumps.pop()!) internalSum -= w;
+      }
 
       let line: number | undefined;
       let col: number | undefined;
       let path: string | undefined;
       let stmtId: number | undefined;
       let entry: SourceMapEntry | undefined;
+      let node: AstNode | undefined;
+      let stmt: AstNode | undefined;
       const optimized = resolution?.optimized ?? false;
       const viaIR = resolution?.cu.viaIR() ?? false;
 
@@ -176,15 +228,30 @@ export class SteppingModel {
             line = pos.line;
             col = pos.column;
             path = source.path;
-            const node = findInnermostNode(
-              source.ast(),
-              entry.start,
-              entry.length,
-            );
-            stmtId = node !== undefined ? closestStatement(node)?.id : undefined;
+            node = findInnermostNode(source.ast(), entry.start, entry.length);
+            stmt = node !== undefined ? closestStatement(node) : undefined;
+            stmtId = stmt?.id;
           }
         }
       }
+
+      // Weigh the previous step's internal call now that its landing is known.
+      if (pendingCall !== undefined) {
+        const {frame, weightless} = pendingCall;
+        pendingCall = undefined;
+        const weight =
+          weightless ||
+          (viaIR &&
+            node !== undefined &&
+            closestFunctionOrModifier(node)?.nodeType === 'ModifierDefinition')
+            ? 0
+            : 1;
+        if (frame < frameJumps.length) {
+          frameJumps[frame]!.push(weight);
+          internalSum += weight;
+        }
+      }
+      const combinedDepth = st.depth + internalSum;
 
       const isStmtStart = stmtId !== undefined && stmtId !== lastDefinedStmtId;
       const isLineStart =
@@ -203,6 +270,25 @@ export class SteppingModel {
         optimized,
         viaIR,
         isJump: st.op === 'JUMP' || st.op === 'JUMPI',
+        isJumpdest: st.op === 'JUMPDEST',
+        isPush: st.op.startsWith('PUSH'),
+        stmtRange:
+          stmt !== undefined && path !== undefined
+            ? {path, start: stmt.srcStart, end: stmt.srcStart + stmt.srcLength}
+            : undefined,
+        stmtType: stmt?.nodeType,
+        returnsFromUser:
+          entry?.jump === 'o' &&
+          node !== undefined &&
+          node.nodeType !== 'ContractDefinition',
+        inHeader: viaIR && node !== undefined && inParameterList(node),
+        fnEntry:
+          viaIR &&
+          i > 0 &&
+          meta[i - 1]!.jump === 'i' &&
+          (node?.nodeType === 'FunctionDefinition' ||
+            node?.nodeType === 'ModifierDefinition'),
+        placeholder: stmt?.nodeType === 'PlaceholderStatement',
       };
 
       if (stmtId !== undefined) {
@@ -219,17 +305,138 @@ export class SteppingModel {
       if (entry !== undefined && frameJumps.length > 0) {
         const top = frameJumps.length - 1;
         if (entry.jump === 'i') {
-          frameJumps[top]!++;
-          internalSum++;
-        } else if (entry.jump === 'o' && frameJumps[top]! > 0) {
-          frameJumps[top]!--;
-          internalSum--;
+          // `_;` (a PlaceholderStatement) enters the modified function's body.
+          pendingCall = {
+            frame: top,
+            weightless: viaIR && node?.nodeType === 'PlaceholderStatement',
+          };
+        } else if (entry.jump === 'o' && frameJumps[top]!.length > 0) {
+          internalSum -= frameJumps[top]!.pop()!;
         }
       }
     }
 
     this.#meta = meta;
     this.last = meta.length - 1;
+    if (meta.some((m) => m.viaIR)) {
+      this.#dropHoistedPushes();
+      this.#restorePrologueStarts();
+    }
+    this.#dropCompoundJoins();
+  }
+
+  /**
+   * viaIR hoists single `PUSHn <return label>` instructions ahead of a call and
+   * attributes each to a LATER statement. Such a one-step PUSH whose next step is
+   * a different statement is not that statement's start (it would bounce the
+   * walk between lines / show them out of order), and must not count as the
+   * statement having begun. Recomputes `isStmtStart` accordingly.
+   */
+  #dropHoistedPushes(): void {
+    const meta = this.#meta;
+    let lastStmt: number | undefined;
+    for (let i = 0; i < meta.length; i++) {
+      const m = meta[i]!;
+      const next = meta[i + 1];
+      const hoisted =
+        m.viaIR &&
+        m.isPush &&
+        m.stmtId !== undefined &&
+        m.stmtId !== lastStmt &&
+        next !== undefined &&
+        next.stmtId !== m.stmtId;
+      if (hoisted) {
+        m.isStmtStart = false;
+        continue;
+      }
+      m.isStmtStart = m.stmtId !== undefined && m.stmtId !== lastStmt;
+      if (m.stmtId !== undefined) lastStmt = m.stmtId;
+    }
+  }
+
+  /**
+   * viaIR function prologue: on entry the first body statement often gets a
+   * one-step mark, then the header code runs (parameter/return declarations, a
+   * zero-init helper), and only then the statement really starts. The mark is
+   * discarded as a blip, but it already made the real start "not new", so the
+   * function's first statement — or a one-statement helper entirely — got no
+   * stop. After each entry, clear starts up to the last header step and force a
+   * start on the first statement step after it.
+   */
+  #restorePrologueStarts(): void {
+    const meta = this.#meta;
+    for (let e = 0; e < meta.length; e++) {
+      if (!meta[e]!.fnEntry) continue;
+      const d = meta[e]!.combinedDepth;
+      let headerEnd = -1;
+      for (let k = e + 1; k < meta.length; k++) {
+        const m = meta[k]!;
+        if (m.combinedDepth < d) break;
+        if (m.combinedDepth > d) {
+          if (m.stmtId !== undefined) break; // a real sub-call, not a helper
+          continue;
+        }
+        if (m.jump === 'o') break;
+        if (m.inHeader) headerEnd = k;
+      }
+      if (headerEnd < 0) continue;
+      for (let k = e + 1; k <= headerEnd; k++) {
+        if (meta[k]!.combinedDepth === d) meta[k]!.isStmtStart = false;
+      }
+      for (let k = headerEnd + 1; k < meta.length; k++) {
+        const m = meta[k]!;
+        if (m.combinedDepth < d) break;
+        if (m.combinedDepth === d && m.stmtId !== undefined) {
+          m.isStmtStart = true;
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * After a branch/loop body, the join code is mapped to the WHOLE enclosing
+   * `if`/`for`/`while`, which made the walk climb back up an if/else-if chain
+   * and stop on a `for` header several times per iteration. A compound
+   * statement's step is a stop only when entered from OUTSIDE it — not when the
+   * frame's previous statement lies inside it.
+   */
+  #dropCompoundJoins(): void {
+    const meta = this.#meta;
+    const lastAt: (number | undefined)[] = [];
+    let prevDepth = 0;
+    for (let i = 0; i < meta.length; i++) {
+      const m = meta[i]!;
+      const d = m.combinedDepth;
+      // Entering a deeper frame: stale statements of earlier calls at those
+      // depths must not count as "previous".
+      for (let dd = prevDepth + 1; dd <= d; dd++) lastAt[dd] = undefined;
+      prevDepth = d;
+      if (m.stmtId === undefined) continue;
+      if (
+        m.isStmtStart &&
+        (m.stmtType === 'IfStatement' ||
+          m.stmtType === 'ForStatement' ||
+          m.stmtType === 'WhileStatement' ||
+          m.stmtType === 'DoWhileStatement')
+      ) {
+        const p = lastAt[d] === undefined ? undefined : meta[lastAt[d]!]!;
+        const r = m.stmtRange;
+        const pr = p?.stmtRange;
+        if (
+          p !== undefined &&
+          p.stmtId !== m.stmtId &&
+          r !== undefined &&
+          pr !== undefined &&
+          pr.path === r.path &&
+          pr.start >= r.start &&
+          pr.end <= r.end
+        ) {
+          m.isStmtStart = false;
+        }
+      }
+      lastAt[d] = i;
+    }
   }
 
   /** Metadata for `index`. */
@@ -270,10 +477,49 @@ export class SteppingModel {
     return false;
   }
 
+  readonly #lastInFrame = new Map<number, boolean>();
+
+  /**
+   * Whether no OTHER statement starts in the frame of `index` (same
+   * combinedDepth) before that frame returns. Memoized.
+   */
+  #isLastInFrame(index: number): boolean {
+    const cached = this.#lastInFrame.get(index);
+    if (cached !== undefined) return cached;
+    const {combinedDepth: d, stmtId: s} = this.#meta[index]!;
+    let last = true;
+    for (let k = index + 1; k <= this.last; k++) {
+      const m = this.#meta[k]!;
+      if (m.combinedDepth < d) break;
+      if (m.combinedDepth === d && m.isStmtStart && m.stmtId !== s) {
+        last = false;
+        break;
+      }
+    }
+    this.#lastInFrame.set(index, last);
+    return last;
+  }
+
   #persists(index: number): boolean {
     if (index >= this.last) return true;
     const cur = this.#meta[index]!;
     const nxt = this.#meta[index + 1]!;
+    // viaIR: after returning from a user function, the caller statement may get
+    // only a single JUMPDEST step. When that call was the caller's LAST statement,
+    // that step is the caller's only remaining stop — discarding it made step-out
+    // skip up TWO levels. (If another caller statement follows, the normal guard
+    // applies and step-out lands there, as on legacy.) Not for a `_;` landing
+    // (the modifier resuming after the function body).
+    if (
+      cur.viaIR &&
+      cur.isStmtStart &&
+      index > 0 &&
+      this.#meta[index - 1]!.returnsFromUser &&
+      !cur.placeholder &&
+      this.#isLastInFrame(index)
+    ) {
+      return true;
+    }
     // One-step guard: a single-step out-of-order artifact (the next step is a
     // DIFFERENT statement at the same-or-shallower depth) is abandoned at once —
     // UNLESS the statement RESUMES at the same depth (it does real work after
@@ -328,7 +574,11 @@ export class SteppingModel {
       if (m.combinedDepth > d) return false; // descended into a sub-call
       if (m.combinedDepth < d) return false; // frame returned (last statement)
       if (m.stmtId === s) continue; // still inside this statement's run
-      if (this.#meta[j - 1]!.isJump) return false; // reached via a taken jump
+      // Reached via a taken jump (the step before is the JUMP/JUMPI, or it is
+      // the landing JUMPDEST of one).
+      const prev = this.#meta[j - 1]!;
+      if (prev.isJump) return false;
+      if (prev.isJumpdest && j >= 2 && this.#meta[j - 2]!.isJump) return false;
       // Fall-through to a DIFFERENT statement at the same depth. Under viaIR the
       // argument setup of a CALL statement is attributed alternately to the
       // statement and to its function-declaration line (a smaller AST id) before
@@ -347,7 +597,12 @@ export class SteppingModel {
         }
       }
       if (resumes) continue;
-      return m.stmtId !== undefined && m.stmtId < s; // fall-through to an EARLIER stmt
+      // Fall-through to an EARLIER statement, by SOURCE position — AST ids are no
+      // order (a nested else-if is a child of the outer if, with a smaller id).
+      const r = cur.stmtRange;
+      const mr = m.stmtRange;
+      if (m.stmtId === undefined || r === undefined || mr === undefined) return false;
+      return mr.path === r.path ? mr.start < r.start : m.stmtId < s;
     }
     return false;
   }

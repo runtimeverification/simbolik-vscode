@@ -143,6 +143,8 @@ export interface BytesStorageLayout {
 export interface ResolvedVariable {
   name: string;
   kind: 'storage' | 'parameter' | 'return' | 'local';
+  /** AST id of the declaration (params/returns/locals only). */
+  declId?: number;
   /** solc storage-style type id, e.g. `t_uint256`, `t_enum(Color)5`. */
   solcType: string;
   /** Solidity type string for display. */
@@ -151,6 +153,12 @@ export interface ResolvedVariable {
   isValueType: boolean;
   /** Concrete pointer, ready to dereference (value types only). */
   pointer?: Pointer;
+  /**
+   * When the stack location came from the provenance model: that model's stack
+   * length at this pc (see `StackProvenance.stackLengthAt`), so a consumer with
+   * the real trace can check the model matches the executed path.
+   */
+  modelStackLength?: number;
   /**
    * For a reference-type COMPLEX variable (a memory struct of value-type
    * members), the per-member layout — each with its own concrete pointer. The
@@ -220,6 +228,22 @@ function storageVariables(
   sourcePath: string,
   contractName: string,
 ): ResolvedVariable[] {
+  // pc-independent: computed once per contract (variablesAt runs per pc).
+  const contract = cu.contract(sourcePath, contractName);
+  const cached = contract === undefined ? undefined : storageVarCache.get(contract);
+  if (cached !== undefined) return cached;
+  const vars = computeStorageVariables(cu, sourcePath, contractName);
+  if (contract !== undefined) storageVarCache.set(contract, vars);
+  return vars;
+}
+
+const storageVarCache = new WeakMap<Contract, ResolvedVariable[]>();
+
+function computeStorageVariables(
+  cu: CompilationUnit,
+  sourcePath: string,
+  contractName: string,
+): ResolvedVariable[] {
   try {
     const program = generateEthdebugProgram(cu, sourcePath, contractName);
     return program.storageVariables.map((sv) => {
@@ -282,6 +306,20 @@ interface StackVar {
  * full CFG analysis (O(contract size)) reran on every `variablesAt` call —
  * ~300ms per newly-visited pc on a large viaIR contract.
  */
+/** Per-function (pc-independent) frame facts, keyed by the contract's analyzer. */
+const frameInfoCache = new WeakMap<
+  object,
+  Map<
+    number,
+    {
+      params: ReturnType<typeof parametersFromFunctionNode>;
+      locals: ReturnType<typeof localsFromFunctionNode>;
+      returnNodes: ReturnType<AstNode['returnParameters']>;
+      frameBase: number | undefined;
+    }
+  >
+>();
+
 const analyzerCache = new WeakMap<
   Contract,
   {
@@ -332,8 +370,10 @@ function stackVariables(
   // the source map may resolve `pc` to a function INHERITED from a base contract,
   // which a name lookup scoped to `contractName` would miss (degrading to
   // storage-only), and the node also disambiguates overloads.
-  const params = parametersFromFunctionNode(fnNode, cu);
-  const locals = localsFromFunctionNode(fnNode, cu);
+  // Everything below that depends only on the FUNCTION (not the pc) is computed
+  // once per (contract analyzers, function): `variablesAt` runs for every pc the
+  // debugger inspects (incl. the last-known backward scan), and `anchorFrameBase`
+  // alone scans the contract's whole source map.
 
   // Value-type params/locals are located by the per-pc stack-PROVENANCE analyzer
   // (codegen-agnostic: correct for viaIR's reordered/reused slots AND legacy). The
@@ -357,20 +397,36 @@ function stackVariables(
   // declared returns (including UNNAMED ones) reserve a slot, so locals rank past
   // them correctly. Those slots must be counted so params, returns AND locals rank
   // correctly.
-  const returnNodes = fnNode.returnParameters();
-  const returnSlots = returnNodes.length;
-
   // 3. frameBase — anchored ONCE per function via the static analyzer (used only
   //    for reference-type layouts; value types no longer depend on it).
-  const frameBase = anchorFrameBase(
-    cu,
-    contract,
-    fnNode,
-    params,
-    locals,
-    returnSlots,
-    heights,
-  );
+  let perFn = frameInfoCache.get(heights);
+  if (perFn === undefined) {
+    perFn = new Map();
+    frameInfoCache.set(heights, perFn);
+  }
+  let info = perFn.get(fnNode.id);
+  if (info === undefined) {
+    const params = parametersFromFunctionNode(fnNode, cu);
+    const locals = localsFromFunctionNode(fnNode, cu);
+    const returnNodes = fnNode.returnParameters();
+    info = {
+      params,
+      locals,
+      returnNodes,
+      frameBase: anchorFrameBase(
+        cu,
+        contract,
+        fnNode,
+        params,
+        locals,
+        returnNodes.length,
+        heights,
+      ),
+    };
+    perFn.set(fnNode.id, info);
+  }
+  const {params, locals, returnNodes, frameBase} = info;
+  const returnSlots = returnNodes.length;
 
   // 4. Uniform LIVE ordering: params (always live), then return params (always
   //    live once entered), then in-scope locals — all in declaration order;
@@ -404,6 +460,7 @@ function stackVariables(
     const result: ResolvedVariable = {
       name: v.name,
       kind: v.kind,
+      declId: v.declId,
       solcType: v.solcType,
       typeLabel: v.typeLabel,
       numberOfBytes: v.numberOfBytes,
@@ -422,6 +479,7 @@ function stackVariables(
       // (sound for viaIR's reordered/reused slots AND legacy). `undefined` means
       // the value is not known to be on the stack here.
       let depth = provenance.variableDepthAt(pc, v.declId);
+      const modelled = depth !== undefined ? provenance.stackLengthAt(pc) : undefined;
 
       // FALLBACK (legacy bytecode, non-parameters only): where provenance has no
       // data-flow evidence, the classic "height − declarationRank" slot is a sound
@@ -442,6 +500,7 @@ function stackVariables(
       }
 
       if (depth === undefined) return result; // unavailable at this pc → omit.
+      if (modelled !== undefined) result.modelStackLength = modelled;
       result.pointer = {
         location: 'stack',
         slot: depth,
@@ -457,18 +516,18 @@ function stackVariables(
     // exactly as for value types — and fall back to the legacy frame-relative slot
     // only where provenance has no evidence (classic codegen).
     let depth = provenance.variableDepthAt(pc, v.declId);
-    // FALLBACK (both pipelines, INTENTIONALLY ungated — unlike the value-type
-    // gate above): for a reference type the stack slot holds a MEMORY OFFSET, and
-    // provenance is deliberately incomplete for it — a memory struct/array is
-    // often materialised only near its use, and a fixed-size memory array has no
-    // DUP/SWAP-anchored read to value-number. So under viaIR the frame-relative
-    // slot is the only way to locate these (verified load-bearing by the
-    // memstruct/memrefs viaIR fixtures: fixed3 and the late-materialised struct
-    // resolve ONLY through it). It is a best-effort completion: the theoretical
-    // unsoundness under viaIR (a reused slot could hold an unrelated word, yielding
-    // a garbage memory offset) is a known limitation whose sound fix is extending
-    // stack-provenance to reference handles — NOT disabling the fallback.
-    if (depth === undefined) depth = frameDepth;
+    if (depth !== undefined) {
+      const modelled = provenance.stackLengthAt(pc);
+      if (modelled !== undefined) result.modelStackLength = modelled;
+    }
+    // FALLBACK — legacy only. The frame-relative slot is sound on the classic
+    // pipeline (fixed frame slots) but NOT under viaIR, whose stack scheduler
+    // reorders and reuses slots: the differential uniswap campaign showed it
+    // decoding plausible-but-WRONG values there (a `bytes params` showing another
+    // local's string, an array shown as its sibling). Under viaIR reference
+    // handles are located by provenance instead (parameter entry claims,
+    // declaration-end claims, and reads); unlocated ⇒ listed without a layout.
+    if (depth === undefined && !cu.viaIR()) depth = frameDepth;
     if (depth === undefined) {
       return result; // unresolved → list reference var without a layout.
     }

@@ -135,6 +135,8 @@ export class SourceFile {
   readonly content: string;
   readonly #ast: unknown;
   #lineStarts: number[] | undefined;
+  #astRoot: AstNode | undefined;
+  #nodeIndex: Map<number, AstNode> | undefined;
 
   constructor(id: number, path: string, content: string, ast: unknown) {
     this.id = id;
@@ -144,12 +146,23 @@ export class SourceFile {
   }
 
   ast(): AstNode {
-    return new AstNode(this.#ast as Record<string, unknown>);
+    // Cached so the (memoized) wrapper tree persists across lookups.
+    this.#astRoot ??= new AstNode(this.#ast as Record<string, unknown>);
+    return this.#astRoot;
   }
 
   /** Find the AST node with the given `id` anywhere in this source's tree. */
   nodeById(id: number): AstNode | undefined {
-    return findAstNode(this.ast(), (n) => n.id === id);
+    if (this.#nodeIndex === undefined) {
+      const index = new Map<number, AstNode>();
+      const visit = (n: AstNode): void => {
+        index.set(n.id, n);
+        for (const c of n.children()) visit(c);
+      };
+      visit(this.ast());
+      this.#nodeIndex = index;
+    }
+    return this.#nodeIndex.get(id);
   }
 
   /**
@@ -192,6 +205,8 @@ export class Contract {
   readonly name: string;
   readonly sourcePath: string;
   readonly #raw: RawContract;
+  #initSourceMap: SourceMapEntry[] | undefined;
+  #runtimeSourceMap: SourceMapEntry[] | undefined;
 
   constructor(name: string, sourcePath: string, raw: RawContract) {
     this.name = name;
@@ -219,12 +234,18 @@ export class Contract {
     return Object.values(refs).flat();
   }
 
+  // Parsed once: the source maps are immutable and queried per instruction by
+  // the variable/frame analyses (a full parse per call dominated `variables`).
   initSourceMap(): SourceMapEntry[] {
-    return parseSourceMap(this.#raw.evm?.bytecode?.sourceMap ?? '');
+    this.#initSourceMap ??= parseSourceMap(this.#raw.evm?.bytecode?.sourceMap ?? '');
+    return this.#initSourceMap;
   }
 
   runtimeSourceMap(): SourceMapEntry[] {
-    return parseSourceMap(this.#raw.evm?.deployedBytecode?.sourceMap ?? '');
+    this.#runtimeSourceMap ??= parseSourceMap(
+      this.#raw.evm?.deployedBytecode?.sourceMap ?? '',
+    );
+    return this.#runtimeSourceMap;
   }
 
   storageLayout(): StorageEntry[] {

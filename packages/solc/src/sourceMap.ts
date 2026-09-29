@@ -75,6 +75,25 @@ export function buildInstructionIndex(bytecode: Hex): {
   pcToInstruction: Map<number, number>;
   instructionToPc: number[];
 } {
+  const cached = instructionIndexCache.get(bytecode);
+  if (cached !== undefined) return cached;
+  const index = computeInstructionIndex(bytecode);
+  // A handful of distinct contracts per session; bound it so a long-lived host
+  // cannot accumulate indexes indefinitely.
+  if (instructionIndexCache.size >= 64) instructionIndexCache.clear();
+  instructionIndexCache.set(bytecode, index);
+  return index;
+}
+
+const instructionIndexCache = new Map<
+  string,
+  {pcToInstruction: Map<number, number>; instructionToPc: number[]}
+>();
+
+function computeInstructionIndex(bytecode: Hex): {
+  pcToInstruction: Map<number, number>;
+  instructionToPc: number[];
+} {
   const bytes = hexToBytes(bytecode);
   const pcToInstruction = new Map<number, number>();
   const instructionToPc: number[] = [];

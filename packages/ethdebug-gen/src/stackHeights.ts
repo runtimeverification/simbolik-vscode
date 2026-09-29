@@ -211,6 +211,11 @@ interface Insn {
   jump: Jump;
   /** Enclosing `FunctionDefinition` AST id, or `undefined` (helper/dispatcher). */
   fnId: number | undefined;
+  /**
+   * For a `JUMP [in]`: how many values the call returns (from the call's AST
+   * type) — used when the target is DYNAMIC (a call through a function pointer).
+   */
+  callRets?: number;
 }
 
 /** The abstract stack of known PUSH constants; `undefined` = an unknown slot. */
@@ -275,6 +280,36 @@ function applyToStack(s: AbstractStack, insn: Insn): void {
 // The analyzer
 // ---------------------------------------------------------------------------
 
+/**
+ * The number of values the internal call at source-map `entry` returns, read
+ * from the enclosing `FunctionCall`'s type (`tuple()` → 0, `tuple(a,b)` → 2,
+ * any other type → 1); `undefined` if the entry is not inside a call.
+ */
+export function indirectCallReturns(
+  cu: CompilationUnit,
+  entry: SourceMapEntry,
+): number | undefined {
+  if (entry.fileId < 0) return undefined;
+  const source = cu.sourceById(entry.fileId);
+  if (source === undefined) return undefined;
+  let n = findInnermostNode(source.ast(), entry.start, entry.length);
+  while (n !== undefined && n.nodeType !== 'FunctionCall') n = n.parent();
+  const t = n?.typeString;
+  if (t === undefined) return undefined;
+  const m = /^tuple\((.*)\)$/.exec(t);
+  if (m === null) return 1;
+  const inner = m[1]!.trim();
+  if (inner === '') return 0;
+  let depth = 0;
+  let count = 1;
+  for (const ch of inner) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) count++;
+  }
+  return count;
+}
+
 class Analyzer {
   private readonly insns = new Map<number, Insn>();
   private readonly jumpdests = new Set<number>();
@@ -323,6 +358,8 @@ class Analyzer {
       }
       const entry = sourceMap[i];
       const fnId = entry ? this.attributeFunction(cu, entry) : undefined;
+      const callRets =
+        op === 0x56 && entry?.jump === 'i' ? indirectCallReturns(cu, entry) : undefined;
       this.insns.set(pc, {
         pc,
         op,
@@ -331,6 +368,7 @@ class Analyzer {
         delta: stackDelta(op),
         jump: entry?.jump ?? '-',
         fnId,
+        ...(callRets !== undefined ? {callRets} : {}),
       });
       if (fnId !== undefined) {
         const prev = this.entryByFn.get(fnId);
@@ -457,6 +495,27 @@ class Analyzer {
     }
   }
 
+  /**
+   * An indirect internal call (`JUMP [in]` to a function-pointer target): resume
+   * at the return tag, the call having consumed target + args + return tag and
+   * left its `callRets` return values. `undefined` when not resolvable.
+   */
+  private indirectResume(
+    height: number,
+    stack: AbstractStack,
+    insn: Insn,
+    fnId: number | undefined,
+  ): {pc: number; height: number; stack: AbstractStack} | undefined {
+    if (insn.jump !== 'i' || insn.callRets === undefined) return undefined;
+    const depth = this.returnTagDepth(stack, fnId);
+    if (depth === undefined) return undefined;
+    const returnPc = stack[stack.length - 1 - depth]!;
+    const resumed = cloneStack(stack);
+    for (let k = 0; k <= depth; k++) resumed.pop();
+    for (let k = 0; k < insn.callRets; k++) resumed.push(undefined);
+    return {pc: returnPc, height: height + insn.callRets - depth - 1, stack: resumed};
+  }
+
   /** Handle a JUMP: internal jump, internal call (net effect), or return. */
   private handleJump(
     height: number,
@@ -467,7 +526,11 @@ class Analyzer {
   ): void {
     const target = top(stack);
     if (target === undefined || !this.jumpdests.has(target)) {
-      // Dynamic target = the caller-supplied return address ⇒ frame return.
+      // Dynamic target: the caller-supplied return address ⇒ frame return —
+      // unless it is an INDIRECT CALL (`[in]`, through a function pointer): then
+      // resume at its return tag with the call's return values.
+      const resume = this.indirectResume(height, stack, insn, fnId);
+      if (resume !== undefined) push(resume);
       return;
     }
     if (this.isCall(insn, fnId, target)) {
@@ -587,6 +650,7 @@ class Analyzer {
     const localHeights = new Map<number, number>();
     const work: Item[] = [{pc: entryPc, height: 0, stack: baseStack()}];
     let hret: number | undefined;
+    let hretOut: number | undefined;
 
     while (work.length > 0) {
       const {pc, height, stack} = work.pop()!;
@@ -607,9 +671,18 @@ class Analyzer {
       if (insn.op === 0x56) {
         const target = top(stack);
         if (target === undefined || !this.jumpdests.has(target)) {
-          // Terminal return to the caller-supplied address.
-          if (hret === undefined) {
+          // Terminal return to the caller-supplied address — unless the jump is
+          // tagged `[in]`: that is an INDIRECT CALL (through a function pointer,
+          // e.g. forge-std's console `_sendLogPayload`), whose height is not the
+          // frame's return height (taking it skewed every caller by +4 per
+          // `bound()` on real uniswap tests). An `[out]` jump is authoritative.
+          if (insn.jump === 'o') {
+            if (hretOut === undefined) hretOut = height;
+          } else if (insn.jump !== 'i' && hret === undefined) {
             hret = height;
+          } else if (insn.jump === 'i') {
+            const resume = this.indirectResume(height, stack, insn, insn.fnId);
+            if (resume !== undefined) work.push(resume);
           }
           continue;
         }
@@ -666,7 +739,8 @@ class Analyzer {
     }
 
     this.netInProgress.delete(entryPc);
-    const net = hret === undefined ? undefined : hret - 2;
+    const ret = hretOut ?? hret;
+    const net = ret === undefined ? undefined : ret - 2;
     this.netCache.set(entryPc, net);
     return net;
   }

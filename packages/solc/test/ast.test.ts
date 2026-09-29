@@ -1,6 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 import {
+  AstNode,
   closestFunction,
   closestStatement,
   findInnermostNode,
@@ -104,5 +105,34 @@ describe('SourceFile.offsetToPosition (UTF-8 byte offset -> 1-based line, 0-base
 
   it('offset 65 -> line 4, column 7 (mid-line, the `t` ending `contract`)', () => {
     expect(file().offsetToPosition(65)).toEqual({line: 4, column: 7});
+  });
+});
+
+describe('closestStatement — Yul nodes belong to their InlineAssembly block', () => {
+  // Yul nodes carry no AST id (they all read as -1, shared across every assembly
+  // block), so a Yul "statement" must never be a statement of its own: stepping
+  // would otherwise flip between -1 and the block's id inside every asm block.
+  const asm = new AstNode({
+    nodeType: 'InlineAssembly',
+    id: 5,
+    src: '0:60:0',
+    AST: {
+      nodeType: 'YulBlock',
+      src: '10:40:0',
+      statements: [
+        {
+          nodeType: 'YulExpressionStatement',
+          src: '12:20:0',
+          expression: {nodeType: 'YulFunctionCall', src: '12:20:0'},
+        },
+      ],
+    },
+  });
+
+  it('resolves a Yul expression to the enclosing InlineAssembly statement', () => {
+    const inner = findInnermostNode(asm, 12, 20);
+    expect(inner?.nodeType).toBe('YulFunctionCall');
+    expect(closestStatement(inner!)?.id).toBe(5);
+    expect(closestStatement(inner!)?.nodeType).toBe('InlineAssembly');
   });
 });

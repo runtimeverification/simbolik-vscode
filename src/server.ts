@@ -337,13 +337,13 @@ async function buildContractsByAddress(
 ): Promise<{
   contractsByAddress: Record<
     string,
-    {buildInfoJson: unknown; contractName?: string}
+    {buildInfoJson: unknown; contractName?: string; sourcePath?: string}
   >;
   addresses: string[];
 }> {
   const result: Record<
     string,
-    {buildInfoJson: unknown; contractName?: string}
+    {buildInfoJson: unknown; contractName?: string; sourcePath?: string}
   > = {};
   let steps: {codeAddress: bigint}[];
   try {
@@ -379,7 +379,11 @@ async function buildContractsByAddress(
       for (const {bi, cu} of cus) {
         const contract = identifyContractByRuntimeCode(cu, code as `0x${string}`);
         if (contract !== undefined) {
-          result[addr] = {buildInfoJson: bi, contractName: contract.name};
+          result[addr] = {
+            buildInfoJson: bi,
+            contractName: contract.name,
+            sourcePath: contract.sourcePath,
+          };
           return;
         }
       }
@@ -625,7 +629,7 @@ async function attachResolver(
   );
   const contractsByAddress: Record<
     string,
-    {buildInfoJson: unknown; contractName?: string}
+    {buildInfoJson: unknown; contractName?: string; sourcePath?: string}
   > = {};
   await Promise.all(
     [...addresses].map(async (addr) => {
@@ -731,16 +735,28 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   const buildInfos = rawJsons.map((s) => JSON.parse(s) as unknown);
 
   // Find the CU + contract that declares `contractName`, and remember which raw
-  // build-info it came from (for the selector lookup).
+  // build-info it came from (for the selector lookup). Contract names are NOT
+  // unique within a project (e.g. uniswap-v4 has both `src/test/HooksTest.sol`
+  // and `test/libraries/Hooks.t.sol` declaring `HooksTest`), so when several
+  // match, prefer the one declared in the launched `file`; the first match is
+  // only the fallback.
+  const launchedFile =
+    args.file === undefined
+      ? undefined
+      : toFsPath(args.file).replace(/\\/g, '/');
   let contract: import('@simbolik/solc').Contract | undefined;
   let rawForContract: RawBuildInfo | undefined;
-  for (let i = 0; i < buildInfos.length; i++) {
+  search: for (let i = 0; i < buildInfos.length; i++) {
     const cu = loadBuildInfo(buildInfos[i]);
-    const found = cu.contracts().find((c) => c.name === contractName);
-    if (found !== undefined) {
-      contract = found;
-      rawForContract = buildInfos[i] as RawBuildInfo;
-      break;
+    for (const found of cu.contracts()) {
+      if (found.name !== contractName) continue;
+      const inFile =
+        launchedFile !== undefined && launchedFile.endsWith('/' + found.sourcePath);
+      if (contract === undefined || inFile) {
+        contract = found;
+        rawForContract = buildInfos[i] as RawBuildInfo;
+      }
+      if (inFile) break search;
     }
   }
   if (contract === undefined || rawForContract === undefined) {

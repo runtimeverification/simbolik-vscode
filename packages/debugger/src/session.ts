@@ -120,7 +120,16 @@ export interface LaunchInputs {
    */
   contractsByAddress?: Record<
     string,
-    {buildInfoJson: unknown; contractName?: string}
+    {
+      buildInfoJson: unknown;
+      contractName?: string;
+      /**
+       * The declaring source path. Contract names are NOT unique within a build
+       * (forge-std and solmate both declare `MockERC20`), so a name alone can
+       * select the wrong contract; with the path the pick is exact.
+       */
+      sourcePath?: string;
+    }
   >;
   /**
    * PRE-TRACE storage to seed the cursor with, keyed `address(hex) → slot(hex) →
@@ -282,6 +291,57 @@ interface LaunchedState {
 /** Format a `bigint` EVM address as a lowercase, zero-padded hex string. */
 function addressHex(addr: bigint): string {
   return '0x' + addr.toString(16).padStart(40, '0');
+}
+
+/** A pc's source position + enclosing definitions (see `#resolvePosition`). */
+interface ResolvedPosition {
+  path: string;
+  line: number;
+  col: number;
+  offset: number;
+  fnNode: AstNode | undefined;
+  defNode: AstNode | undefined;
+  modifierDepth: number;
+}
+
+/** A statement or block node (the boundary of a statement's OWN expressions). */
+function isNestedStatement(n: AstNode): boolean {
+  const t = n.nodeType;
+  return (
+    t === 'Block' ||
+    t === 'UncheckedBlock' ||
+    t.endsWith('Statement') ||
+    t === 'Return' ||
+    t === 'InlineAssembly' ||
+    t === 'Break' ||
+    t === 'Continue' ||
+    t === 'Throw'
+  );
+}
+
+/** Pure stack/control plumbing — executing only these does no computation. */
+function isShuffleOp(op: string): boolean {
+  return (
+    op.startsWith('PUSH') ||
+    op.startsWith('DUP') ||
+    op.startsWith('SWAP') ||
+    op === 'POP' ||
+    op === 'JUMP' ||
+    op === 'JUMPI' ||
+    op === 'JUMPDEST'
+  );
+}
+
+/** Opcodes that push NO result (everything else except DUP/SWAP pushes exactly one). */
+const NO_RESULT_OPS = new Set([
+  'POP', 'JUMP', 'JUMPI', 'JUMPDEST', 'MSTORE', 'MSTORE8', 'SSTORE', 'TSTORE',
+  'LOG0', 'LOG1', 'LOG2', 'LOG3', 'LOG4', 'STOP', 'RETURN', 'REVERT', 'INVALID',
+  'SELFDESTRUCT', 'CALLDATACOPY', 'CODECOPY', 'EXTCODECOPY', 'RETURNDATACOPY', 'MCOPY',
+]);
+
+/** Whether executing `op` pushes a freshly produced value on top of the stack. */
+function producesValue(op: string): boolean {
+  return !NO_RESULT_OPS.has(op);
 }
 
 /** Arguments a step request may carry (VSCode adds `granularity`). */
@@ -474,6 +534,17 @@ export class SolidityDebugSession {
     return this.#require().step;
   }
 
+  /**
+   * Reposition the session at trace step `index` (clamped), without emitting
+   * any event. Test/harness support: lets a driver probe `next`/`stepOut` from
+   * a stop reached by `stepIn` and then return to it, since every stepping
+   * command is a pure function of the current step index.
+   */
+  seekStep(index: number): void {
+    const state = this.#require();
+    state.step = Math.max(0, Math.min(index, state.model.last));
+  }
+
   /** Wire everything, position at the entry statement, and queue a `stopped` event. */
   async launch(inputs: LaunchInputs): Promise<void> {
     this.#endEmitted = false;
@@ -567,7 +638,13 @@ export class SolidityDebugSession {
         // Register the CU for cross-CU lookups (#nodeById etc.), deduped by the
         // parsed-CU identity (a fresh object per loadBuildInfo call).
         if (!cus.includes(cu)) cus.push(cu);
-        const contract = this.#pickContract(cu, entry.contractName, cursor, firstSeen.get(addr));
+        const contract = this.#pickContract(
+          cu,
+          entry.contractName,
+          cursor,
+          firstRuntimeSeen.get(addr) ?? firstSeen.get(addr),
+          entry.sourcePath,
+        );
         if (contract !== undefined) {
           registry.set(addr, {
             contract,
@@ -1294,9 +1371,18 @@ export class SolidityDebugSession {
     if (steps.length === 0) return [];
 
     // Fold: record (address, stepIndex) at each depth up to `step`.
+    // The code address is constant within a call frame, so the (costly) address
+    // string is only formatted when the depth changes; otherwise just the frame's
+    // latest step index advances.
     const stack: {address: string; stepIndex: number; depth: number}[] = [];
+    let prevDepth = -1;
     for (let i = 0; i <= step && i < steps.length; i++) {
       const depth = steps[i]!.depth;
+      if (depth === prevDepth) {
+        stack[depth - 1]!.stepIndex = i;
+        continue;
+      }
+      prevDepth = depth;
       const address = addressHex(steps[i]!.codeAddress);
       stack[depth - 1] = {address, stepIndex: i, depth};
       stack.length = depth; // pop any frames deeper than the current depth
@@ -1434,10 +1520,15 @@ export class SolidityDebugSession {
     // — become DAP frames; `real:false` entries are "phantoms" that keep the depth
     // honest. A real frame renders at its call site (a parent) or at the current
     // step (the innermost, finalized below).
-    const stack: {stepIndex: number; real: boolean; fnId: number}[] = [];
+    // `lastOwn`: the latest step of a real frame that lies in its OWN function —
+    // its call site when it calls out. The step just before a call's jump can lie
+    // elsewhere (a modifier body; viaIR's function-pointer dispatcher, which maps
+    // to the ContractDefinition), where the frame would be named after the contract.
+    type Entry = {stepIndex: number; real: boolean; fnId: number; lastOwn?: number};
+    const stack: Entry[] = [];
     /** The topmost real frame, whose call site is set when it makes a call. */
     const topReal = ():
-      | {stepIndex: number; real: boolean; fnId: number}
+      | Entry
       | undefined => {
       for (let k = stack.length - 1; k >= 0; k--) {
         if (stack[k]!.real) return stack[k]!;
@@ -1475,7 +1566,7 @@ export class SolidityDebugSession {
           fn !== undefined &&
           (caller === undefined || caller.fnId !== fn.id)
         ) {
-          if (caller !== undefined) caller.stepIndex = prevStep; // call site
+          if (caller !== undefined) caller.stepIndex = caller.lastOwn ?? prevStep; // call site
           stack.push({stepIndex: i, real: true, fnId: fn.id});
         } else {
           stack.push({stepIndex: i, real: false, fnId: fn?.id ?? -1});
@@ -1494,6 +1585,8 @@ export class SolidityDebugSession {
         }
       }
 
+      const owner = topReal();
+      if (owner !== undefined && fnAt(i)?.id === owner.fnId) owner.lastOwn = i;
       prevStep = i;
       prevJump = state.model.at(i).jump;
     }
@@ -1749,6 +1842,31 @@ export class SolidityDebugSession {
         modifierDepth: number;
       }
     | undefined {
+    // Pure in (contract, isInit, pc) — memoized: frame reconstruction resolves
+    // every step of the current EVM frame on each stackTrace.
+    let byPc = this.#positionCache.get(contract);
+    if (byPc === undefined) {
+      byPc = new Map();
+      this.#positionCache.set(contract, byPc);
+    }
+    const key = isInit ? -1 - pc : pc;
+    if (byPc.has(key)) return byPc.get(key);
+    const resolved = this.#computePosition(contract, cu, pc, isInit);
+    byPc.set(key, resolved);
+    return resolved;
+  }
+
+  readonly #positionCache = new WeakMap<
+    Contract,
+    Map<number, ResolvedPosition | undefined>
+  >();
+
+  #computePosition(
+    contract: Contract,
+    cu: CompilationUnit,
+    pc: number,
+    isInit: boolean,
+  ): ResolvedPosition | undefined {
     const {pcToInstruction, sourceMap} = this.#indexFor(contract, isInit);
     const instruction = pcToInstruction.get(pc);
     if (instruction === undefined) return undefined;
@@ -1808,10 +1926,29 @@ export class SolidityDebugSession {
     contractName: string | undefined,
     cursor: StateCursor,
     traceIdx: number | undefined,
+    sourcePath?: string,
   ): Contract | undefined {
     if (contractName !== undefined) {
-      const byName = cu.contracts().find((c) => c.name === contractName);
-      if (byName !== undefined) return byName;
+      const byName = cu
+        .contracts()
+        .filter(
+          (c) =>
+            c.name === contractName &&
+            (sourcePath === undefined || c.sourcePath === sourcePath),
+        );
+      if (byName.length === 1) return byName[0];
+      // Ambiguous name (same-named contracts in different files): the running
+      // code decides — never an arbitrary first match, whose source map would
+      // silently mis-map every step of the frame.
+      if (byName.length > 1 && traceIdx !== undefined) {
+        const code = cursor.at(traceIdx).bytecode;
+        const identified =
+          code.length > 2 ? identifyContractByRuntimeCode(cu, code) : undefined;
+        if (identified !== undefined && byName.includes(identified)) {
+          return identified;
+        }
+      }
+      if (byName.length > 0) return byName[0];
     }
     const deployable = cu
       .contracts()
@@ -2022,15 +2159,52 @@ export class SolidityDebugSession {
     // them no pointer there. Walk back to the last in-body statement step of the
     // same occurrence — pure trace reconstruction, no variable-location math.
     const stepIndex = this.#localReadStep(frame);
+    // Constructor frames run INIT code, whose pcs index the init source map;
+    // `variablesAt` models RUNTIME code only, so resolving them there would name
+    // an unrelated runtime function's variables. Not supported ⇒ none, not wrong.
+    if (state.steps[stepIndex]!.isInitCode) return [];
     const pc = state.steps[stepIndex]!.pc;
     const vars = this.#variablesFor(frame, pc);
     const ms = machineStateFor(state.cursor.at(stepIndex), address);
+    const modelRef = this.#modelReference(frame, stepIndex);
 
     const variables: DebugProtocol.Variable[] = [];
     for (const v of vars) {
       if (v.kind !== 'parameter' && v.kind !== 'return' && v.kind !== 'local') {
         continue; // storage lives in another scope.
       }
+      // Decode each variable in isolation: one undecodable value (e.g. a string
+      // whose length word is garbage) must not blank the whole Locals scope.
+      try {
+        await this.#pushLocal(variables, frame, cu, v, ms, stepIndex, modelRef);
+      } catch (e) {
+        variables.push({
+          name: v.name,
+          value: `<unreadable: ${e instanceof Error ? e.message : String(e)}>`,
+          type: v.typeLabel,
+          variablesReference: 0,
+        });
+      }
+    }
+    return variables;
+  }
+
+  /** Decode one live param/local `v` of {@link #localVariables} into `variables`. */
+  async #pushLocal(
+    variables: DebugProtocol.Variable[],
+    frame: FrameInfo,
+    cu: CompilationUnit,
+    v: ResolvedVariable,
+    ms: import('@ethdebug/pointers').Machine.State,
+    stepIndex: number,
+    modelRef: number | undefined,
+  ): Promise<void> {
+    // The static model's location is only trustworthy where the model matches
+    // the executed path (see #modelReference): otherwise treat as unlocated.
+    if (!this.#modelMatches(v, stepIndex, modelRef)) {
+      v = {...v, pointer: undefined, members: undefined, array: undefined, bytes: undefined};
+    }
+    {
       // A reference-type COMPLEX variable — a memory STRUCT (`members`)
       // or a DYNAMIC memory ARRAY (`array`) — is surfaced as a NESTED variable via
       // the SHARED complex-render routine (children decoded on handle expansion).
@@ -2052,7 +2226,7 @@ export class SolidityDebugSession {
             'local',
           ),
         );
-        continue;
+        return;
       }
       // A memory STRING / BYTES carries a `bytes` layout — a SCALAR value.
       if (v.bytes !== undefined) {
@@ -2061,9 +2235,14 @@ export class SolidityDebugSession {
           ? `"${Buffer.from(hex.slice(2), 'hex').toString('utf8')}"`
           : hex;
         variables.push({name: v.name, value, type: v.typeLabel, variablesReference: 0});
-        continue;
+        return;
       }
-      if (v.pointer !== undefined) {
+      // Value numbering names a VALUE, so a leftover copy of a variable's OLD
+      // value can still be named after the variable was reassigned (e.g. an
+      // initializer `0` kept on the stack while `x -= …` ran in a loop). The
+      // trace settles it: a stale copy is not the variable — treat it as
+      // unlocated here and fall back to the last-known value below.
+      if (v.pointer !== undefined && !this.#isStaleCopy(frame, v, stepIndex)) {
         const field = await readPointerValue(v.pointer, ms);
         if (this.#isAddressType(v.solcType)) {
           variables.push(this.#renderContractAddress(v.name, field, v.typeLabel));
@@ -2077,7 +2256,7 @@ export class SolidityDebugSession {
           );
           variables.push({name: v.name, value, type, variablesReference: 0});
         }
-        continue;
+        return;
       }
       // Unavailable at the live pc: its stack slot has been freed/reused (common
       // under viaIR once a value local's LAST use has passed), yet it is still in
@@ -2086,10 +2265,192 @@ export class SolidityDebugSession {
       // it was still locatable, and marked stale. Sound: it reads the variable's
       // genuine historical value, never the current (reused) slot. Scalars only;
       // a complex reference type is shown only while live.
-      const stale = await this.#lastKnownScalar(frame, cu, v.name, stepIndex);
-      if (stale !== undefined) variables.push(stale);
+      const stale = await this.#lastKnownScalar(frame, cu, v.name, stepIndex, modelRef);
+      if (stale !== undefined) {
+        variables.push(stale);
+        return;
+      }
+      // A NAMED RETURN variable starts at its type's zero value (a Solidity
+      // guarantee). viaIR keeps no stack slot for it until its first assignment,
+      // so before that — when the trace shows no write to it since the frame was
+      // entered — its value is known without a location: the default.
+      if (v.kind === 'return' && this.#unwrittenSinceEntry(frame, cu, v, stepIndex)) {
+        const zero = v.isValueType
+          ? this.#isAddressType(v.solcType)
+            ? {value: addressHex(0n), type: v.typeLabel}
+            : this.#decodeField(cu, 0n, v.solcType, v.typeLabel, v.numberOfBytes)
+          : undefined;
+        if (zero !== undefined) {
+          variables.push({name: v.name, ...zero, variablesReference: 0});
+        }
+      }
     }
-    return variables;
+  }
+
+  /**
+   * The frame invocation's reference offset between the RUNTIME stack length and
+   * the provenance MODEL's stack length. Wherever the static model matches the
+   * executed path this offset is constant (it is the caller's share of the
+   * stack); the most common offset over the invocation's first located steps is
+   * the reference. Memoized per invocation.
+   */
+  #modelReference(frame: FrameInfo, curStep: number): number | undefined {
+    const {steps, model} = this.#require();
+    const d = model.at(curStep).combinedDepth;
+    let s0 = curStep;
+    while (s0 > 0 && model.at(s0 - 1).combinedDepth >= d) s0--;
+    const key = `${frame.address}:${s0}:${d}`;
+    if (this.#modelRefCache.has(key)) return this.#modelRefCache.get(key);
+    const counts = new Map<number, number>();
+    let seen = 0;
+    for (let j = s0; j <= curStep && seen < 24; j++) {
+      const m = model.at(j);
+      if (m.combinedDepth !== d || addressHex(steps[j]!.codeAddress) !== frame.address) continue;
+      if (steps[j]!.isInitCode) continue;
+      const len = this.#variablesFor(frame, steps[j]!.pc).find(
+        (x) => x.modelStackLength !== undefined,
+      )?.modelStackLength;
+      if (len === undefined) continue;
+      const off = steps[j]!.stack.length - len;
+      counts.set(off, (counts.get(off) ?? 0) + 1);
+      seen++;
+    }
+    let ref: number | undefined;
+    let best = 0;
+    for (const [off, n] of counts) if (n > best) [ref, best] = [off, n];
+    // Only memoize a settled reference (enough samples), else recompute later.
+    if (seen >= 24 || curStep - s0 > 5000) this.#modelRefCache.set(key, ref);
+    return ref;
+  }
+
+  readonly #modelRefCache = new Map<string, number | undefined>();
+
+  /** Whether `v`'s model-derived location is consistent with the trace at `step`. */
+  #modelMatches(v: ResolvedVariable, step: number, modelRef: number | undefined): boolean {
+    if (v.modelStackLength === undefined || modelRef === undefined) return true;
+    return this.#require().steps[step]!.stack.length - v.modelStackLength === modelRef;
+  }
+
+  /** No statement writing `v` ran in this frame invocation before `curStep`. */
+  #unwrittenSinceEntry(
+    frame: FrameInfo,
+    cu: CompilationUnit,
+    v: ResolvedVariable,
+    curStep: number,
+  ): boolean {
+    if (v.declId === undefined) return false;
+    const {steps, model} = this.#require();
+    const d = model.at(curStep).combinedDepth;
+    for (let j = curStep - 1, n = 0; j >= 0; j--, n++) {
+      if (n > 50000) return false; // too long to prove — don't guess
+      const m = model.at(j);
+      if (m.combinedDepth < d) return true; // reached the frame's entry
+      if (m.combinedDepth > d || addressHex(steps[j]!.codeAddress) !== frame.address) continue;
+      if (m.stmtId !== undefined && this.#statementWrites(cu, m.stmtId, v.declId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Whether the live stack slot `v.pointer` names at `curStep` holds a value
+   * produced BEFORE the start of `v`'s last write in this frame invocation — i.e.
+   * a leftover copy of an OLD value (value numbering names values, not variables,
+   * so after `x = …` / `x -= …` a surviving copy of x's previous value may still
+   * be named `x`). Decided from the trace: the slot's value is followed backward
+   * through DUP (copy source) / SWAP (move) to the step that produced it.
+   */
+  #isStaleCopy(frame: FrameInfo, v: ResolvedVariable, curStep: number): boolean {
+    const declId = v.declId;
+    const cu = frame.cu;
+    const ptr = v.pointer as {location?: string; slot?: number} | undefined;
+    if (declId === undefined || cu === undefined || ptr?.location !== 'stack') return false;
+    if (typeof ptr.slot !== 'number') return false;
+    const state = this.#require();
+    const {steps, model} = state;
+    const d = model.at(curStep).combinedDepth;
+    const evmDepth = steps[curStep]!.depth;
+    const addr = frame.address;
+    // 1. The step span [writeStart, writeEnd] of the last execution of a
+    // statement writing `v` in this invocation.
+    let writeStart: number | undefined;
+    let writeEnd: number | undefined;
+    let writeStmt: number | undefined;
+    let didWork = false;
+    for (let j = curStep - 1, n = 0; j >= 0 && n < 50000; j--, n++) {
+      const m = model.at(j);
+      if (m.combinedDepth < d) break; // left this invocation
+      if (addressHex(steps[j]!.codeAddress) !== addr) continue;
+      if (m.combinedDepth > d) {
+        if (writeStmt !== undefined) didWork = true; // a call made by the write
+        continue;
+      }
+      if (writeStmt !== undefined && m.stmtId === writeStmt) {
+        writeStart = j; // extend back to the span's first step
+        if (!isShuffleOp(steps[j]!.op)) didWork = true;
+        continue;
+      }
+      if (m.stmtId === undefined) continue;
+      if (writeStmt !== undefined) {
+        // The span ended. viaIR hoists single instructions of a statement ahead
+        // of it (a `PUSH <label>` attributed to `x -= …`): a span that did no real
+        // work is such a fragment, not the write having run — keep looking.
+        if (didWork) break;
+        writeStmt = undefined;
+        writeStart = writeEnd = undefined;
+      }
+      if (this.#statementWrites(cu, m.stmtId, declId)) {
+        writeStmt = m.stmtId;
+        writeStart = j;
+        writeEnd = j;
+        didWork = !isShuffleOp(steps[j]!.op);
+      }
+    }
+    if (writeStmt !== undefined && !didWork) writeStart = writeEnd = undefined;
+    if (writeStart === undefined || writeEnd === undefined) return false;
+    // 2. Follow the slot's value back through its lineage (DUP = copy of a
+    // source slot, SWAP = move). The variable's current value was produced OR
+    // copied while its last write executed; a leftover copy of an OLD value never
+    // touches that span. (A plain "produced after the write" test is wrong: a
+    // write may copy an existing value, e.g. `lo = a` returning a parameter.)
+    let i = steps[curStep]!.stack.length - 1 - ptr.slot; // absolute index from bottom
+    const inWrite = (j: number): boolean => j >= writeStart! && j <= writeEnd!;
+    // A COMPOUND write (`x -= e`, `x++`) always computes a FRESH value inside the
+    // statement, so only a value PRODUCED during it can be x's; shuffles (DUP/
+    // SWAP) of older values during the statement prove nothing. A PLAIN write
+    // (`x = e`, a declaration) may just copy an existing value (`lo = a`), so
+    // there being copied/moved during the write counts as current.
+    const compound = this.#statementWriteKind(cu, writeStmt!, declId) === 'compound';
+    for (let j = curStep - 1; j >= writeStart; j--) {
+      const st = steps[j]!;
+      if (st.depth !== evmDepth) continue; // an external sub-call's own stack
+      const after = steps[j + 1]!.stack.length;
+      const len = st.stack.length;
+      const op = st.op;
+      if (op.startsWith('DUP')) {
+        if (i === after - 1) {
+          if (inWrite(j) && !compound) return false; // copied during the write ⇒ current
+          i = len - Number(op.slice(3)); // a later copy: follow its source
+        }
+        continue;
+      }
+      if (op.startsWith('SWAP')) {
+        const n = Number(op.slice(4));
+        const touched = i === len - 1 || i === len - 1 - n;
+        if (touched && inWrite(j) && !compound) return false; // moved into place by the write
+        if (i === len - 1) i = len - 1 - n;
+        else if (i === len - 1 - n) i = len - 1;
+        continue;
+      }
+      if (i === after - 1 && after > 0 && producesValue(op)) {
+        // Produced during the write ⇒ current; produced after it ⇒ not a value
+        // the write gave the variable (a mis-named slot) ⇒ treat as stale.
+        return !inWrite(j);
+      }
+      if (i >= after) return false; // defensive: index out of range
+    }
+    return true; // lineage predates the write ⇒ an OLD value's copy
   }
 
   /**
@@ -2111,16 +2472,29 @@ export class SolidityDebugSession {
     cu: CompilationUnit,
     name: string,
     curStep: number,
+    modelRef?: number,
   ): Promise<DebugProtocol.Variable | undefined> {
     const state = this.#require();
     const {steps, model} = state;
     const frameDepth = model.at(curStep).combinedDepth;
     const addr = frame.address;
+    let declId: number | undefined;
     for (let j = curStep - 1; j >= 0; j--) {
       const m = model.at(j);
       if (m.combinedDepth < frameDepth) break; // returned out of this invocation
       if (m.combinedDepth > frameDepth) continue; // inside a sub-call
       if (addressHex(steps[j]!.codeAddress) !== addr) continue;
+      if (steps[j]!.isInitCode) continue; // init code: not modelled (see #localVariables)
+      // Never reach back ACROSS a write to the variable: a value located before
+      // `x = …` / `x++` / `delete x` / an asm block touching `x` is superseded,
+      // and showing it as "last known" would be wrong, not merely stale.
+      if (
+        declId !== undefined &&
+        m.stmtId !== undefined &&
+        this.#statementWrites(cu, m.stmtId, declId)
+      ) {
+        return undefined;
+      }
       const v = this.#variablesFor(frame, steps[j]!.pc).find(
         (x) =>
           x.name === name &&
@@ -2129,23 +2503,45 @@ export class SolidityDebugSession {
             x.kind === 'local'),
       );
       if (v === undefined) continue;
+      if (declId === undefined && v.declId !== undefined) {
+        // First sighting (the scan starts where the variable is in scope but
+        // unlocated): from here on, watch for writes — and check this step too.
+        declId = v.declId;
+        if (m.stmtId !== undefined && this.#statementWrites(cu, m.stmtId, declId)) {
+          return undefined;
+        }
+      }
       if (v.members !== undefined || v.array !== undefined) return undefined;
       const ms = machineStateFor(state.cursor.at(j), addr);
       if (v.bytes !== undefined) {
-        const hex = await readPointerBytes(v.bytes.pointer, ms);
+        // A location that does not decode here (e.g. a slot read before the
+        // variable was assigned) is not a value the variable held — keep looking
+        // further back rather than surfacing the failure as a live value.
+        let hex: string;
+        try {
+          hex = await readPointerBytes(v.bytes.pointer, ms);
+        } catch {
+          continue;
+        }
         const raw = v.bytes.isString
           ? `"${Buffer.from(hex.slice(2), 'hex').toString('utf8')}"`
           : hex;
         return this.#staleVariable(v.name, raw, v.typeLabel);
       }
       if (v.pointer === undefined) continue; // present but unlocated here too
+      if (!this.#modelMatches(v, j, modelRef)) continue; // model off this path here
+      if (this.#isStaleCopy(frame, v, j)) continue; // an old value's copy, not v
       const field = await readPointerValue(v.pointer, ms);
       if (this.#isAddressType(v.solcType)) {
-        return this.#staleVariable(
-          v.name,
-          addressHex(field & ((1n << 160n) - 1n)),
-          v.typeLabel,
-        );
+        // Same rendering as a live address (contract label + expandable state),
+        // only marked stale — so a value does not change presentation merely
+        // because its slot was freed (viaIR) while the variable stayed in scope.
+        const live = this.#renderContractAddress(v.name, field, v.typeLabel);
+        return {
+          ...live,
+          value: `${live.value} (last known)`,
+          presentationHint: {attributes: ['readOnly']},
+        };
       }
       const {value, type} = this.#decodeField(
         cu,
@@ -2157,6 +2553,85 @@ export class SolidityDebugSession {
       return this.#staleVariable(v.name, value, type);
     }
     return undefined;
+  }
+
+  /**
+   * Whether statement `stmtId` may WRITE the variable `declId`: an assignment
+   * with it on the left-hand side (incl. tuple destructuring), `++`/`--`/
+   * `delete` on it, or an inline-assembly block referencing it (conservative —
+   * assembly reads and writes are not distinguished). Memoized per statement.
+   */
+  #statementWrites(cu: CompilationUnit, stmtId: number, declId: number): boolean {
+    let writes = this.#writesCache.get(stmtId);
+    if (writes === undefined) {
+      writes = new Set<number>();
+      const compound = new Set<number>();
+      let compoundNow = false;
+      this.#compoundWrites.set(stmtId, compound);
+      const stmt = cu.nodeById(stmtId);
+      const visit = (n: AstNode, inLhs: boolean): void => {
+        if (n.nodeType === 'Assignment') {
+          const kids = n.children();
+          // The right-hand side is the child starting last.
+          const rhs = kids.reduce((a, b) => (b.srcStart > a.srcStart ? b : a), kids[0]!);
+          compoundNow = n.operator !== '=';
+          for (const k of kids) visit(k, k !== rhs);
+          compoundNow = false;
+          return;
+        }
+        if (
+          n.nodeType === 'UnaryOperation' &&
+          (n.operator === '++' || n.operator === '--' || n.operator === 'delete')
+        ) {
+          compoundNow = n.operator !== 'delete';
+          for (const k of n.children()) visit(k, true);
+          compoundNow = false;
+          return;
+        }
+        if (n.nodeType === 'InlineAssembly') {
+          for (const id of n.externalReferenceIds()) writes!.add(id);
+          return;
+        }
+        if (inLhs && n.nodeType === 'Identifier' && n.referencedDeclaration !== undefined) {
+          writes!.add(n.referencedDeclaration);
+          if (compoundNow) compound.add(n.referencedDeclaration);
+        }
+        // Index/member accesses on the LHS write into the base's CONTENTS, not
+        // the stack variable itself (a memory handle is unchanged).
+        const lhsPasses = inLhs && (n.nodeType === 'TupleExpression' || n.nodeType === 'Identifier');
+        for (const k of n.children()) {
+          // Only the statement's OWN expressions: a nested statement (an `if`/
+          // `while` body) runs under its own steps — the loop's condition steps
+          // must not count as writing what the body assigns.
+          if (k !== stmt && isNestedStatement(k)) continue;
+          visit(k, lhsPasses);
+        }
+      };
+      if (stmt !== undefined) {
+        // A declaration statement initialises its own variables (a write too).
+        if (stmt.nodeType === 'VariableDeclarationStatement') {
+          for (const d of stmt.children()) {
+            if (d.nodeType === 'VariableDeclaration') writes.add(d.id);
+          }
+        }
+        visit(stmt, false);
+      }
+      this.#writesCache.set(stmtId, writes);
+    }
+    return writes.has(declId);
+  }
+
+  readonly #writesCache = new Map<number, Set<number>>();
+  readonly #compoundWrites = new Map<number, Set<number>>();
+
+  /** Whether statement `stmtId` writes `declId` by a compound update (`-=`, `++`). */
+  #statementWriteKind(
+    cu: CompilationUnit,
+    stmtId: number,
+    declId: number,
+  ): 'compound' | 'plain' | undefined {
+    if (!this.#statementWrites(cu, stmtId, declId)) return undefined;
+    return this.#compoundWrites.get(stmtId)?.has(declId) ? 'compound' : 'plain';
   }
 
   /** A read-only DAP variable whose value is flagged as a stale last-known value. */

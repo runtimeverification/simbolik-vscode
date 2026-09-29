@@ -39,12 +39,29 @@ function readSlice(byteHex: string, offset: bigint, length: bigint): Data {
   return Data.fromHex('0x' + slice);
 }
 
+/**
+ * How far a read may run past the end of a byte region. Word-granular reads of
+ * a region's tail legitimately overhang (and read as zeros, as in the EVM), but
+ * no genuine value extends further: a string/bytes whose length word points far
+ * beyond the region is a misdecoded pointer (e.g. a reused stack slot), and
+ * materializing it would allocate up to gigabytes.
+ */
+const MAX_OVERHANG_BYTES = 1n << 16n;
+
 /** Build a `Machine.State.Bytes` view over a fixed byte-hex string. */
 function bytesRegion(byteHex: string): Machine.State.Bytes {
+  const size = BigInt(byteHex.length / 2);
   return {
-    length: Promise.resolve(BigInt(byteHex.length / 2)),
-    read: async ({slice}: {slice: Machine.State.Slice}) =>
-      readSlice(byteHex, slice.offset, slice.length),
+    length: Promise.resolve(size),
+    read: async ({slice}: {slice: Machine.State.Slice}) => {
+      if (slice.offset + slice.length > size + MAX_OVERHANG_BYTES) {
+        throw new RangeError(
+          `read of ${slice.length} bytes at ${slice.offset} exceeds the ` +
+            `${size}-byte region`,
+        );
+      }
+      return readSlice(byteHex, slice.offset, slice.length);
+    },
   };
 }
 
@@ -157,6 +174,7 @@ export async function readPointerRegions(
   pointer: Pointer,
   machineState: Machine.State,
 ): Promise<bigint[]> {
+  await assertListCountsFit(pointer, machineState);
   const cursor = await dereference(pointer, {state: machineState});
   const view = await cursor.view(machineState);
   const values: bigint[] = [];
@@ -164,6 +182,57 @@ export async function readPointerRegions(
     values.push((await view.read(region)).asUint());
   }
   return values;
+}
+
+/**
+ * Reject a `Group` whose `List` count is read from state (`count: {$read: n}`,
+ * e.g. a dynamic memory array's length word) when that count cannot fit the
+ * element region's byte area. Dereferencing enumerates EVERY element region
+ * eagerly, so a misdecoded length (a reused stack slot pointing at arbitrary
+ * memory) would otherwise try to build ~2^255 regions and exhaust the heap.
+ */
+async function assertListCountsFit(
+  pointer: Pointer,
+  machineState: Machine.State,
+): Promise<void> {
+  if (typeof pointer !== 'object' || pointer === null || !('group' in pointer)) {
+    return;
+  }
+  const members = pointer.group as unknown[];
+  const isList = (p: unknown): p is {list: {count: unknown; is: unknown}} =>
+    typeof p === 'object' && p !== null && 'list' in p;
+  const lists = members.filter(isList).filter((p) => {
+    const c = p.list.count;
+    return typeof c === 'object' && c !== null && '$read' in c;
+  });
+  if (lists.length === 0) return;
+  const head = {group: members.filter((p) => !isList(p))} as Pointer;
+  const view = await (await dereference(head, {state: machineState})).view(
+    machineState,
+  );
+  for (const {list} of lists) {
+    const name = (list.count as {$read: string}).$read;
+    const region = view.regions.named(name)[0];
+    if (region === undefined) continue;
+    const count = (await view.read(region)).asUint();
+    const is = list.is as {location?: string; length?: unknown};
+    const regionKey = is.location as keyof Machine.State | undefined;
+    const target = regionKey === undefined ? undefined : machineState[regionKey];
+    if (
+      target === undefined ||
+      typeof target !== 'object' ||
+      !('length' in target) ||
+      typeof is.length !== 'number'
+    ) {
+      continue;
+    }
+    const size = await (target as Machine.State.Bytes).length;
+    if (count * BigInt(is.length) > size + MAX_OVERHANG_BYTES) {
+      throw new RangeError(
+        `collection length ${count} exceeds the ${size}-byte ${String(regionKey)} region`,
+      );
+    }
+  }
 }
 
 /**

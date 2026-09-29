@@ -8,6 +8,10 @@ interface RawAstNode {
 
 /** Node types treated as "statements" by {@link closestStatement}. */
 function isStatement(nodeType: string): boolean {
+  // Yul nodes are never statements of their own: they carry no AST id (every
+  // one reads as -1, shared across ALL assembly blocks) and viaIR maps assembly
+  // only to the whole block, so the enclosing `InlineAssembly` is the statement.
+  if (nodeType.startsWith('Yul')) return false;
   return (
     nodeType.endsWith('Statement') ||
     nodeType === 'Return' ||
@@ -29,6 +33,7 @@ export class AstNode {
   #srcStart = 0;
   #srcLength = 0;
   #srcFileId = 0;
+  #children: readonly AstNode[] | undefined;
 
   constructor(raw: RawAstNode, parent?: AstNode) {
     this.#raw = raw;
@@ -61,6 +66,34 @@ export class AstNode {
    * The raw `visibility` field of a declaration (`public` / `external` /
    * `internal` / `private`), e.g. on a `FunctionDefinition`; `undefined` if absent.
    */
+  /**
+   * For a `VariableDeclarationStatement`: its `assignments` — the declared
+   * variable ids in tuple order, with `null` for a skipped component (`(a, , b)`).
+   */
+  assignments(): (number | null)[] {
+    const a = this.#raw.assignments;
+    if (!Array.isArray(a)) return [];
+    return a.map((x) => (typeof x === 'number' ? x : null));
+  }
+
+  /** The raw `operator` field (e.g. `=`, `+=`, `++`, `delete`), if present. */
+  get operator(): string | undefined {
+    const value = this.#raw.operator;
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  /**
+   * For an `InlineAssembly` node: the AST declaration ids of the Solidity
+   * variables it references (`externalReferences[].declaration`).
+   */
+  externalReferenceIds(): number[] {
+    const refs = this.#raw.externalReferences;
+    if (!Array.isArray(refs)) return [];
+    return refs
+      .map((r) => (r as {declaration?: unknown}).declaration)
+      .filter((d): d is number => typeof d === 'number');
+  }
+
   get visibility(): string | undefined {
     const value = this.#raw.visibility;
     return typeof value === 'string' ? value : undefined;
@@ -202,7 +235,11 @@ export class AstNode {
    * Direct AST child nodes. Discovered structurally: every value that is itself
    * an AST node (has a `nodeType`), and every element of arrays of such nodes.
    */
-  children(): AstNode[] {
+  children(): readonly AstNode[] {
+    // Memoized: the raw AST is immutable, so the wrappers are too. Callers (e.g.
+    // findInnermostNode, run once per source-map entry by the frame-base anchor)
+    // otherwise re-allocate the whole path from the root on every lookup.
+    if (this.#children !== undefined) return this.#children;
     const out: AstNode[] = [];
     for (const key of Object.keys(this.#raw)) {
       if (key === 'nodeType' || key === 'id' || key === 'src') {
@@ -219,6 +256,7 @@ export class AstNode {
         }
       }
     }
+    this.#children = out;
     return out;
   }
 }

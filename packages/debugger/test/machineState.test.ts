@@ -26,7 +26,12 @@
 import type {MachineState} from '@simbolik/lifting';
 import {describe, expect, it} from 'vitest';
 
-import {machineStateFor, readPointerValue} from '../src/machineState.js';
+import {
+  machineStateFor,
+  readPointerBytes,
+  readPointerRegions,
+  readPointerValue,
+} from '../src/machineState.js';
 
 // The code address the reconstructed state is read for. Account keys in a real
 // trace are lowercase; `machineStateFor` lowercases the lookup, so this resolves.
@@ -161,5 +166,69 @@ describe('machineStateFor — even-length regression (padding is a no-op)', () =
       machineStateFor(state, ADDR),
     );
     expect(value).toBe(42n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bounded reads: a misdecoded (garbage) length must fail fast, not allocate GBs
+// ---------------------------------------------------------------------------
+
+describe('machineStateFor — reads far past the end of a region are rejected', () => {
+  // 64 bytes of memory: two words.
+  const ms = () =>
+    machineStateFor(
+      makeState({memory: ['00'.repeat(32), '11'.repeat(32)]}),
+      ADDR,
+    );
+
+  it('a string whose length word is garbage throws a RangeError (no huge allocation)', async () => {
+    // A memory string whose length word is 100_000_000 (the handle came from a
+    // reused stack slot): the old reader silently materialized a 200 MB string
+    // per such read (and OOM'd on real traces); it must be rejected instead.
+    const big = machineStateFor(
+      makeState({memory: ['00'.repeat(32), (100_000_000).toString(16).padStart(64, '0')]}),
+      ADDR,
+    );
+    const pointer = {
+      group: [
+        {name: 'len', location: 'memory', offset: 32, length: 32},
+        {name: 'data', location: 'memory', offset: 64, length: {$read: 'len'}},
+      ],
+    } as never;
+    await expect(readPointerBytes(pointer, big)).rejects.toThrow(RangeError);
+  });
+
+  it('a small overhang past the end still reads as zeros (EVM semantics)', async () => {
+    const pointer = {location: 'memory', offset: 32, length: 64} as never;
+    const hex = await readPointerBytes(pointer, ms());
+    expect(hex).toBe('0x' + '11'.repeat(32) + '00'.repeat(32));
+  });
+
+  it('an array whose length word cannot fit memory is rejected before enumerating elements', async () => {
+    // A dynamic memory array handle (0x20) whose length word (memory[0x20..]) is
+    // 0x1111… — ~2^252 elements, which dereferencing would try to enumerate.
+    const state = machineStateFor(
+      makeState({stack: ['0x20'], memory: ['00'.repeat(32), '11'.repeat(32)]}),
+      ADDR,
+    );
+    const pointer = {
+      group: [
+        {name: 'base', location: 'stack', slot: 0, offset: 0, length: 32},
+        {name: 'len', location: 'memory', offset: {$read: 'base'}, length: 32},
+        {
+          list: {
+            count: {$read: 'len'},
+            each: 'i',
+            is: {
+              name: 'element',
+              location: 'memory',
+              offset: {$sum: [{$read: 'base'}, 32, {$product: ['i', 32]}]},
+              length: 32,
+            },
+          },
+        },
+      ],
+    } as never;
+    await expect(readPointerRegions(pointer, state)).rejects.toThrow(RangeError);
   });
 });

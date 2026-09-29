@@ -240,6 +240,49 @@ describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
   });
 });
 
+/**
+ * The Callee build-info with a same-named DECOY `Callee` (the Caller's code,
+ * declared in another file) inserted AHEAD of the real one — mirroring a Foundry
+ * build where forge-std and solmate both declare `MockERC20`.
+ */
+function calleeBuildInfoWithDecoy(): unknown {
+  const bi = structuredClone(CALLEE_BI_JSON) as {
+    output: {contracts: Record<string, Record<string, unknown>>};
+  };
+  const callerContracts = (
+    CALLER_BI_JSON as {output: {contracts: Record<string, Record<string, unknown>>}}
+  ).output.contracts[CALLER_PATH]!;
+  bi.output.contracts = {
+    'src/Decoy.sol': {Callee: callerContracts['Caller']},
+    ...bi.output.contracts,
+  };
+  return bi;
+}
+
+describe('geth multi-frame lift — same-named contracts in different files', () => {
+  // With a geth trace (no per-step code) ONLY the entry's sourcePath can tell the
+  // two apart — which is why the resolver sends it. (kontrol traces carry code, so
+  // a name-only ambiguous entry is resolved by runtime-code identification.)
+  it('a sourcePath-qualified entry resolves the declared contract, not the first same-named decoy', async () => {
+    const extra = {sourcePath: CALLEE_PATH};
+    const inputs = gethMultiFrameInputs() as unknown as {
+      contractsByAddress: Record<string, Record<string, unknown>>;
+    };
+    inputs.contractsByAddress[META.calleeAddress.toLowerCase()] = {
+      buildInfoJson: calleeBuildInfoWithDecoy(),
+      contractName: 'Callee',
+      ...extra,
+    };
+    const session = new SolidityDebugSession();
+    await session.launch(inputs as unknown as LaunchInputs);
+    continueIntoCallee(session);
+
+    const [top] = session.stackTrace().stackFrames;
+    expect(top!.source?.path).toBe(CALLEE_PATH);
+    expect(top!.name).toContain('compute');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. Per-frame variables — decoded against each frame's own (address) CU
 // ---------------------------------------------------------------------------
