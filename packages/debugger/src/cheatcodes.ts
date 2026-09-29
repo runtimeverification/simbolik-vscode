@@ -35,6 +35,8 @@ import {
 
 import type {Step} from '@simbolik/lifting';
 
+import {addressHex, wordToBigInt} from './hex.js';
+
 /** The well-known cheatcode target address (lowercase 0x form, 42 chars). */
 export const CHEATCODE_ADDRESS = '0x7109709ecfa91a80626ff3989d68f67f5b1dd12d';
 
@@ -123,7 +125,7 @@ const SELECTOR_TABLE = buildSelectorTable();
 
 /** Parse a machine WORD (hex, optionally `0x`-prefixed) to a number. */
 function wordToNumber(word: string): number {
-  return Number(BigInt(word.startsWith('0x') ? word : `0x${word}`));
+  return Number(wordToBigInt(word));
 }
 
 /**
@@ -258,7 +260,7 @@ function decodeArg(
   }
 
   if (argType === 'address') {
-    const addr = '0x' + (word & ADDRESS_MASK).toString(16).padStart(40, '0');
+    const addr = addressHex(word & ADDRESS_MASK);
     return {full: addr, display: abbreviateAddress(addr)};
   }
   if (argType === 'bool') {

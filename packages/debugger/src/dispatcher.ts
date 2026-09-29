@@ -10,10 +10,7 @@
  */
 import type {DebugProtocol} from '@vscode/debugprotocol';
 
-import {
-  SolidityDebugSession,
-  EXCEPTION_BREAKPOINT_FILTERS,
-} from './session.js';
+import {CAPABILITIES, SolidityDebugSession} from './session.js';
 
 /** DAP `output` event categories the resolver may log into. */
 export type OutputCategory = 'console' | 'stdout' | 'stderr';
@@ -39,7 +36,7 @@ export type SessionResolver = (
   args:
     | DebugProtocol.LaunchRequestArguments
     | DebugProtocol.AttachRequestArguments,
-  ctx?: ResolveContext,
+  ctx?: ResolveContext
 ) => Promise<SolidityDebugSession>;
 
 /** Commands that require a live session; rejected with an error before launch. */
@@ -110,7 +107,7 @@ export class DapDispatcher {
    * failure becomes an error response.
    */
   async handle(
-    message: DebugProtocol.ProtocolMessage,
+    message: DebugProtocol.ProtocolMessage
   ): Promise<DebugProtocol.ProtocolMessage[]> {
     const request = message as DebugProtocol.Request;
     const command = request.command;
@@ -119,7 +116,9 @@ export class DapDispatcher {
     // Guard: session-requiring commands received before launch → error, no throw,
     // and the resolver is never called.
     if (this.#session === undefined && SESSION_COMMANDS.has(command)) {
-      return [this.#error(request, `no active session for request: ${command}`)];
+      return [
+        this.#error(request, `no active session for request: ${command}`),
+      ];
     }
 
     // Backstop the documented invariant: any failure in a session call (e.g. a
@@ -138,30 +137,14 @@ export class DapDispatcher {
   async #dispatch(
     request: DebugProtocol.Request,
     command: string,
-    args: Record<string, unknown> | undefined,
+    args: Record<string, unknown> | undefined
   ): Promise<DebugProtocol.ProtocolMessage[]> {
     switch (command) {
-      case 'initialize': {
-        const capabilities: DebugProtocol.Capabilities = {
-          supportsConfigurationDoneRequest: true,
-          supportsStepBack: true,
-          supportsSteppingGranularity: true,
-          supportsDisassembleRequest: true,
-          supportsInstructionBreakpoints: true,
-          // "Dynamic" breakpoints (stop-on-call/create/revert/…) shown as
-          // toggles in the Breakpoints panel; matched during continue.
-          exceptionBreakpointFilters: EXCEPTION_BREAKPOINT_FILTERS.map((f) => ({
-            filter: f.filter,
-            label: f.label,
-            description: f.description,
-            default: false,
-          })),
-        };
+      case 'initialize':
         return [
-          this.#response(request, capabilities),
+          this.#response(request, CAPABILITIES),
           this.#dispatcherEvent('initialized'),
         ];
-      }
 
       case 'launch':
       case 'attach': {
@@ -182,12 +165,15 @@ export class DapDispatcher {
         try {
           session = await this.#resolve(
             (args ?? {}) as DebugProtocol.LaunchRequestArguments,
-            ctx,
+            ctx
           );
         } catch (err) {
           return [
             ...outputs,
-            this.#error(request, err instanceof Error ? err.message : String(err)),
+            this.#error(
+              request,
+              err instanceof Error ? err.message : String(err)
+            ),
           ];
         }
         this.#session = session;
@@ -197,43 +183,37 @@ export class DapDispatcher {
 
       case 'configurationDone':
         return [this.#response(request, {})];
+    }
 
+    if (!SESSION_COMMANDS.has(command)) {
+      return [this.#error(request, `unsupported request: ${command}`)];
+    }
+    // Every remaining command runs against the live session. `args` is the
+    // untyped DAP `arguments` object, passed through as each request's own
+    // argument type (`a`).
+    const session = this.#requireSession();
+    const a = (args ?? {}) as never;
+    const reply = (body: unknown): DebugProtocol.ProtocolMessage[] => [
+      this.#response(request, body),
+    ];
+    /** A stepping command: acknowledge, then emit the session's stop event(s). */
+    const moved = (body: unknown = {}): DebugProtocol.ProtocolMessage[] => [
+      this.#response(request, body),
+      ...this.#drain(),
+    ];
+    switch (command) {
       case 'threads':
-        return [this.#response(request, this.#requireSession().threads())];
-
+        return reply(session.threads());
       case 'stackTrace':
-        return [this.#response(request, this.#requireSession().stackTrace())];
-
+        return reply(session.stackTrace());
       case 'scopes':
-        return [
-          this.#response(
-            request,
-            this.#requireSession().scopes(args?.['frameId'] as number),
-          ),
-        ];
-
+        return reply(session.scopes(args?.['frameId'] as number));
       case 'variables':
-        return [
-          this.#response(
-            request,
-            await this.#requireSession().variables(
-              args?.['variablesReference'] as number,
-            ),
-          ),
-        ];
-
+        return reply(
+          await session.variables(args?.['variablesReference'] as number)
+        );
       case 'disassemble':
-        return [
-          this.#response(
-            request,
-            this.#requireSession().disassemble(
-              args as unknown as Parameters<
-                SolidityDebugSession['disassemble']
-              >[0],
-            ),
-          ),
-        ];
-
+        return reply(session.disassemble(a));
       case 'source': {
         // VSCode may send the reference top-level or nested under `source`.
         const sourceArg = args?.['source'] as
@@ -242,80 +222,38 @@ export class DapDispatcher {
         const ref =
           (args?.['sourceReference'] as number | undefined) ??
           sourceArg?.sourceReference;
-        return [
-          this.#response(request, this.#requireSession().source(ref as number)),
-        ];
+        return reply(session.source(ref as number));
       }
-
       case 'next':
-        this.#requireSession().next(args);
-        return [this.#response(request, {}), ...this.#drain()];
-
+        session.next(args);
+        return moved();
       case 'stepIn':
-        this.#requireSession().stepIn(args);
-        return [this.#response(request, {}), ...this.#drain()];
-
+        session.stepIn(args);
+        return moved();
       case 'stepOut':
-        this.#requireSession().stepOut(args);
-        return [this.#response(request, {}), ...this.#drain()];
-
+        session.stepOut(args);
+        return moved();
       case 'stepBack':
-        this.#requireSession().stepBack(args);
-        return [this.#response(request, {}), ...this.#drain()];
-
+        session.stepBack(args);
+        return moved();
       case 'continue':
-        this.#requireSession().continue(args);
-        return [
-          this.#response(request, {allThreadsContinued: true}),
-          ...this.#drain(),
-        ];
-
+        session.continue(args);
+        return moved({allThreadsContinued: true});
       case 'reverseContinue':
-        this.#requireSession().reverseContinue(args);
-        return [
-          this.#response(request, {allThreadsContinued: true}),
-          ...this.#drain(),
-        ];
-
+        session.reverseContinue(args);
+        return moved({allThreadsContinued: true});
       case 'setBreakpoints':
-        return [
-          this.#response(
-            request,
-            this.#requireSession().setBreakpoints(
-              args as unknown as Parameters<
-                SolidityDebugSession['setBreakpoints']
-              >[0],
-            ),
-          ),
-        ];
-
+        return reply(session.setBreakpoints(a));
       case 'setInstructionBreakpoints':
-        return [
-          this.#response(
-            request,
-            this.#requireSession().setInstructionBreakpoints(
-              args as unknown as Parameters<
-                SolidityDebugSession['setInstructionBreakpoints']
-              >[0],
-            ),
-          ),
-        ];
-
+        return reply(session.setInstructionBreakpoints(a));
       case 'setExceptionBreakpoints':
-        return [
-          this.#response(
-            request,
-            this.#requireSession().setExceptionBreakpoints(
-              (args ?? {}) as unknown as Parameters<
-                SolidityDebugSession['setExceptionBreakpoints']
-              >[0],
-            ),
-          ),
-        ];
-
+        return reply(session.setExceptionBreakpoints(a));
       case 'disconnect':
-        this.#requireSession().disconnect();
-        return [this.#response(request, {}), this.#dispatcherEvent('terminated')];
+        session.disconnect();
+        return [
+          this.#response(request, {}),
+          this.#dispatcherEvent('terminated'),
+        ];
 
       default:
         return [this.#error(request, `unsupported request: ${command}`)];
@@ -327,7 +265,7 @@ export class DapDispatcher {
   /** Build a success response for `request` carrying `body`. */
   #response(
     request: DebugProtocol.Request,
-    body: unknown,
+    body: unknown
   ): DebugProtocol.Response {
     return {
       seq: this.#seq++,
@@ -342,7 +280,7 @@ export class DapDispatcher {
   /** Build a failure response for `request` with a human-readable `message`. */
   #error(
     request: DebugProtocol.Request,
-    message: string,
+    message: string
   ): DebugProtocol.Response {
     return {
       seq: this.#seq++,
@@ -378,7 +316,7 @@ export class DapDispatcher {
     const session = this.#requireSession();
     const pending = session.events.slice(this.#cursor);
     this.#cursor = session.events.length;
-    return pending.map((e) => ({
+    return pending.map(e => ({
       seq: this.#seq++,
       type: 'event',
       event: e.event,

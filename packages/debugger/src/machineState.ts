@@ -11,10 +11,7 @@ import {Data, dereference} from '@ethdebug/pointers';
 import type {Machine, Pointer} from '@ethdebug/pointers';
 import type {MachineState} from '@simbolik/lifting';
 
-/** Strip a leading `0x`, if present. */
-function stripHex(hex: string): string {
-  return hex.startsWith('0x') ? hex.slice(2) : hex;
-}
+import {strip0x} from './hex.js';
 
 /**
  * Pad an EVM word to a full 32-byte (64-hex) big-endian word (no `0x`).
@@ -25,7 +22,7 @@ function stripHex(hex: string): string {
  * odd-length case, and it gives `readSlice` a full 32-byte word to slice from.
  */
 function padWord(hex: string): string {
-  return stripHex(hex).padStart(64, '0');
+  return strip0x(hex).padStart(64, '0');
 }
 
 /**
@@ -94,7 +91,7 @@ export function machineStateFor(
     },
   });
 
-  const memoryHex = state.memory.map(stripHex).join('');
+  const memoryHex = state.memory.map(strip0x).join('');
 
   const adapter = {
     traceIndex: Promise.resolve(BigInt(state.index)),
@@ -124,9 +121,9 @@ export function machineStateFor(
     memory: bytesRegion(memoryHex),
     storage: words(),
     transient: words(),
-    calldata: bytesRegion(stripHex(state.calldata)),
-    returndata: bytesRegion(stripHex(state.returnData)),
-    code: bytesRegion(stripHex(state.bytecode)),
+    calldata: bytesRegion(strip0x(state.calldata)),
+    returndata: bytesRegion(strip0x(state.returnData)),
+    code: bytesRegion(strip0x(state.bytecode)),
   };
 
   return adapter as unknown as Machine.State;

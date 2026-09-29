@@ -25,16 +25,15 @@
  */
 import type {StateCursor} from '@simbolik/lifting';
 import {
-  buildInstructionIndex,
   closestFunctionOrModifier,
   closestStatement,
-  findInnermostNode,
   type AstNode,
   type CompilationUnit,
   type Contract,
   type Jump,
-  type SourceMapEntry,
 } from '@simbolik/solc';
+
+import {mapPc} from './contractAnalysis.js';
 
 /** The compilation unit + contract a single trace step executes in. */
 export interface StepResolution {
@@ -146,10 +145,72 @@ export interface ModifierEntry {
   col: number;
 }
 
-/** Per-contract source-map indexing, cached across steps. */
-interface ContractIndex {
-  pcToInstruction: Map<number, number>;
-  sourceMap: SourceMapEntry[];
+/**
+ * Modifier-entry detection, per combinedDepth level (a function and its
+ * modifiers share one level): the level's current function and the index of
+ * the last of its modifier invocations that began. A step entering a modifier
+ * whose invocation comes LATER than that is an entry; entering an earlier one is
+ * a modifier resuming after its `_;`.
+ */
+class ModifierEntryDetector {
+  readonly #levelFn: (AstNode | undefined)[] = [];
+  readonly #levelEntered: number[] = [];
+  #prevLevel = 0;
+  readonly #invocationsOf = new Map<
+    AstNode,
+    ReturnType<AstNode['modifierInvocations']>
+  >();
+
+  /**
+   * Feed the next step (its combinedDepth `level` and enclosing definition);
+   * returns the entry when the step begins one of the level's modifiers. With no
+   * `cu` (optimized or unresolved code) modifier entries are not detected.
+   */
+  visit(
+    level: number,
+    def: AstNode | undefined,
+    cu: CompilationUnit | undefined,
+  ): ModifierEntry | undefined {
+    for (let dd = this.#prevLevel + 1; dd <= level; dd++) {
+      this.#levelFn[dd] = undefined;
+      this.#levelEntered[dd] = -1;
+    }
+    this.#prevLevel = level;
+    if (def?.nodeType === 'FunctionDefinition') {
+      if (this.#levelFn[level] !== def) {
+        this.#levelFn[level] = def;
+        this.#levelEntered[level] = -1;
+      }
+      return undefined;
+    }
+    if (def?.nodeType !== 'ModifierDefinition' || cu === undefined) {
+      return undefined;
+    }
+    const fn = this.#levelFn[level];
+    if (fn === undefined) return undefined;
+    const entered = this.#levelEntered[level] ?? -1;
+    let invocations = this.#invocationsOf.get(fn);
+    if (invocations === undefined) {
+      invocations = fn.modifierInvocations();
+      this.#invocationsOf.set(fn, invocations);
+    }
+    const k = invocations.findIndex(
+      (inv, n) =>
+        n > entered && (inv.modifierId === def.id || inv.name === def.name),
+    );
+    const inv = invocations[k]?.node;
+    const invSource = inv !== undefined ? cu.sourceById(inv.srcFileId) : undefined;
+    if (inv === undefined || invSource === undefined) return undefined;
+    this.#levelEntered[level] = k;
+    const pos = invSource.offsetToPosition(inv.srcStart);
+    return {
+      fn,
+      invocation: inv,
+      path: invSource.path,
+      line: pos.line,
+      col: pos.column,
+    };
+  }
 }
 
 /**
@@ -173,27 +234,6 @@ export class SteppingModel {
   readonly last: number;
 
   constructor(cursor: StateCursor, resolve: StepResolver) {
-    const runtimeCache = new Map<Contract, ContractIndex>();
-    const initCache = new Map<Contract, ContractIndex>();
-    // Init (constructor) code has its OWN bytecode + source map, distinct from
-    // runtime code — a CREATE frame's pcs index into it, not the runtime map.
-    const indexFor = (contract: Contract, isInit: boolean): ContractIndex => {
-      const cache = isInit ? initCache : runtimeCache;
-      let idx = cache.get(contract);
-      if (idx === undefined) {
-        idx = {
-          pcToInstruction: buildInstructionIndex(
-            isInit ? contract.initBytecode() : contract.runtimeBytecode(),
-          ).pcToInstruction,
-          sourceMap: isInit
-            ? contract.initSourceMap()
-            : contract.runtimeSourceMap(),
-        };
-        cache.set(contract, idx);
-      }
-      return idx;
-    };
-
     const meta: StepMeta[] = new Array(cursor.length);
     /** viaIR function/modifier entry steps + their body's first statement position. */
     const entryCandidates: {
@@ -228,18 +268,7 @@ export class SteppingModel {
     let lastDefinedStmtId: number | undefined;
     let lastPath: string | undefined;
     let lastLine: number | undefined;
-    // Modifier-entry detection, per combinedDepth level (a function and its
-    // modifiers share one level): the level's current function and the index of
-    // the last of its modifier invocations that began. A step entering a
-    // modifier whose invocation comes LATER than that is an entry; entering an
-    // earlier one is a modifier resuming after its `_;`.
-    const levelFn: (AstNode | undefined)[] = [];
-    const levelEntered: number[] = [];
-    let prevLevel = 0;
-    const invocationsOf = new Map<
-      AstNode,
-      ReturnType<AstNode['modifierInvocations']>
-    >();
+    const modifierEntries = new ModifierEntryDetector();
 
     for (let i = 0; i < cursor.length; i++) {
       const st = cursor.at(i);
@@ -252,52 +281,38 @@ export class SteppingModel {
         for (const w of frameJumps.pop()!) internalSum -= w;
       }
 
-      let line: number | undefined;
-      let col: number | undefined;
-      let path: string | undefined;
-      let stmtId: number | undefined;
-      let entry: SourceMapEntry | undefined;
-      let node: AstNode | undefined;
-      let stmt: AstNode | undefined;
       const optimized = resolution?.optimized ?? false;
       const viaIR = resolution?.cu.viaIR() ?? false;
 
       // A CREATE/CREATE2 frame runs the constructor's INIT code, indexed by the
       // init source map (`isInitCode`), not the runtime map. If the frame's
       // contract wasn't identified (the pc won't be a valid init instruction),
-      // `pcToInstruction.get` returns undefined and the step stays unmapped — so
-      // statement stepping steps OVER an unresolved constructor rather than
-      // mis-mapping it (which previously corrupted `combinedDepth`).
-      if (resolution !== undefined) {
-        const {pcToInstruction, sourceMap} = indexFor(
-          resolution.contract,
-          st.isInitCode,
-        );
-        const instruction = pcToInstruction.get(st.pc);
-        entry = instruction !== undefined ? sourceMap[instruction] : undefined;
-        if (entry !== undefined && entry.fileId >= 0) {
-          const source = resolution.cu.sourceById(entry.fileId);
-          if (source !== undefined) {
-            const pos = source.offsetToPosition(entry.start);
-            line = pos.line;
-            col = pos.column;
-            path = source.path;
-            node = findInnermostNode(source.ast(), entry.start, entry.length);
-            stmt = node !== undefined ? closestStatement(node) : undefined;
-            stmtId = stmt?.id;
-          }
-        }
-      }
+      // the pc does not map and the step stays unmapped — so statement stepping
+      // steps OVER an unresolved constructor rather than mis-mapping it (which
+      // previously corrupted `combinedDepth`).
+      const mapped =
+        resolution !== undefined
+          ? mapPc(resolution.contract, resolution.cu, st.pc, st.isInitCode)
+          : undefined;
+      const entry = mapped?.entry;
+      const node = mapped?.node;
+      const source = mapped?.source;
+      const pos = source?.offsetToPosition(entry!.start);
+      const line = pos?.line;
+      const col = pos?.column;
+      const path = source?.path;
+      const stmt = node !== undefined ? closestStatement(node) : undefined;
+      const stmtId = stmt?.id;
+
+      const def =
+        node !== undefined ? closestFunctionOrModifier(node) : undefined;
 
       // Weigh the previous step's internal call now that its landing is known.
       if (pendingCall !== undefined) {
         const {frame, weightless} = pendingCall;
         pendingCall = undefined;
         const weight =
-          weightless ||
-          (viaIR &&
-            node !== undefined &&
-            closestFunctionOrModifier(node)?.nodeType === 'ModifierDefinition')
+          weightless || (viaIR && def?.nodeType === 'ModifierDefinition')
             ? 0
             : 1;
         if (frame < frameJumps.length) {
@@ -306,51 +321,15 @@ export class SteppingModel {
         }
       }
       const combinedDepth = st.depth + internalSum;
-      const def =
-        node !== undefined ? closestFunctionOrModifier(node) : undefined;
 
-      for (let dd = prevLevel + 1; dd <= combinedDepth; dd++) {
-        levelFn[dd] = undefined;
-        levelEntered[dd] = -1;
-      }
-      prevLevel = combinedDepth;
-      if (def?.nodeType === 'FunctionDefinition') {
-        if (levelFn[combinedDepth] !== def) {
-          levelFn[combinedDepth] = def;
-          levelEntered[combinedDepth] = -1;
-        }
-      } else if (
-        def?.nodeType === 'ModifierDefinition' &&
-        !optimized &&
-        resolution !== undefined
-      ) {
-        const fn = levelFn[combinedDepth];
-        const entered = levelEntered[combinedDepth] ?? -1;
-        let invocations = fn !== undefined ? invocationsOf.get(fn) : [];
-        if (invocations === undefined) {
-          invocations = fn!.modifierInvocations();
-          invocationsOf.set(fn!, invocations);
-        }
-        const k = invocations.findIndex(
-          (inv, n) =>
-            n > entered &&
-            (inv.modifierId === def.id || inv.name === def.name),
-        );
-        const inv = invocations[k]?.node;
-        const invSource =
-          inv !== undefined ? resolution.cu.sourceById(inv.srcFileId) : undefined;
-        if (fn !== undefined && inv !== undefined && invSource !== undefined) {
-          levelEntered[combinedDepth] = k;
-          const pos = invSource.offsetToPosition(inv.srcStart);
-          this.#modifierEntries.set(i, {
-            fn,
-            invocation: inv,
-            path: invSource.path,
-            line: pos.line,
-            col: pos.column,
-          });
-          this.#entrySteps.push(i);
-        }
+      const modifierEntry = modifierEntries.visit(
+        combinedDepth,
+        def,
+        optimized ? undefined : resolution?.cu,
+      );
+      if (modifierEntry !== undefined) {
+        this.#modifierEntries.set(i, modifierEntry);
+        this.#entrySteps.push(i);
       }
 
       const isStmtStart = stmtId !== undefined && stmtId !== lastDefinedStmtId;
@@ -609,21 +588,6 @@ export class SteppingModel {
   }
 
   /**
-   * Whether the statement starting at `index` is REAL execution rather than a
-   * compiler entry-prologue artifact. On entering a function, solc emits local-
-   * variable initialization code whose source maps point at the declaration/use
-   * statements OUT OF SOURCE ORDER — each visited for a single step before control
-   * returns to the function-definition line. Those transient visits are marked
-   * `isStmtStart` too, so a naive "first statement start" lands on the wrong
-   * (often the LAST) source line of the function.
-   *
-   * A genuine statement's execution STAYS in it (the next step carries the same
-   * `stmtId`) or DESCENDS into it (the next step is at a greater combinedDepth);
-   * a prologue init is abandoned immediately — the next step is a DIFFERENT
-   * statement (or the unmapped function-definition line) at the same-or-shallower
-   * combinedDepth. The terminal step is treated as persistent.
-   */
-  /**
    * Whether the statement at `index` reappears at the SAME combinedDepth before
    * that depth changes — i.e. it briefly yielded to another line (viaIR call-arg
    * setup) but resumes and keeps executing, rather than being a one-shot prologue
@@ -664,6 +628,21 @@ export class SteppingModel {
     return last;
   }
 
+  /**
+   * Whether the statement starting at `index` is REAL execution rather than a
+   * compiler entry-prologue artifact. On entering a function, solc emits local-
+   * variable initialization code whose source maps point at the declaration/use
+   * statements OUT OF SOURCE ORDER — each visited for a single step before control
+   * returns to the function-definition line. Those transient visits are marked
+   * `isStmtStart` too, so a naive "first statement start" lands on the wrong
+   * (often the LAST) source line of the function.
+   *
+   * A genuine statement's execution STAYS in it (the next step carries the same
+   * `stmtId`) or DESCENDS into it (the next step is at a greater combinedDepth);
+   * a prologue init is abandoned immediately — the next step is a DIFFERENT
+   * statement (or the unmapped function-definition line) at the same-or-shallower
+   * combinedDepth. The terminal step is treated as persistent.
+   */
   #persists(index: number): boolean {
     if (index >= this.last) return true;
     const cur = this.#meta[index]!;
@@ -984,7 +963,7 @@ export class SteppingModel {
     o: Stop,
     breakpoints: ReadonlyMap<string, ReadonlySet<number>>,
   ): Stop {
-    if (o.beforeModifier && this.#isArmedStop(o.step, breakpoints)) {
+    if (o.beforeModifier && this.isArmedStop(o.step, breakpoints)) {
       return {step: o.step, beforeModifier: false};
     }
     return {step: this.continue(o.step, breakpoints), beforeModifier: false};
@@ -997,7 +976,7 @@ export class SteppingModel {
    */
   continue(origin: number, breakpoints: ReadonlyMap<string, ReadonlySet<number>>): number {
     for (let j = origin + 1; j <= this.last; j++) {
-      if (this.#isArmedStop(j, breakpoints)) return j;
+      if (this.isArmedStop(j, breakpoints)) return j;
     }
     return this.last;
   }
@@ -1011,7 +990,7 @@ export class SteppingModel {
     breakpoints: ReadonlyMap<string, ReadonlySet<number>>,
   ): number {
     for (let j = origin - 1; j >= 0; j--) {
-      if (this.#isArmedStop(j, breakpoints)) return j;
+      if (this.isArmedStop(j, breakpoints)) return j;
     }
     return 0;
   }
@@ -1023,13 +1002,6 @@ export class SteppingModel {
    * frames (statement identity is unreliable under optimization).
    */
   isArmedStop(
-    index: number,
-    breakpoints: ReadonlyMap<string, ReadonlySet<number>>,
-  ): boolean {
-    return this.#isArmedStop(index, breakpoints);
-  }
-
-  #isArmedStop(
     index: number,
     breakpoints: ReadonlyMap<string, ReadonlySet<number>>,
   ): boolean {

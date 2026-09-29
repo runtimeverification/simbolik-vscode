@@ -15,6 +15,8 @@ import {bytesToHex, hexToBytes} from 'ethereum-cryptography/utils';
 
 import type {StateCursor, Step} from '@simbolik/lifting';
 
+import {wordToBigInt} from './hex.js';
+
 /** keccak op names across nodes: kontrol emits `SHA3`, geth/anvil `KECCAK256`. */
 const KECCAK_OPS = new Set(['SHA3', 'KECCAK256']);
 
@@ -24,16 +26,6 @@ const PREIMAGE_SIZE = 0x40n;
 /** Left-pad a bigint to a 32-byte (64-hex) big-endian word (no `0x`). */
 function pad32(n: bigint): string {
   return n.toString(16).padStart(64, '0');
-}
-
-/**
- * Parse a machine WORD to a bigint. Kontrol emits MEMORY words WITHOUT a `0x`
- * prefix (`"0000…"`), so a bare `BigInt(word)` would parse them as DECIMAL —
- * silently wrong for any word (and throwing outright on one containing `a-f`,
- * e.g. an address key). Normalize the prefix first.
- */
-function wordToBigInt(word: string): bigint {
-  return BigInt(word.startsWith('0x') ? word : `0x${word}`);
 }
 
 /**

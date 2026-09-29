@@ -7,6 +7,7 @@
  * TYPES ONLY (uintN, intN, bool, address, contract, bytesN, enum,
  * userDefinedValueType-as-underlying); dynamic/reference types are a follow-up.
  */
+import {addressHex} from './hex.js';
 
 /** A decoded value: display string + Solidity type label. */
 export interface DecodedValue {
@@ -50,7 +51,7 @@ export function decodeValue(
 
   if (typeId === 't_address' || typeId.startsWith('t_contract')) {
     return {
-      value: '0x' + field.toString(16).padStart(40, '0'),
+      value: addressHex(field),
       type: ctx.label ?? 'address',
     };
   }

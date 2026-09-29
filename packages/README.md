@@ -19,6 +19,27 @@ See the design plan for full architecture, decisions, and the milestone roadmap.
 | `@simbolik/sources` | ◐ (M9b-1, M9b-2) | Source repositories for remote replay: `SourcifyRepository` fetches verified sources + settings (Sourcify v2) → standard-json; `recompile()` compiles that via solc-js (bundled 0.8.36 offline, `loadRemoteVersion` otherwise) → a `loadBuildInfo`-consumable build-info (byte-for-byte deployed-bytecode parity, live-verified). Local repo + session wiring (M9b-3) pending. |
 | `@simbolik/debugger` | ◐ (M5–M10, M7b-1) | `SolidityDebugSession` (DAP requests, stepping, value-type state + parameter variables, multi-frame/mixed-CU/optimized), the **`DapDispatcher`** (raw DAP message protocol: seq, events, error handling), and a **TCP server** (`startDapServer`, DAP `Content-Length` framing). Reads value-type **input parameters** — external via calldata, internal via dynamic stack-depth. Return params + locals + reference types (M7b-2/3) pending; VSCode `src/` host wiring (M10b) pending. |
 
+### Module layout (after the 2026-09-29 cleanup refactor)
+
+- **`debugger`**: `session.ts` is a thin DAP facade. The launch-time model lives in `trace.ts`
+  (`loadTrace`: steps, cursor, stepping model) and `registry.ts` (`CodeRegistry`: address →
+  contract/CU, or foreign). The static per-contract caches (pc → source, positions,
+  disassembly, ethdebug program, `variablesAt`) live in `contractAnalysis.ts`, shared with
+  `stepping.ts`. Also: `frames.ts` (call-stack reconstruction), `breakpoints.ts` (line,
+  instruction and exception-filter breakpoints plus run-to-stop), `sources.ts` (DAP
+  `Source` and `sourceReference`), `handles.ts` (typed `variablesReference` handles).
+  Per-scope renderers: `solidityVariables.ts` (State, Locals and nested values),
+  `localsHistory.ts` (last-known values, stale copies, model offset), `writes.ts`
+  (statement-write AST analysis), `evmScope.ts`, `globalsScope.ts`, `eventsScope.ts` and
+  `disassemblyView.ts`.
+- **`ethdebug-gen`**: `index.ts` only re-exports. `cfg.ts` holds the shared control-flow
+  core of the two stack analyzers (`stackHeights.ts` and `stackProvenance.ts`). The other
+  modules are `opcodes.ts`, `ast.ts`, `valueTypes.ts`, `layouts.ts` (memory) and
+  `storageLayouts.ts`, and `program.ts` holds `generateEthdebugProgram`.
+- **Extension host**: `src/server.ts` is only the entry point. The production resolver is
+  under `src/resolver/`: `launch`, `attach`, `contracts`, `preState`, `rpc` and
+  `launchArgs`.
+
 ## Milestone progress
 
 - **M0 — Monorepo bootstrap** ✅ npm workspaces, Vitest, shared tsconfig + project refs, CI (Node 22, `typecheck` + `test`).

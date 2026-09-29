@@ -6,6 +6,8 @@
  */
 import type {Hex} from '@simbolik/protocol';
 
+import {addressHex, strip0x} from './hex.js';
+
 /** One disassembled instruction. */
 export interface EvmInstruction {
   /** Byte offset (program counter) of the opcode. */
@@ -55,8 +57,7 @@ export function decodeInstructionAddress(ref: string): {
 } {
   const packed = BigInt(ref);
   const pc = Number(packed & PC_MASK);
-  const codeAddress =
-    '0x' + ((packed >> PC_BITS) & ADDR_MASK).toString(16).padStart(40, '0');
+  const codeAddress = addressHex((packed >> PC_BITS) & ADDR_MASK);
   const isInit = ((packed >> INIT_BIT) & 1n) === 1n;
   return {codeAddress, pc, isInit};
 }
@@ -163,7 +164,7 @@ function mnemonic(op: number): string {
  * operand runs past the end of code is truncated to the available bytes.
  */
 export function disassembleBytecode(bytecode: Hex): EvmInstruction[] {
-  const hex = bytecode.startsWith('0x') ? bytecode.slice(2) : bytecode;
+  const hex = strip0x(bytecode);
   const code = new Uint8Array(hex.length / 2);
   for (let i = 0; i < code.length; i++) {
     code[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
