@@ -203,6 +203,35 @@ export class AstNode {
   }
 
   /**
+   * For a `FunctionDefinition`, its `ModifierInvocation` nodes in source (=
+   * execution) order, each with the id and name of the modifier it names. A
+   * constructor's base-constructor calls are ModifierInvocations too; their id
+   * is a contract's, so they never match an executing `ModifierDefinition`.
+   */
+  modifierInvocations(): {
+    node: AstNode;
+    modifierId: number | undefined;
+    name: string | undefined;
+  }[] {
+    if (this.nodeType !== 'FunctionDefinition') return [];
+    return this.children()
+      .filter((c) => c.nodeType === 'ModifierInvocation')
+      .map((node) => {
+        const ref = node.#raw.modifierName as
+          | {referencedDeclaration?: unknown; name?: unknown}
+          | undefined;
+        return {
+          node,
+          modifierId:
+            typeof ref?.referencedDeclaration === 'number'
+              ? ref.referencedDeclaration
+              : undefined,
+          name: typeof ref?.name === 'string' ? ref.name : undefined,
+        };
+      });
+  }
+
+  /**
    * The raw `referencedDeclaration` field of an `Identifier` (or `MemberAccess`)
    * node: the AST id of the declaration this reference resolves to (a
    * `VariableDeclaration`, `FunctionDefinition`, …), or `undefined` when absent.

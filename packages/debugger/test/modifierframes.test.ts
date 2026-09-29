@@ -12,8 +12,9 @@
  *
  * Ground truth (recorded fixture Modifiers.bump(5), 326 steps, kontrol —
  * observed by running the session, cross-checked against src/Modifiers.sol):
- *   - Launch opens PAUSED at step 110, line 12 (inside the modifier body,
- *     `uint256 doubled = x * 2;`). Verified via session.currentStepIndex.
+ *   - Launch opens PAUSED just before step 110, on `bump`'s header at the
+ *     `onlyPositive(x)` invocation (line 17); one step-in enters the modifier at
+ *     step 110, line 12 (`uint256 doubled = x * 2;`).
  *   - Modifier decl: line 11; body lines 12–13; placeholder `_;`: line 14.
  *   - Function `bump` decl (with `onlyPositive(x)` applied): line 17; body
  *     lines 18–19.
@@ -50,8 +51,20 @@ const modifiersSpec: Spec = {
 // ---------------------------------------------------------------------------
 
 describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier body', () => {
-  it('launch opens paused inside the modifier body (step 110, line 12)', async () => {
+  it('launch opens on the modifier invocation, before the modifier frame', async () => {
     const session = await launch(modifiersSpec);
+    const {stackFrames} = session.stackTrace();
+    expect(session.currentStepIndex).toBe(110);
+    expect(stackFrames).toHaveLength(1);
+    expect(stackFrames[0]!.name).toBe('bump');
+    expect(stackFrames[0]!.line).toBe(17);
+    // `onlyPositive(x)` in `function bump(uint256 x) public onlyPositive(x) …`.
+    expect(stackFrames[0]!.column).toBe(37);
+  });
+
+  it('one step-in enters the modifier body (step 110, line 12)', async () => {
+    const session = await launch(modifiersSpec);
+    session.stepIn();
 
     // FIRST confirm WHERE we paused (observed by running the session): the
     // launch opens inside the modifier body, not the function body.
@@ -66,6 +79,7 @@ describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier 
 
   it('pausing inside the modifier shows a 2-frame stack [onlyPositive@12, bump@17]', async () => {
     const session = await launch(modifiersSpec);
+    session.stepIn();
     const {stackFrames} = session.stackTrace();
 
     expect(stackFrames).toHaveLength(2);
@@ -111,6 +125,7 @@ describe('Modifiers function body — modifier suspended → [bump@18]', () => {
 describe('Modifiers modifier frame is addressable via scopes()', () => {
   it('scopes(modifierFrame.id) returns a scope list including State and EVM', async () => {
     const session = await launch(modifiersSpec);
+    session.stepIn(); // into the modifier body
     const {stackFrames} = session.stackTrace();
 
     // The modifier frame is [0] (top). Its id must resolve to a real scope list.

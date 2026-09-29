@@ -1,0 +1,8 @@
+{
+ "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+ "calldata": "0xa444f5e90000000000000000000000000000000000000000000000000000000000000007",
+ "callTxHash": "0x4c7062c321cf5cb56f4a022d30f44afb01233864ebdb6a6e531b9c58abf13b9e",
+ "status": "0x1",
+ "traceStepCount": 1188,
+ "note": "MultiMod.run(7) — viair, recorded on kontrol-node (fresh node)"
+}

@@ -100,6 +100,8 @@ export interface StepMeta {
   fnEntry: boolean;
   /** Mapped to a modifier's `_;` (PlaceholderStatement). */
   placeholder: boolean;
+  /** AST id of the enclosing FunctionDefinition/ModifierDefinition, if mapped. */
+  defId: number | undefined;
 }
 
 /** Whether `node` lies in a function/modifier's parameter or return list. */
@@ -120,6 +122,30 @@ function inParameterList(node: AstNode): boolean {
   return false;
 }
 
+/**
+ * A stop position: a trace step, or — when `beforeModifier` — the moment just
+ * BEFORE that step, where it begins a modifier's execution. The latter shows the
+ * modified function's frame positioned on the modifier's invocation in its
+ * header, so stepping into a modified function enters one frame at a time: the
+ * function (at its first modifier), then each modifier, then the body.
+ */
+export interface Stop {
+  step: number;
+  beforeModifier: boolean;
+}
+
+/** A step that begins executing one of a function's modifiers. */
+export interface ModifierEntry {
+  /** The modified FunctionDefinition. */
+  fn: AstNode;
+  /** The `ModifierInvocation` in `fn`'s header being executed. */
+  invocation: AstNode;
+  /** Source path, 1-based line and 0-based column of the invocation. */
+  path: string;
+  line: number;
+  col: number;
+}
+
 /** Per-contract source-map indexing, cached across steps. */
 interface ContractIndex {
   pcToInstruction: Map<number, number>;
@@ -132,6 +158,17 @@ interface ContractIndex {
  */
 export class SteppingModel {
   readonly #meta: StepMeta[];
+  /** Modifier entries by step, and their steps in ascending order. */
+  readonly #modifierEntries = new Map<number, ModifierEntry>();
+  readonly #entrySteps: number[] = [];
+  /**
+   * viaIR function/modifier entries that are stops although no statement starts
+   * there, by step, with the position shown: the body's first statement.
+   * See {@link #markCallFirstEntries}.
+   */
+  readonly #entryStops = new Map<number, {path: string; line: number; col: number}>();
+  /** Every step of such an entry's header-mapped run up to its call → that position. */
+  readonly #entryRuns = new Map<number, {path: string; line: number; col: number}>();
   /** The terminal (last) step index. */
   readonly last: number;
 
@@ -158,6 +195,11 @@ export class SteppingModel {
     };
 
     const meta: StepMeta[] = new Array(cursor.length);
+    /** viaIR function/modifier entry steps + their body's first statement position. */
+    const entryCandidates: {
+      step: number;
+      pos: {path: string; line: number; col: number};
+    }[] = [];
     // Internal-function nesting is folded PER RAW-EVM-FRAME, not globally.
     // `frameJumps[d-1]` is the internal-call ('jump:i' minus 'jump:o') depth
     // accrued WITHIN the frame at raw EVM depth `d`; `internalSum` is their total.
@@ -186,6 +228,18 @@ export class SteppingModel {
     let lastDefinedStmtId: number | undefined;
     let lastPath: string | undefined;
     let lastLine: number | undefined;
+    // Modifier-entry detection, per combinedDepth level (a function and its
+    // modifiers share one level): the level's current function and the index of
+    // the last of its modifier invocations that began. A step entering a
+    // modifier whose invocation comes LATER than that is an entry; entering an
+    // earlier one is a modifier resuming after its `_;`.
+    const levelFn: (AstNode | undefined)[] = [];
+    const levelEntered: number[] = [];
+    let prevLevel = 0;
+    const invocationsOf = new Map<
+      AstNode,
+      ReturnType<AstNode['modifierInvocations']>
+    >();
 
     for (let i = 0; i < cursor.length; i++) {
       const st = cursor.at(i);
@@ -252,6 +306,52 @@ export class SteppingModel {
         }
       }
       const combinedDepth = st.depth + internalSum;
+      const def =
+        node !== undefined ? closestFunctionOrModifier(node) : undefined;
+
+      for (let dd = prevLevel + 1; dd <= combinedDepth; dd++) {
+        levelFn[dd] = undefined;
+        levelEntered[dd] = -1;
+      }
+      prevLevel = combinedDepth;
+      if (def?.nodeType === 'FunctionDefinition') {
+        if (levelFn[combinedDepth] !== def) {
+          levelFn[combinedDepth] = def;
+          levelEntered[combinedDepth] = -1;
+        }
+      } else if (
+        def?.nodeType === 'ModifierDefinition' &&
+        !optimized &&
+        resolution !== undefined
+      ) {
+        const fn = levelFn[combinedDepth];
+        const entered = levelEntered[combinedDepth] ?? -1;
+        let invocations = fn !== undefined ? invocationsOf.get(fn) : [];
+        if (invocations === undefined) {
+          invocations = fn!.modifierInvocations();
+          invocationsOf.set(fn!, invocations);
+        }
+        const k = invocations.findIndex(
+          (inv, n) =>
+            n > entered &&
+            (inv.modifierId === def.id || inv.name === def.name),
+        );
+        const inv = invocations[k]?.node;
+        const invSource =
+          inv !== undefined ? resolution.cu.sourceById(inv.srcFileId) : undefined;
+        if (fn !== undefined && inv !== undefined && invSource !== undefined) {
+          levelEntered[combinedDepth] = k;
+          const pos = invSource.offsetToPosition(inv.srcStart);
+          this.#modifierEntries.set(i, {
+            fn,
+            invocation: inv,
+            path: invSource.path,
+            line: pos.line,
+            col: pos.column,
+          });
+          this.#entrySteps.push(i);
+        }
+      }
 
       const isStmtStart = stmtId !== undefined && stmtId !== lastDefinedStmtId;
       const isLineStart =
@@ -289,7 +389,22 @@ export class SteppingModel {
           (node?.nodeType === 'FunctionDefinition' ||
             node?.nodeType === 'ModifierDefinition'),
         placeholder: stmt?.nodeType === 'PlaceholderStatement',
+        defId: def?.id,
       };
+
+      if (meta[i]!.fnEntry && def !== undefined && resolution !== undefined) {
+        const body = def.children().find((c) => c.nodeType === 'Block');
+        const first = body?.children()[0];
+        const src =
+          first !== undefined ? resolution.cu.sourceById(first.srcFileId) : undefined;
+        if (first !== undefined && src !== undefined) {
+          const p = src.offsetToPosition(first.srcStart);
+          entryCandidates.push({
+            step: i,
+            pos: {path: src.path, line: p.line, col: p.column},
+          });
+        }
+      }
 
       if (stmtId !== undefined) {
         lastDefinedStmtId = stmtId;
@@ -323,6 +438,7 @@ export class SteppingModel {
       this.#restorePrologueStarts();
     }
     this.#dropCompoundJoins();
+    this.#markCallFirstEntries(entryCandidates);
   }
 
   /**
@@ -437,6 +553,54 @@ export class SteppingModel {
       }
       lastAt[d] = i;
     }
+  }
+
+  /**
+   * viaIR maps a function's (or modifier's) code up to its first call to the
+   * definition's HEADER, so when the body starts with a call — `f(); …`,
+   * `modifier m() { check(); _; }` — no statement starts before the callee's, and
+   * the first stop after entering lies INSIDE the callee: step-into (and the
+   * launch stop) entered two frames at once. Such an entry step becomes a stop
+   * itself, shown at the body's first statement.
+   */
+  #markCallFirstEntries(
+    candidates: {step: number; pos: {path: string; line: number; col: number}}[],
+  ): void {
+    for (const {step: e, pos} of candidates) {
+      const d = this.#meta[e]!.combinedDepth;
+      for (let j = e; j <= this.last; j++) {
+        const m = this.#meta[j]!;
+        if (m.combinedDepth < d) break; // returned without a stop
+        if (m.isStmtStart && this.#persists(j)) {
+          if (m.combinedDepth > d) {
+            this.#entryStops.set(e, pos);
+            for (let k = e; k < j && this.#meta[k]!.combinedDepth === d; k++) {
+              this.#entryRuns.set(k, pos);
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  /** Whether step `j` is a statement-granular stop candidate. */
+  #isStop(j: number): boolean {
+    return (
+      (this.#meta[j]!.isStmtStart && this.#persists(j)) ||
+      this.#entryStops.has(j)
+    );
+  }
+
+  /**
+   * The position a frame at `step` shows when `step` lies in a call-first
+   * entry's header-mapped run (see {@link #markCallFirstEntries}): the body's
+   * first statement — also as the call site while the callee runs.
+   */
+  entryRunPosition(
+    step: number,
+  ): {path: string; line: number; col: number} | undefined {
+    return this.#entryRuns.get(step);
   }
 
   /** Metadata for `index`. */
@@ -610,7 +774,7 @@ export class SteppingModel {
   /** The first statement-start step (the entry stop after launch). */
   entry(): number {
     for (let i = 0; i <= this.last; i++) {
-      if (this.#meta[i]!.isStmtStart && this.#persists(i)) return i;
+      if (this.#isStop(i)) return i;
     }
     return 0;
   }
@@ -643,10 +807,9 @@ export class SteppingModel {
     for (let j = origin + 1; j <= this.last; j++) {
       const m = this.#meta[j]!;
       if (
-        m.isStmtStart &&
         m.combinedDepth <= o.combinedDepth &&
         m.stmtId !== o.stmtId &&
-        this.#persists(j)
+        this.#isStop(j)
       )
         return j;
     }
@@ -688,7 +851,7 @@ export class SteppingModel {
     const {stmtId: s} = this.#meta[origin]!;
     for (let j = origin + 1; j <= this.last; j++) {
       const m = this.#meta[j]!;
-      if (m.isStmtStart && m.stmtId !== s && this.#persists(j)) return j;
+      if (m.stmtId !== s && this.#isStop(j)) return j;
     }
     return this.last;
   }
@@ -701,17 +864,130 @@ export class SteppingModel {
     const {combinedDepth: d} = this.#meta[origin]!;
     for (let j = origin + 1; j <= this.last; j++) {
       const m = this.#meta[j]!;
-      if (m.isStmtStart && m.combinedDepth < d && this.#persists(j)) return j;
+      if (m.combinedDepth < d && this.#isStop(j)) return j;
     }
     return this.last;
   }
 
-  /** `stepBack`: largest j<O that starts a statement; stay at 0 if none. */
+  /**
+   * `stepBack`: largest j<O that starts a REAL statement — one forward stepping
+   * could stop at (transient artifacts, see {@link #persists}, are skipped); stay
+   * at 0 if none.
+   */
   stepBack(origin: number): number {
     for (let j = origin - 1; j >= 0; j--) {
-      if (this.#meta[j]!.isStmtStart) return j;
+      if (this.#isStop(j)) return j;
     }
     return 0;
+  }
+
+  // ─── stops (steps + before-modifier positions) ────────────────────────────
+
+  /** The modifier entry at `step`, if that step begins a modifier. */
+  modifierEntry(step: number): ModifierEntry | undefined {
+    return this.#modifierEntries.get(step);
+  }
+
+  /** The first modifier-entry step > `after` passing `accept`, if any. */
+  #entryAfter(
+    after: number,
+    accept: (e: number) => boolean = () => true,
+  ): number | undefined {
+    for (const e of this.#entrySteps) {
+      if (e > after && accept(e)) return e;
+    }
+    return undefined;
+  }
+
+  /** The earlier of a before-modifier stop at `entry` and a step stop at `step`. */
+  static #earlier(entry: number | undefined, step: number): Stop {
+    return entry !== undefined && entry <= step
+      ? {step: entry, beforeModifier: true}
+      : {step, beforeModifier: false};
+  }
+
+  /** The first real statement stop at or after `from`. */
+  #stopFrom(from: number): number {
+    for (let j = from; j <= this.last; j++) {
+      if (this.#isStop(j)) return j;
+    }
+    return this.last;
+  }
+
+  /** The launch stop: {@link entry}, or an earlier modifier entry. */
+  entryStop(): Stop {
+    return SteppingModel.#earlier(this.#entryAfter(-1), this.entry());
+  }
+
+  /**
+   * `stepIn` over stops: the next statement (see {@link stepIn}) or, if one
+   * comes first, the next modifier entry. From a before-modifier stop the
+   * modifier's own first statement is next.
+   */
+  stepInStop(o: Stop): Stop {
+    const step = o.beforeModifier
+      ? this.#stopFrom(o.step)
+      : this.stepIn(o.step);
+    return SteppingModel.#earlier(this.#entryAfter(o.step), step);
+  }
+
+  /**
+   * `next` over stops. A modifier entry at or above the origin's depth is a stop
+   * (from a modifier's last statement, `next` reaches the following modifier's
+   * invocation). From a before-modifier stop, the modifier itself is stepped over:
+   * the next stop outside it — the following modifier or the function body.
+   */
+  nextStop(o: Stop): Stop {
+    const d = this.#meta[o.step]!.combinedDepth;
+    const shallow = (e: number): boolean => this.#meta[e]!.combinedDepth <= d;
+    if (!o.beforeModifier) {
+      return SteppingModel.#earlier(
+        this.#entryAfter(o.step, shallow),
+        this.next(o.step),
+      );
+    }
+    const mod = this.#meta[o.step]!.defId;
+    let step = this.last;
+    for (let j = o.step + 1; j <= this.last; j++) {
+      const m = this.#meta[j]!;
+      if (m.combinedDepth <= d && m.defId !== mod && this.#isStop(j)) {
+        step = j;
+        break;
+      }
+    }
+    return SteppingModel.#earlier(this.#entryAfter(o.step, shallow), step);
+  }
+
+  /** `stepOut` over stops (a before-modifier stop is in the function's frame). */
+  stepOutStop(o: Stop): Stop {
+    return {step: this.stepOut(o.step), beforeModifier: false};
+  }
+
+  /** `stepBack` over stops: the latest statement start or modifier entry before `o`. */
+  stepBackStop(o: Stop): Stop {
+    if (!o.beforeModifier && this.#modifierEntries.has(o.step)) {
+      return {step: o.step, beforeModifier: true};
+    }
+    const step = this.stepBack(o.step);
+    let entry: number | undefined;
+    for (const e of this.#entrySteps) {
+      if (e >= o.step) break;
+      entry = e;
+    }
+    return entry !== undefined && entry > step
+      ? {step: entry, beforeModifier: true}
+      : {step, beforeModifier: false};
+  }
+
+  /** `continue` over stops (from a before-modifier stop, its own step may be armed). */
+  continueStop(
+    o: Stop,
+    breakpoints: ReadonlyMap<string, ReadonlySet<number>>,
+  ): Stop {
+    if (o.beforeModifier && this.#isArmedStop(o.step, breakpoints)) {
+      return {step: o.step, beforeModifier: false};
+    }
+    return {step: this.continue(o.step, breakpoints), beforeModifier: false};
   }
 
   /**
@@ -757,6 +1033,8 @@ export class SteppingModel {
     index: number,
     breakpoints: ReadonlyMap<string, ReadonlySet<number>>,
   ): boolean {
+    const at = this.#entryStops.get(index);
+    if (at !== undefined) return breakpoints.get(at.path)?.has(at.line) ?? false;
     const m = this.#meta[index]!;
     if (m.path === undefined || m.line === undefined) return false;
     if (!(breakpoints.get(m.path)?.has(m.line) ?? false)) return false;

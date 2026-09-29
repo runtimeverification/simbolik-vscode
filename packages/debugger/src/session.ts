@@ -74,7 +74,12 @@ import {
   decodeInstructionAddress,
   type EvmInstruction,
 } from './disassemble.js';
-import {SteppingModel, type StepResolution} from './stepping.js';
+import {
+  SteppingModel,
+  type Stop,
+  type StepMeta,
+  type StepResolution,
+} from './stepping.js';
 import {
   decodeValue,
   describeValueTypeString,
@@ -279,6 +284,12 @@ interface LaunchedState {
   cursor: StateCursor;
   model: SteppingModel;
   step: number;
+  /**
+   * Whether the stop is just BEFORE `step`, which begins a modifier: the
+   * modified function's frame is shown at the modifier's invocation instead of
+   * inside the modifier (see {@link Stop}). Every step assignment clears it.
+   */
+  beforeModifier: boolean;
   inputs: LaunchInputs;
   /** Requested breakpoint lines, keyed by source path. */
   breakpoints: Map<string, number[]>;
@@ -543,6 +554,12 @@ export class SolidityDebugSession {
   seekStep(index: number): void {
     const state = this.#require();
     state.step = Math.max(0, Math.min(index, state.model.last));
+    state.beforeModifier = false;
+  }
+
+  /** Test/harness support: the stepping model's metadata for trace step `index`. */
+  stepMeta(index: number): StepMeta {
+    return this.#require().model.at(index);
   }
 
   /** Wire everything, position at the entry statement, and queue a `stopped` event. */
@@ -669,6 +686,7 @@ export class SolidityDebugSession {
     };
 
     const model = new SteppingModel(cursor, resolve);
+    const entryStop = model.entryStop();
 
     this.#state = {
       cus,
@@ -677,7 +695,8 @@ export class SolidityDebugSession {
       steps,
       cursor,
       model,
-      step: model.entry(),
+      step: entryStop.step,
+      beforeModifier: entryStop.beforeModifier,
       inputs,
       breakpoints: new Map(),
       instructionBreakpoints: new Map(),
@@ -842,12 +861,23 @@ export class SolidityDebugSession {
     const state = this.#require();
     if (isInstruction(args)) {
       state.step = state.model.nextInstruction(state.step);
+      state.beforeModifier = false;
       this.#stop('step');
     } else {
-      state.step = state.model.next(state.step);
+      this.#goTo(state, state.model.nextStop(this.#stopOf(state)));
       this.#stopOrEnd('step');
     }
     return {};
+  }
+
+  /** The current stop. */
+  #stopOf(state: LaunchedState): Stop {
+    return {step: state.step, beforeModifier: state.beforeModifier};
+  }
+
+  #goTo(state: LaunchedState, stop: Stop): void {
+    state.step = stop.step;
+    state.beforeModifier = stop.beforeModifier;
   }
 
   /** Step into. At `instruction` granularity, a single EVM opcode forward. */
@@ -855,9 +885,10 @@ export class SolidityDebugSession {
     const state = this.#require();
     if (isInstruction(args)) {
       state.step = Math.min(state.step + 1, state.model.last);
+      state.beforeModifier = false;
       this.#stop('step');
     } else {
-      state.step = state.model.stepIn(state.step);
+      this.#goTo(state, state.model.stepInStop(this.#stopOf(state)));
       this.#stopOrEnd('step');
     }
     return {};
@@ -868,9 +899,10 @@ export class SolidityDebugSession {
     const state = this.#require();
     if (isInstruction(args)) {
       state.step = state.model.stepOutInstruction(state.step);
+      state.beforeModifier = false;
       this.#stop('step');
     } else {
-      state.step = state.model.stepOut(state.step);
+      this.#goTo(state, state.model.stepOutStop(this.#stopOf(state)));
       this.#stopOrEnd('step');
     }
     return {};
@@ -879,9 +911,12 @@ export class SolidityDebugSession {
   /** Reverse step. At `instruction` granularity, a single EVM opcode backward. */
   stepBack(args?: StepArgs): Record<string, never> {
     const state = this.#require();
-    state.step = isInstruction(args)
-      ? Math.max(state.step - 1, 0)
-      : state.model.stepBack(state.step);
+    this.#goTo(
+      state,
+      isInstruction(args)
+        ? {step: Math.max(state.step - 1, 0), beforeModifier: false}
+        : state.model.stepBackStop(this.#stopOf(state)),
+    );
     this.#stop('step');
     return {};
   }
@@ -890,6 +925,7 @@ export class SolidityDebugSession {
   stepInstruction(_args?: {threadId?: number}): Record<string, never> {
     const state = this.#require();
     state.step = Math.min(state.step + 1, state.model.last);
+    state.beforeModifier = false;
     this.#stop('step');
     return {};
   }
@@ -898,6 +934,7 @@ export class SolidityDebugSession {
   stepBackInstruction(_args?: {threadId?: number}): Record<string, never> {
     const state = this.#require();
     state.step = Math.max(state.step - 1, 0);
+    state.beforeModifier = false;
     this.#stop('step');
     return {};
   }
@@ -909,7 +946,7 @@ export class SolidityDebugSession {
    */
   continue(_args?: {threadId?: number}): Record<string, never> {
     const {target, reason} = this.#runToStop(this.#require(), 1);
-    this.#require().step = target;
+    this.#goTo(this.#require(), {step: target, beforeModifier: false});
     // NOTE: continue deliberately reports a `stopped` even at the terminal step
     // (the state remains inspectable there), unlike an explicit step-over past
     // the last statement, which ends the session via #stopOrEnd.
@@ -922,7 +959,7 @@ export class SolidityDebugSession {
    */
   reverseContinue(_args?: {threadId?: number}): Record<string, never> {
     const {target, reason} = this.#runToStop(this.#require(), -1);
-    this.#require().step = target;
+    this.#goTo(this.#require(), {step: target, beforeModifier: false});
     this.#stop(reason);
     return {};
   }
@@ -940,7 +977,7 @@ export class SolidityDebugSession {
     const bps = this.#breakpointMap(state);
     const srcTarget =
       dir === 1
-        ? state.model.continue(state.step, bps)
+        ? state.model.continueStop(this.#stopOf(state), bps).step
         : state.model.reverseContinue(state.step, bps);
     const candidates = [srcTarget];
     const instrTarget = this.#nextInstructionStop(state, state.step, dir);
@@ -1389,43 +1426,62 @@ export class SolidityDebugSession {
     }
     if (stack.length === 0) return [];
 
-    // Expand the INNERMOST (top) EVM frame into internal-function sub-frames
-    // (constant-EVM-depth JUMPs). Parent EVM frames stay single frames. On any
-    // inconsistency the reconstruction returns undefined and we fall back to the
-    // single EVM frame for that depth (today's behavior).
-    const innermost = stack[stack.length - 1]!;
-    const internalSteps = this.#reconstructInternalFrames(
-      innermost.depth,
-      innermost.address,
-      step,
-    );
-
+    // Expand EVERY EVM frame into its internal-function sub-frames (constant-
+    // EVM-depth JUMPs). A parent frame is replayed up to its CALL site, so its
+    // innermost sub-frame sits at the call. Expanding only the innermost frame
+    // collapsed the caller's internal call chain into one frame while a subcall
+    // ran, and re-expanded it on return — so returning from an external call
+    // looked like entering several frames at once. On any inconsistency the
+    // reconstruction returns undefined and that depth falls back to a single
+    // EVM frame.
     const frames: FrameInfo[] = [];
     let id = 1;
-    for (let i = 0; i < stack.length - 1; i++) {
-      const f = stack[i]!;
-      frames.push(this.#buildFrame(f.depth, f.address, f.stepIndex, id++));
-    }
-    if (internalSteps === undefined) {
-      frames.push(
-        this.#buildFrame(
-          innermost.depth,
-          innermost.address,
-          innermost.stepIndex,
-          id++,
-        ),
+    for (const f of stack) {
+      const internalSteps = this.#reconstructInternalFrames(
+        f.depth,
+        f.address,
+        f.stepIndex,
       );
-    } else {
+      if (internalSteps === undefined) {
+        frames.push(this.#buildFrame(f.depth, f.address, f.stepIndex, id++));
+        continue;
+      }
       for (const sub of internalSteps) {
         frames.push(
-          this.#buildFrame(
-            innermost.depth,
-            innermost.address,
-            sub.stepIndex,
-            id++,
-            sub.kind,
-          ),
+          this.#buildFrame(f.depth, f.address, sub.stepIndex, id++, sub.kind),
         );
+      }
+    }
+
+    // A frame in a call-first entry's header-mapped run (no statement starts
+    // before the body's first call) shows the body's first statement.
+    for (let k = 0; k < frames.length; k++) {
+      const pos = state.model.entryRunPosition(frames[k]!.stepIndex);
+      if (pos !== undefined) {
+        frames[k] = {
+          ...frames[k]!,
+          path: pos.path,
+          line: pos.line,
+          column: pos.col + 1,
+        };
+      }
+    }
+
+    // Before a modifier: the modified function's frame, positioned on the
+    // modifier's invocation in its header (the modifier frame isn't entered yet).
+    const modEntry = state.beforeModifier
+      ? state.model.modifierEntry(step)
+      : undefined;
+    if (modEntry !== undefined) {
+      if (frames[frames.length - 1]?.kind === 'modifier') frames.pop();
+      const top = frames[frames.length - 1];
+      if (top !== undefined && top.fnNode?.id === modEntry.fn.id) {
+        frames[frames.length - 1] = {
+          ...top,
+          path: modEntry.path,
+          line: modEntry.line,
+          column: modEntry.col + 1,
+        };
       }
     }
 
@@ -1474,8 +1530,9 @@ export class SolidityDebugSession {
   }
 
   /**
-   * Reconstruct the internal-function sub-frames of the innermost EVM frame by
-   * replaying its current occurrence `[evmEntryStep..cur]`. Returns a bottom-first
+   * Reconstruct the internal-function sub-frames of an EVM frame by replaying
+   * its current occurrence `[evmEntryStep..cur]` (`cur` is the current step for
+   * the innermost frame, the CALL site for a parent). Returns a bottom-first
    * array of per-frame step indices (parents at their call site, innermost at the
    * current step), or `undefined` to signal a fail-safe fallback to the single
    * EVM frame. Never throws.
@@ -1524,7 +1581,18 @@ export class SolidityDebugSession {
     // its call site when it calls out. The step just before a call's jump can lie
     // elsewhere (a modifier body; viaIR's function-pointer dispatcher, which maps
     // to the ContractDefinition), where the frame would be named after the contract.
-    type Entry = {stepIndex: number; real: boolean; fnId: number; lastOwn?: number};
+    // `viaModifier`: the call site's step when a MODIFIER body made the call — the
+    // modifier then stays on the stack beneath the callee (it is suspended there,
+    // not finished) instead of vanishing while the callee runs.
+    type Entry = {
+      stepIndex: number;
+      real: boolean;
+      fnId: number;
+      lastOwn?: number;
+      viaModifier?: number;
+      /** Entered without a `jump:'i'` (see the fall-through call below). */
+      inline?: boolean;
+    };
     const stack: Entry[] = [];
     /** The topmost real frame, whose call site is set when it makes a call. */
     const topReal = ():
@@ -1546,8 +1614,13 @@ export class SolidityDebugSession {
         ? fn
         : undefined;
     };
+    const defAt = (i: number): AstNode | undefined =>
+      this.#resolvePosition(contract, cu, steps[i]!.pc, steps[i]!.isInitCode)
+        ?.defNode;
     let prevStep = -1;
     let prevJump: 'i' | 'o' | '-' = '-';
+    /** The latest step (at this depth) inside a function or modifier. */
+    let lastDefStep = -1;
 
     for (let i = evmEntryStep; i <= cur; i++) {
       // Skip steps inside an external subcall (a deeper EVM frame); their internal
@@ -1567,7 +1640,13 @@ export class SolidityDebugSession {
           (caller === undefined || caller.fnId !== fn.id)
         ) {
           if (caller !== undefined) caller.stepIndex = caller.lastOwn ?? prevStep; // call site
-          stack.push({stepIndex: i, real: true, fnId: fn.id});
+          const viaModifier =
+            caller !== undefined &&
+            lastDefStep >= 0 &&
+            defAt(lastDefStep)?.nodeType === 'ModifierDefinition'
+              ? lastDefStep
+              : undefined;
+          stack.push({stepIndex: i, real: true, fnId: fn.id, viaModifier});
         } else {
           stack.push({stepIndex: i, real: false, fnId: fn?.id ?? -1});
         }
@@ -1575,6 +1654,26 @@ export class SolidityDebugSession {
         // A return: pop the matching entry. Nothing to pop → inconsistency.
         if (stack.length === 0) return undefined;
         stack.pop();
+      } else if (
+        topReal() !== undefined &&
+        topReal()!.lastOwn === prevStep &&
+        fnAt(i) !== undefined &&
+        fnAt(i)!.id !== topReal()!.fnId
+      ) {
+        // Straight from the caller's own code into ANOTHER user function without
+        // a `jump:'i'`: viaIR calls a function that never returns (one that
+        // always reverts) with a plain JUMP, or inlines its body outright. It is
+        // still a call — otherwise the callee REPLACED its caller on the stack.
+        // Falling back into the frame below (an inlined body that returns)
+        // pops it again.
+        const caller = topReal()!;
+        const below = stack.filter((f) => f.real).at(-2);
+        if (caller.inline === true && below?.fnId === fnAt(i)!.id) {
+          stack.splice(stack.lastIndexOf(caller), 1);
+        } else {
+          caller.stepIndex = prevStep; // call site
+          stack.push({stepIndex: i, real: true, fnId: fnAt(i)!.id, inline: true});
+        }
       } else if (topReal() === undefined) {
         // The entry function is reached from the dispatcher WITHOUT a `jump:'i'`,
         // so seed the base frame from the first curDepth step whose enclosing
@@ -1587,6 +1686,7 @@ export class SolidityDebugSession {
 
       const owner = topReal();
       if (owner !== undefined && fnAt(i)?.id === owner.fnId) owner.lastOwn = i;
+      if (defAt(i) !== undefined) lastDefStep = i;
       prevStep = i;
       prevJump = state.model.at(i).jump;
     }
@@ -1595,6 +1695,17 @@ export class SolidityDebugSession {
     // single-EVM-frame behavior.
     const real = stack.filter((f) => f.real);
     if (real.length === 0) return undefined;
+    /** Bottom-first frames, with each calling modifier beneath its callee. */
+    const materialize = (): {
+      stepIndex: number;
+      kind: 'internal' | 'modifier';
+    }[] =>
+      real.flatMap((f) => [
+        ...(f.viaModifier !== undefined
+          ? [{stepIndex: f.viaModifier, kind: 'modifier' as const}]
+          : []),
+        {stepIndex: f.stepIndex, kind: 'internal' as const},
+      ]);
 
     // ── 4b: modifier frame ──────────────────────────────────────────────────
     // If the CURRENT step sits inside a ModifierDefinition body (an INLINE
@@ -1648,15 +1759,12 @@ export class SolidityDebugSession {
     if (curPos?.defNode?.nodeType === 'ModifierDefinition') {
       // Keep the innermost function frame at its call site (seed), append the
       // modifier frame at the current step (bottom-first → [fn, modifier]).
-      return [
-        ...real.map((f) => ({stepIndex: f.stepIndex, kind: 'internal' as const})),
-        {stepIndex: cur, kind: 'modifier' as const},
-      ];
+      return [...materialize(), {stepIndex: cur, kind: 'modifier' as const}];
     }
 
     // The innermost frame is positioned at the current step.
     real[real.length - 1]!.stepIndex = cur;
-    return real.map((f) => ({stepIndex: f.stepIndex, kind: 'internal' as const}));
+    return materialize();
   }
 
   /** Resolve a single frame's contract + source position (with in-frame fallback). */
