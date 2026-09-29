@@ -65,16 +65,18 @@ export function parseSourceMap(sourceMap: string): SourceMapEntry[] {
   return entries;
 }
 
+interface InstructionIndex {
+  pcToInstruction: Map<number, number>;
+  instructionToPc: number[];
+}
+
 /**
  * Walk EVM bytecode and index instruction starts, skipping the immediate data
  * bytes of `PUSH1..PUSH32` (`0x60..0x7f`). The Nth instruction corresponds to
  * the Nth source-map entry. A PC pointing into push data (or past the end) is
  * absent from `pcToInstruction`.
  */
-export function buildInstructionIndex(bytecode: Hex): {
-  pcToInstruction: Map<number, number>;
-  instructionToPc: number[];
-} {
+export function buildInstructionIndex(bytecode: Hex): InstructionIndex {
   const cached = instructionIndexCache.get(bytecode);
   if (cached !== undefined) return cached;
   const index = computeInstructionIndex(bytecode);
@@ -85,15 +87,9 @@ export function buildInstructionIndex(bytecode: Hex): {
   return index;
 }
 
-const instructionIndexCache = new Map<
-  string,
-  {pcToInstruction: Map<number, number>; instructionToPc: number[]}
->();
+const instructionIndexCache = new Map<string, InstructionIndex>();
 
-function computeInstructionIndex(bytecode: Hex): {
-  pcToInstruction: Map<number, number>;
-  instructionToPc: number[];
-} {
+function computeInstructionIndex(bytecode: Hex): InstructionIndex {
   const bytes = hexToBytes(bytecode);
   const pcToInstruction = new Map<number, number>();
   const instructionToPc: number[] = [];

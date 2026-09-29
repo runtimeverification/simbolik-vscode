@@ -1,5 +1,3 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import {CodelensProvider} from './CodelensProvider';
 import {SolidityDebugAdapterDescriptorFactory} from './DebugAdapter';
@@ -14,11 +12,7 @@ const outputChannel = vscode.window.createOutputChannel(
   {log: true}
 );
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-  // Use the console to output diagnostic information (console.log) and errors (console.error)
-  // This line of code will only be executed once when your extension is activated
   console.log('Congratulations, your extension "simbolik" is now active!');
 
   const codelensProvider = new CodelensProvider();
@@ -52,21 +46,16 @@ export function activate(context: vscode.ExtensionContext) {
   const diagnosticsCollection =
     vscode.languages.createDiagnosticCollection('solidity');
   context.subscriptions.push(diagnosticsCollection);
-  vscode.workspace.onDidChangeTextDocument(async event => {
-    if (event.document.languageId === 'solidity') {
-      await forgeLintFile(event.document.uri, diagnosticsCollection);
-    }
-  });
-  vscode.workspace.onDidOpenTextDocument(async document => {
+  const lintIfSolidity = async (document: vscode.TextDocument) => {
     if (document.languageId === 'solidity') {
       await forgeLintFile(document.uri, diagnosticsCollection);
     }
-  });
-  vscode.workspace.textDocuments.forEach(async document => {
-    if (document.languageId === 'solidity') {
-      await forgeLintFile(document.uri, diagnosticsCollection);
-    }
-  });
+  };
+  vscode.workspace.onDidChangeTextDocument(event =>
+    lintIfSolidity(event.document)
+  );
+  vscode.workspace.onDidOpenTextDocument(lintIfSolidity);
+  vscode.workspace.textDocuments.forEach(lintIfSolidity);
 
   vscode.debug.onDidStartDebugSession(session => {
     outputChannel.info(`Debug session started: ${session.id}`);
@@ -86,5 +75,4 @@ export function activate(context: vscode.ExtensionContext) {
   });
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}

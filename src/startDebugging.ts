@@ -96,8 +96,14 @@ export async function populateDebugConfiguration(
       }
 
       const contractName = config.contractName;
-      const jsonRpcUrl = getConfigValue('json-rpc-url', 'http://localhost:8545');
-      const sourcifyUrl = getConfigValue('sourcify-url', 'http://localhost:5555');
+      const jsonRpcUrl = getConfigValue(
+        'json-rpc-url',
+        'http://localhost:8545'
+      );
+      const sourcifyUrl = getConfigValue(
+        'sourcify-url',
+        'http://localhost:5555'
+      );
       // kontrol-node (the KEVM engine) is the default backend for every session;
       // users can switch to anvil via the "simbolik.rpc-node-type" setting.
       const rpcNodeType = getConfigValue<'anvil' | 'kontrol-node'>(
@@ -123,7 +129,9 @@ export async function populateDebugConfiguration(
     }
   );
   if (!result) {
-    throw new Error('Failed to start debugging session due to previous errors.');
+    throw new Error(
+      'Failed to start debugging session due to previous errors.'
+    );
   }
   return result;
 }

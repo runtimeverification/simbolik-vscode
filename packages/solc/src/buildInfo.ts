@@ -128,6 +128,17 @@ export interface EventInfo {
   params: EventParam[];
 }
 
+/** Index every node under `roots` by its AST id. */
+function indexNodesById(roots: AstNode[]): Map<number, AstNode> {
+  const index = new Map<number, AstNode>();
+  const visit = (n: AstNode): void => {
+    index.set(n.id, n);
+    for (const c of n.children()) visit(c);
+  };
+  for (const root of roots) visit(root);
+  return index;
+}
+
 /** A source file in the compilation unit, with its content and AST. */
 export class SourceFile {
   readonly id: number;
@@ -153,15 +164,7 @@ export class SourceFile {
 
   /** Find the AST node with the given `id` anywhere in this source's tree. */
   nodeById(id: number): AstNode | undefined {
-    if (this.#nodeIndex === undefined) {
-      const index = new Map<number, AstNode>();
-      const visit = (n: AstNode): void => {
-        index.set(n.id, n);
-        for (const c of n.children()) visit(c);
-      };
-      visit(this.ast());
-      this.#nodeIndex = index;
-    }
+    this.#nodeIndex ??= indexNodesById([this.ast()]);
     return this.#nodeIndex.get(id);
   }
 
@@ -256,34 +259,14 @@ export class Contract {
   storageTypes(): Record<string, StorageType> {
     const raw = this.#raw.storageLayout?.types ?? {};
     const types: Record<string, StorageType> = {};
-    for (const [id, t] of Object.entries(raw)) {
-      const type: StorageType = {
-        label: t.label ?? '',
-        numberOfBytes: Number(t.numberOfBytes),
-        encoding: t.encoding ?? '',
-      };
-      // Additive reference-layout fields. Members are projected to
-      // EXACTLY {label, slot, offset, type} with slot/offset coerced to numbers
-      // (dropping solc's astId/contract).
-      if (t.base !== undefined) type.base = t.base;
-      if (t.members !== undefined) {
-        type.members = t.members.map((m) => ({
-          label: m.label ?? '',
-          slot: Number(m.slot),
-          offset: Number(m.offset),
-          type: m.type ?? '',
-        }));
-      }
-      if (t.key !== undefined) type.key = t.key;
-      if (t.value !== undefined) type.value = t.value;
-      types[id] = type;
-    }
+    for (const [id, t] of Object.entries(raw)) types[id] = toStorageType(t);
     return types;
   }
 
   /** Resolve a single solc storage type by id, or `undefined` if absent. */
   storageType(typeId: string): StorageType | undefined {
-    return this.storageTypes()[typeId];
+    const raw = this.#raw.storageLayout?.types?.[typeId];
+    return raw === undefined ? undefined : toStorageType(raw);
   }
 
   /**
@@ -316,6 +299,30 @@ export class Contract {
     }
     return out;
   }
+}
+
+/** Coerce a raw `storageLayout.types` entry to a {@link StorageType}. */
+function toStorageType(t: RawStorageType): StorageType {
+  const type: StorageType = {
+    label: t.label ?? '',
+    numberOfBytes: Number(t.numberOfBytes),
+    encoding: t.encoding ?? '',
+  };
+  // Additive reference-layout fields. Members are projected to
+  // EXACTLY {label, slot, offset, type} with slot/offset coerced to numbers
+  // (dropping solc's astId/contract).
+  if (t.base !== undefined) type.base = t.base;
+  if (t.members !== undefined) {
+    type.members = t.members.map((m) => ({
+      label: m.label ?? '',
+      slot: Number(m.slot),
+      offset: Number(m.offset),
+      type: m.type ?? '',
+    }));
+  }
+  if (t.key !== undefined) type.key = t.key;
+  if (t.value !== undefined) type.value = t.value;
+  return type;
 }
 
 /**
@@ -408,15 +415,7 @@ export class CompilationUnit {
    * is built lazily on first use and cached.
    */
   nodeById(id: number): AstNode | undefined {
-    if (this.#nodeIndex === undefined) {
-      const index = new Map<number, AstNode>();
-      const visit = (n: AstNode): void => {
-        index.set(n.id, n);
-        for (const c of n.children()) visit(c);
-      };
-      for (const s of this.#sources) visit(s.ast());
-      this.#nodeIndex = index;
-    }
+    this.#nodeIndex ??= indexNodesById(this.#sources.map((s) => s.ast()));
     return this.#nodeIndex.get(id);
   }
 
@@ -444,12 +443,9 @@ export class CompilationUnit {
     // Embedded AST id: `…$_Point_$10_memory_ptr` or `t_struct(Point)10_storage`.
     const idMatch = /\$(\d+)_/.exec(typeId) ?? /\)(\d+)/.exec(typeId);
     if (idMatch) {
-      const id = Number(idMatch[1]);
-      for (const source of this.#sources) {
-        const node = source.nodeById(id);
-        if (node?.nodeType === 'StructDefinition') {
-          return node.structMembers();
-        }
+      const node = this.nodeById(Number(idMatch[1]));
+      if (node?.nodeType === 'StructDefinition') {
+        return node.structMembers();
       }
     }
     // Fallback: resolve by the struct's simple name (`$_Point_$` / `(Point)`).
@@ -480,7 +476,7 @@ export class CompilationUnit {
     contractName: string,
     methodName: string,
   ): AstNode | undefined {
-    const source = this.#sources.find((s) => s.path === sourcePath);
+    const source = this.sourceByPath(sourcePath);
     if (source === undefined) {
       return undefined;
     }

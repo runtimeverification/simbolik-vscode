@@ -3,8 +3,8 @@
  *
  * Given a `(chainId, address)` pair, {@link SourcifyRepository.resolve} fetches a
  * verified contract's sources + compiler settings from Sourcify's v2 API and
- * returns them as a solc standard-json input ready to recompile (the recompile
- * itself lands in a later cycle). Fetch + parse only.
+ * returns them as a solc standard-json input ready to recompile (see
+ * `recompile.ts`). Fetch + parse only.
  */
 
 /** A solc standard-json input (sources + settings), ready to recompile. */

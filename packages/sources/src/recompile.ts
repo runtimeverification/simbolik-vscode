@@ -138,9 +138,8 @@ export async function recompile(
   resolved: ResolvedContract,
   opts?: RecompileOptions,
 ): Promise<BuildInfoObject> {
-  const compiler = opts?.loadCompiler
-    ? await opts.loadCompiler(resolved.compilerVersion)
-    : await defaultLoadCompiler(resolved.compilerVersion);
+  const loadCompiler = opts?.loadCompiler ?? defaultLoadCompiler;
+  const compiler = await loadCompiler(resolved.compilerVersion);
 
   // Feed the standard-json VERBATIM (paths + settings verbatim keep the CBOR
   // trailer / source map aligned); only ADD outputSelection.

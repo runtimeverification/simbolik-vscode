@@ -14,6 +14,7 @@
   "exclude": [
     "src/react-app",
     "src/server.ts",
+    "src/resolver",
     "sampleWorkspace",
     "node_modules",
     "vendor",

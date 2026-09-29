@@ -54,10 +54,9 @@ export interface ServerModule {
  * can rewrite it. See the file header. Typed as a plain function returning the
  * imported namespace.
  */
-const esmImport = new Function(
-  'url',
-  'return import(url);',
-) as (url: string) => Promise<unknown>;
+const esmImport = new Function('url', 'return import(url);') as (
+  url: string
+) => Promise<unknown>;
 
 /**
  * Dynamically load the ESM debug-server bundle from the CJS extension host.

@@ -70,6 +70,25 @@ export class JsonRpcClient {
   }
 
   async call<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+    const parsed = parseJsonLossless(
+      await this.callRaw(method, params),
+    ) as JsonRpcResponse<T>;
+    if (isJsonRpcFailure(parsed)) {
+      throw new JsonRpcError(
+        parsed.error.code,
+        parsed.error.message,
+        parsed.error.data,
+      );
+    }
+    return parsed.result;
+  }
+
+  /**
+   * Send a request and return the RAW response body, unparsed and unchecked for
+   * a JSON-RPC `error` — for callers that re-parse it themselves (e.g. a trace
+   * handed on verbatim so its big integers never pass through `number`).
+   */
+  async callRaw(method: string, params: unknown[] = []): Promise<string> {
     this.#onRequest?.(method, params);
     const request: JsonRpcRequest = {
       jsonrpc: '2.0',
@@ -96,14 +115,6 @@ export class JsonRpcClient {
     if (!res.ok) {
       throw new Error(`JSON-RPC ${method}: HTTP ${res.status} ${res.statusText}`);
     }
-    const parsed = parseJsonLossless(await res.text()) as JsonRpcResponse<T>;
-    if (isJsonRpcFailure(parsed)) {
-      throw new JsonRpcError(
-        parsed.error.code,
-        parsed.error.message,
-        parsed.error.data,
-      );
-    }
-    return parsed.result;
+    return res.text();
   }
 }

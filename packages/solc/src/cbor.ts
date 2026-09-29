@@ -29,10 +29,11 @@ export function cborMetadataHash(runtimeBytecode: Hex): Hex | undefined {
  * uses the wrong source map and silently corrupts all source/variable/stepping
  * resolution.
  *
- * Two matchers, most-reliable first:
+ * Three matchers, most-reliable first:
  *  1. EXACT runtime-bytecode match. A kontrol trace carries the concrete deployed
  *     code, so an exact, unique match is definitive.
- *  2. CBOR metadata trailer, but ONLY when it uniquely identifies one contract.
+ *  2. The same, with immutable byte ranges masked out (see below).
+ *  3. CBOR metadata trailer, but ONLY when it uniquely identifies one contract.
  *     The trailer's IPFS/bzzr hash pins a source+settings compilation and is
  *     robust to differing immutable/library-address bytes — BUT with
  *     `bytecode_hash = "none"` (Foundry's default, and Uniswap's) it degrades to
@@ -45,11 +46,12 @@ export function identifyContractByRuntimeCode(
   cu: CompilationUnit,
   runtimeCode: Hex,
 ): Contract | undefined {
-  const norm = (h: Hex): string => h.toLowerCase().replace(/^0x/, '');
-  const target = norm(runtimeCode);
+  const target = normalizeCode(runtimeCode);
   const contracts = cu.contracts();
 
-  const exact = contracts.filter((c) => norm(c.runtimeBytecode()) === target);
+  const exact = contracts.filter(
+    (c) => normalizeCode(c.runtimeBytecode()) === target,
+  );
   if (exact.length === 1) return exact[0];
 
   // Immutable-masked exact match: a DEPLOYED contract differs from its build-info
@@ -58,19 +60,8 @@ export function identifyContractByRuntimeCode(
   // ranges in BOTH strings lets a contract WITH immutables (e.g. Uniswap's
   // PoolManager) still be identified when the CBOR trailer is non-discriminating
   // (bytecode_hash="none"). Same length is required (immutables never resize).
-  const maskImmutables = (code: string, c: Contract): string => {
-    const ranges = c.immutableRanges();
-    if (ranges.length === 0) return code;
-    const chars = code.split('');
-    for (const {start, length} of ranges) {
-      for (let i = start * 2; i < (start + length) * 2 && i < chars.length; i++) {
-        chars[i] = '0';
-      }
-    }
-    return chars.join('');
-  };
   const masked = contracts.filter((c) => {
-    const code = norm(c.runtimeBytecode());
+    const code = normalizeCode(c.runtimeBytecode());
     if (code.length !== target.length || c.immutableRanges().length === 0) {
       return false;
     }
@@ -84,4 +75,20 @@ export function identifyContractByRuntimeCode(
     (c) => cborMetadataHash(c.runtimeBytecode()) === cborTarget,
   );
   return byCbor.length === 1 ? byCbor[0] : undefined;
+}
+
+/** Lowercase, unprefixed hex — the form code is compared in. */
+function normalizeCode(code: Hex): string {
+  return code.toLowerCase().replace(/^0x/, '');
+}
+
+/** Zero `c`'s immutable byte ranges in the (unprefixed) hex string `code`. */
+function maskImmutables(code: string, c: Contract): string {
+  const chars = code.split('');
+  for (const {start, length} of c.immutableRanges()) {
+    for (let i = start * 2; i < (start + length) * 2 && i < chars.length; i++) {
+      chars[i] = '0';
+    }
+  }
+  return chars.join('');
 }

@@ -7,6 +7,7 @@ import {loadServer} from './serverBridge';
 import {getConfigValue} from './utils';
 import {DebugNodeManager} from './nodeManager';
 import {
+  FullDebugConfiguration,
   PartialDebugConfiguration,
   populateDebugConfiguration,
 } from './startDebugging';
@@ -68,7 +69,7 @@ export class SolidityDebugAdapterDescriptorFactory
     // before we spawn anything; a node failure throws, aborting the session with
     // a clear notification. `attach` replays a remote tx and needs no local node.
     if (config.request === 'launch') {
-      const full = config as import('./startDebugging').FullDebugConfiguration;
+      const full = config as FullDebugConfiguration;
       full.jsonRpcUrl = await this.nodes.ensureUrl(
         session.id,
         full.rpcNodeType
@@ -192,9 +193,7 @@ function waitForPort(
     child.once('error', err => done(() => reject(err)));
     child.once('exit', code =>
       done(() =>
-        reject(
-          new Error(`Simbolik debug server exited early (code ${code}).`)
-        )
+        reject(new Error(`Simbolik debug server exited early (code ${code}).`))
       )
     );
   });

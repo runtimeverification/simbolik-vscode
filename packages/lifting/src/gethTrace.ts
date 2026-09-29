@@ -132,6 +132,54 @@ function createdAddressByBeginStep(logs: GethStructLog[]): Map<number, bigint> {
 }
 
 /**
+ * The frame entered by the CALL-family op `prev` (the log just before a depth
+ * increase), run from `caller`. `created` is the address a CREATE/CREATE2 frame
+ * deploys, when {@link createdAddressByBeginStep} recovered it.
+ */
+function enteredFrame(
+  prev: GethStructLog,
+  caller: Frame,
+  created: bigint | undefined,
+): Frame {
+  // Callee is `stack[len-2]` (top-of-stack LAST). Guard a malformed stack (a
+  // call op with <2 items): fall back to best-effort.
+  const prevStack = prev.stack ?? [];
+  const calleeHex =
+    prevStack.length >= 2 ? prevStack[prevStack.length - 2] : undefined;
+  const callee = calleeHex !== undefined ? BigInt(calleeHex) : caller.code;
+
+  switch (prev.op) {
+    case 'CALLCODE':
+      // Runs callee code on the CALLER's storage; msg.sender = caller code.
+      return {code: callee, storage: caller.storage, sender: caller.code, initCode: false};
+    case 'DELEGATECALL':
+      // Runs callee code on caller storage, preserving the caller's sender.
+      return {code: callee, storage: caller.storage, sender: caller.sender, initCode: false};
+    case 'CREATE':
+    case 'CREATE2':
+      // The running code is the constructor's INIT bytecode. Its address is
+      // NOT on the stack pre-execution, but the pre-pass recovered it from
+      // the frame's return. With the real created address, the debugger can
+      // identify the contract and resolve these steps against its INIT source
+      // map (step INTO constructors); `initCode` selects that init map. Fall
+      // back to the creator's address only if the return address is unknown.
+      return {
+        code: created ?? caller.code,
+        storage: created ?? caller.storage,
+        sender: caller.code,
+        initCode: true,
+      };
+    default:
+      // CALL / STATICCALL: runs callee code on callee storage; msg.sender = the
+      // caller's code. An unrecognized op that still increased depth (shouldn't
+      // happen for a well-formed trace) is treated the same, with the
+      // best-effort stack callee. CREATE/CREATE2 are handled above, so this
+      // never turns a memory offset into a code address.
+      return {code: callee, storage: callee, sender: caller.code, initCode: false};
+  }
+}
+
+/**
  * Normalize a geth/anvil trace into a positional `Step[]`, in the SAME shape
  * `normalizeKontrolTrace` yields. One Step per structLog; the tx context fills
  * in the fields geth omits per-step.
@@ -169,60 +217,12 @@ export function normalizeGethTrace(
     const dPrev = index === 0 ? 1 : logs[index - 1]!.depth;
 
     if (dCur > dPrev) {
-      // Entered a call: the PREVIOUS log was the CALL-family op. Read its op and
-      // callee (`stack[len-2]`, top-of-stack LAST) and push a frame per call type.
-      const prev = logs[index - 1]!;
-      const caller = stack[stack.length - 1]!;
-      const prevStack = prev.stack ?? [];
-      // Guard a malformed stack (a call op with <2 items): fall back to best-effort.
-      const calleeHex =
-        prevStack.length >= 2 ? prevStack[prevStack.length - 2] : undefined;
-      const callee =
-        calleeHex !== undefined ? BigInt(calleeHex) : caller.code;
-
-      let frame: Frame;
-      switch (prev.op) {
-        case 'CALL':
-        case 'STATICCALL':
-          // Runs callee code on callee storage; msg.sender = the caller's code.
-          frame = {code: callee, storage: callee, sender: caller.code, initCode: false};
-          break;
-        case 'CALLCODE':
-          // Runs callee code on the CALLER's storage; msg.sender = caller code.
-          frame = {code: callee, storage: caller.storage, sender: caller.code, initCode: false};
-          break;
-        case 'DELEGATECALL':
-          // Runs callee code on caller storage, preserving the caller's sender.
-          frame = {code: callee, storage: caller.storage, sender: caller.sender, initCode: false};
-          break;
-        case 'CREATE':
-        case 'CREATE2': {
-          // The running code is the constructor's INIT bytecode. Its address is
-          // NOT on the stack pre-execution, but the pre-pass recovered it from
-          // the frame's return. With the real created address, the debugger can
-          // identify the contract and resolve these steps against its INIT source
-          // map (step INTO constructors); `initCode` selects that init map. Fall
-          // back to the creator's address only if the return address is unknown.
-          const created = createdAt.get(index);
-          frame = {
-            code: created ?? caller.code,
-            storage: created ?? caller.storage,
-            sender: caller.code,
-            initCode: true,
-          };
-          break;
-        }
-        default:
-          // An unrecognized op that still increased depth (shouldn't happen for a
-          // well-formed trace): treat it like a CALL and take the best-effort
-          // stack callee. CREATE/CREATE2 are handled above, so this never turns a
-          // memory offset into a code address.
-          frame = {code: callee, storage: callee, sender: caller.code, initCode: false};
-          break;
-      }
-      // The pushed frame applies STARTING AT this step; the CALL op itself (i-1)
-      // stayed in the caller frame.
-      stack.push(frame);
+      // Entered a call: the PREVIOUS log was the CALL-family op. The pushed frame
+      // applies STARTING AT this step; the CALL op itself (i-1) stayed in the
+      // caller frame.
+      stack.push(
+        enteredFrame(logs[index - 1]!, stack[stack.length - 1]!, createdAt.get(index)),
+      );
     } else if (dCur < dPrev) {
       // Returned: pop one frame per depth level unwound (guard underflow).
       const pops = dPrev - dCur;

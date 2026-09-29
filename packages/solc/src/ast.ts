@@ -30,9 +30,9 @@ function isStatement(nodeType: string): boolean {
 export class AstNode {
   readonly #raw: RawAstNode;
   readonly #parent: AstNode | undefined;
-  #srcStart = 0;
-  #srcLength = 0;
-  #srcFileId = 0;
+  readonly #srcStart: number;
+  readonly #srcLength: number;
+  readonly #srcFileId: number;
   #children: readonly AstNode[] | undefined;
 
   constructor(raw: RawAstNode, parent?: AstNode) {
@@ -58,14 +58,22 @@ export class AstNode {
 
   /** The raw `name` field (e.g. a declaration or definition name), if present. */
   get name(): string | undefined {
-    const value = this.#raw.name;
-    return typeof value === 'string' ? value : undefined;
+    return this.#stringField('name');
   }
 
   /**
    * The raw `visibility` field of a declaration (`public` / `external` /
    * `internal` / `private`), e.g. on a `FunctionDefinition`; `undefined` if absent.
    */
+  get visibility(): string | undefined {
+    return this.#stringField('visibility');
+  }
+
+  /** The raw `operator` field (e.g. `=`, `+=`, `++`, `delete`), if present. */
+  get operator(): string | undefined {
+    return this.#stringField('operator');
+  }
+
   /**
    * For a `VariableDeclarationStatement`: its `assignments` — the declared
    * variable ids in tuple order, with `null` for a skipped component (`(a, , b)`).
@@ -74,12 +82,6 @@ export class AstNode {
     const a = this.#raw.assignments;
     if (!Array.isArray(a)) return [];
     return a.map((x) => (typeof x === 'number' ? x : null));
-  }
-
-  /** The raw `operator` field (e.g. `=`, `+=`, `++`, `delete`), if present. */
-  get operator(): string | undefined {
-    const value = this.#raw.operator;
-    return typeof value === 'string' ? value : undefined;
   }
 
   /**
@@ -94,17 +96,9 @@ export class AstNode {
       .filter((d): d is number => typeof d === 'number');
   }
 
-  get visibility(): string | undefined {
-    const value = this.#raw.visibility;
-    return typeof value === 'string' ? value : undefined;
-  }
-
   /** The raw `typeDescriptions.typeString` (e.g. `uint8`, `enum Vars.Color`). */
   get typeString(): string | undefined {
-    const td = this.#raw.typeDescriptions as
-      | {typeString?: unknown}
-      | undefined;
-    return typeof td?.typeString === 'string' ? td.typeString : undefined;
+    return this.#typeDescription('typeString');
   }
 
   /**
@@ -115,10 +109,7 @@ export class AstNode {
    * parses to resolve the `StructDefinition`.
    */
   get typeIdentifier(): string | undefined {
-    const td = this.#raw.typeDescriptions as
-      | {typeIdentifier?: unknown}
-      | undefined;
-    return typeof td?.typeIdentifier === 'string' ? td.typeIdentifier : undefined;
+    return this.#typeDescription('typeIdentifier');
   }
 
   /**
@@ -164,19 +155,7 @@ export class AstNode {
    * `parameters.parameters`); an empty array for any other node type.
    */
   parameters(): AstNode[] {
-    if (this.nodeType !== 'FunctionDefinition') {
-      return [];
-    }
-    const list = this.#raw.parameters as
-      | {parameters?: unknown}
-      | undefined;
-    const params = list?.parameters;
-    if (!Array.isArray(params)) {
-      return [];
-    }
-    return params
-      .filter(isRawAstNode)
-      .map((p) => new AstNode(p, this));
+    return this.#parameterList('parameters');
   }
 
   /**
@@ -187,19 +166,7 @@ export class AstNode {
    * `@simbolik/ethdebug-gen`).
    */
   returnParameters(): AstNode[] {
-    if (this.nodeType !== 'FunctionDefinition') {
-      return [];
-    }
-    const list = this.#raw.returnParameters as
-      | {parameters?: unknown}
-      | undefined;
-    const params = list?.parameters;
-    if (!Array.isArray(params)) {
-      return [];
-    }
-    return params
-      .filter(isRawAstNode)
-      .map((p) => new AstNode(p, this));
+    return this.#parameterList('returnParameters');
   }
 
   /**
@@ -253,6 +220,26 @@ export class AstNode {
 
   get srcFileId(): number {
     return this.#srcFileId;
+  }
+
+  #stringField(key: string): string | undefined {
+    const value = this.#raw[key];
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  #typeDescription(key: 'typeString' | 'typeIdentifier'): string | undefined {
+    const td = this.#raw.typeDescriptions as Record<string, unknown> | undefined;
+    const value = td?.[key];
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  /** A `FunctionDefinition`'s `<key>.parameters` list (a `ParameterList` node). */
+  #parameterList(key: 'parameters' | 'returnParameters'): AstNode[] {
+    if (this.nodeType !== 'FunctionDefinition') return [];
+    const list = this.#raw[key] as {parameters?: unknown} | undefined;
+    const params = list?.parameters;
+    if (!Array.isArray(params)) return [];
+    return params.filter(isRawAstNode).map((p) => new AstNode(p, this));
   }
 
   /** The parent node this wrapper was descended from, if any. */
@@ -347,28 +334,25 @@ export function findAstNode(
   return undefined;
 }
 
-/** Climb from `node` to the nearest enclosing statement-like node (inclusive). */
-export function closestStatement(node: AstNode): AstNode | undefined {
-  let current: AstNode | undefined = node;
-  while (current !== undefined) {
-    if (isStatement(current.nodeType)) {
-      return current;
-    }
-    current = current.parent();
+/** The nearest ancestor of `node` (inclusive) matching `pred`. */
+function closestAncestor(
+  node: AstNode,
+  pred: (node: AstNode) => boolean,
+): AstNode | undefined {
+  for (let cur: AstNode | undefined = node; cur !== undefined; cur = cur.parent()) {
+    if (pred(cur)) return cur;
   }
   return undefined;
 }
 
+/** Climb from `node` to the nearest enclosing statement-like node (inclusive). */
+export function closestStatement(node: AstNode): AstNode | undefined {
+  return closestAncestor(node, (n) => isStatement(n.nodeType));
+}
+
 /** Climb from `node` to the nearest enclosing `FunctionDefinition` (inclusive). */
 export function closestFunction(node: AstNode): AstNode | undefined {
-  let current: AstNode | undefined = node;
-  while (current !== undefined) {
-    if (current.nodeType === 'FunctionDefinition') {
-      return current;
-    }
-    current = current.parent();
-  }
-  return undefined;
+  return closestAncestor(node, (n) => n.nodeType === 'FunctionDefinition');
 }
 
 /**
@@ -380,15 +364,9 @@ export function closestFunction(node: AstNode): AstNode | undefined {
 export function closestFunctionOrModifier(
   node: AstNode,
 ): AstNode | undefined {
-  let current: AstNode | undefined = node;
-  while (current !== undefined) {
-    if (
-      current.nodeType === 'FunctionDefinition' ||
-      current.nodeType === 'ModifierDefinition'
-    ) {
-      return current;
-    }
-    current = current.parent();
-  }
-  return undefined;
+  return closestAncestor(
+    node,
+    (n) =>
+      n.nodeType === 'FunctionDefinition' || n.nodeType === 'ModifierDefinition',
+  );
 }
