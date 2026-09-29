@@ -94,6 +94,7 @@ The param/local location logic currently lives (wrongly) in `session.ts` as ad-h
 ### Known deferred limitations (from M8 review — mostly out of scope, tracked for a follow-up)
 - Unknown/foreign callee frames (not in any CU) currently fall back to the entry contract's source map rather than rendering as an "unknown frame".
 - CREATE / init-code frames and same-address-two-codes (CREATE then CALL) aren't resolved (registry uses runtime-CBOR, first-seen per address). Python splits init vs runtime.
+- Constructor (init-code) params/locals: `variablesAt(…, pc, 'init')` resolves them against the init image (viaIR ✅, fixture `ctor-*`). **Legacy gap:** legacy codegen inlines a base constructor into the derived one without a call boundary, so the height analyzer's propagation from the base constructor's entry conflicts with the derived one's fall-through flow, and both constructor bodies show no locals (init-code copies of internal functions work). Tripwire: `it.fails` in `debugger/test/ctor.test.ts`.
 - DELEGATECALL storage context: reads use `codeAddress`; a delegatecall runs foreign code against the caller's storage (should use the storage-context address; `Step` carries both `codeAddress` and `targetAddress`).
 - Breakpoints and cross-CU source paths are keyed by path string only (path collision across CUs possible; inherent to path-based DAP).
 - Scope `variablesReference` handles bind to EVM depth, not a durable per-call identity (benign under normal fetch-after-stop DAP usage).

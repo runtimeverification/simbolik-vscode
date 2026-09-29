@@ -183,16 +183,23 @@ export function ethdebugProgram(
 const variablesCache = perImage(() => new Map<number, ResolvedVariable[]>());
 
 /**
- * `variablesAt(cu, …, pc)` over RUNTIME code. `variablesAt` rebuilds the
- * `stackHeights` analyzer on every call, so a session re-reading the Locals
- * scope at the same position would otherwise recompute it each time.
+ * `variablesAt(cu, …, pc)` over the contract's runtime or init code image,
+ * memoized per pc: a session re-reading the Locals scope at the same position
+ * would otherwise redo the per-pc resolution each time.
  */
 export function liveVariables(
   contract: Contract,
   cu: CompilationUnit,
-  pc: number
+  pc: number,
+  isInit: boolean
 ): ResolvedVariable[] {
-  return memo(variablesCache(contract, false), pc, () =>
-    variablesAt(cu, contract.sourcePath, contract.name, pc)
+  return memo(variablesCache(contract, isInit), pc, () =>
+    variablesAt(
+      cu,
+      contract.sourcePath,
+      contract.name,
+      pc,
+      isInit ? 'init' : 'runtime'
+    )
   );
 }

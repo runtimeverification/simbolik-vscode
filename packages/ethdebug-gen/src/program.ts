@@ -9,6 +9,7 @@ import {
   type Contract,
 } from '@simbolik/solc';
 
+import {codeImage, type CodeKind} from './cfg.js';
 import type {
   ArrayLayout,
   BytesStorageLayout,
@@ -76,7 +77,7 @@ export interface EthdebugStorageVariable {
 /** An ethdebug program for one contract's runtime (or init) code. */
 export interface EthdebugProgram {
   contract: string;
-  kind: 'runtime' | 'init';
+  kind: CodeKind;
   instructions: EthdebugInstruction[];
   storageVariables: EthdebugStorageVariable[];
 }
@@ -86,7 +87,7 @@ export function generateEthdebugProgram(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  kind: 'runtime' | 'init' = 'runtime'
+  kind: CodeKind = 'runtime'
 ): EthdebugProgram {
   const contract = cu.contract(sourcePath, contractName);
   if (contract === undefined) {
@@ -104,12 +105,9 @@ export function generateEthdebugProgram(
 function instructions(
   cu: CompilationUnit,
   contract: Contract,
-  kind: 'runtime' | 'init'
+  kind: CodeKind
 ): EthdebugInstruction[] {
-  const bytecode =
-    kind === 'init' ? contract.initBytecode() : contract.runtimeBytecode();
-  const sourceMap =
-    kind === 'init' ? contract.initSourceMap() : contract.runtimeSourceMap();
+  const {bytecode, sourceMap} = codeImage(contract, kind);
   const {instructionToPc} = buildInstructionIndex(bytecode);
 
   // The instruction stream aligns 1:1 with the source map, NOT with the raw

@@ -71,6 +71,7 @@ import {walkAllSources} from './ast.js';
 import {
   Program,
   StackFlow,
+  type CodeKind,
   type Insn,
   type OnCallResume,
   type StackDomain,
@@ -373,10 +374,10 @@ class Analyzer {
   /** Statement id → the declarations it writes (see {@link statementWrites}). */
   private readonly writesCache = new Map<number, Set<number>>();
 
-  constructor(cu: CompilationUnit, contract: Contract) {
+  constructor(cu: CompilationUnit, contract: Contract, kind: CodeKind) {
     this.cu = cu;
     this.collectVarDeclIds();
-    this.program = new Program(cu, contract, stackDelta);
+    this.program = new Program(cu, contract, stackDelta, kind);
     this.flow = new StackFlow(this.program, provenanceDomain);
     this.collectAnchors();
     this.dropShuffleSwaps();
@@ -923,19 +924,20 @@ function stackSlotsOf(typeIdentifier: string | undefined): number {
 
 /**
  * Build the static per-pc stack-provenance analyzer for one contract's runtime
- * code. See the module doc; the returned {@link StackProvenance} exposes
- * {@link StackProvenance.variableDepthAt}.
+ * (or init) code. See the module doc; the returned {@link StackProvenance}
+ * exposes {@link StackProvenance.variableDepthAt}.
  */
 export function stackProvenance(
   cu: CompilationUnit,
   sourcePath: string,
-  contractName: string
+  contractName: string,
+  kind: CodeKind = 'runtime'
 ): StackProvenance {
   const contract = cu.contract(sourcePath, contractName);
   if (contract === undefined) {
     throw new Error(`contract not found: ${sourcePath}:${contractName}`);
   }
-  const analyzer = new Analyzer(cu, contract);
+  const analyzer = new Analyzer(cu, contract, kind);
   return {
     variableDepthAt: (pc: number, declId: number) =>
       analyzer.variableDepthAt(pc, declId),

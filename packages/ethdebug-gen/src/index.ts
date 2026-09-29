@@ -11,6 +11,7 @@ export {
   type EthdebugProgram,
   type EthdebugStorageVariable,
 } from './program.js';
+export type {CodeKind} from './cfg.js';
 export {describeValueTypeString} from './valueTypes.js';
 export {
   functionParameters,

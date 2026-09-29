@@ -54,6 +54,7 @@ import {
 } from '@simbolik/solc';
 
 import {nodeAtEntry} from './ast.js';
+import {codeImage, type CodeKind} from './cfg.js';
 import {
   isLocalLiveAt,
   localsFromFunctionNode,
@@ -132,14 +133,16 @@ export interface ResolvedVariable {
 /**
  * The live variables at `pc` (storage + the enclosing function's params/locals),
  * each with a concrete ethdebug pointer for value types. Pure-static: `pc` is the
- * only runtime-adjacent input. Never throws — on any resolution failure it
- * returns the resolvable subset (at least the storage variables).
+ * only runtime-adjacent input; it indexes the `kind` code image (runtime code by
+ * default; `'init'` for a constructor frame). Never throws — on any resolution
+ * failure it returns the resolvable subset (at least the storage variables).
  */
 export function variablesAt(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  pc: number
+  pc: number,
+  kind: CodeKind = 'runtime'
 ): ResolvedVariable[] {
   const out: ResolvedVariable[] = [];
 
@@ -148,7 +151,7 @@ export function variablesAt(
 
   // Stack variables (params + locals) of the enclosing function, if any.
   try {
-    out.push(...stackVariables(cu, sourcePath, contractName, pc));
+    out.push(...stackVariables(cu, sourcePath, contractName, pc, kind));
   } catch {
     // Any failure resolving the stack region degrades to storage-only.
   }
@@ -254,15 +257,18 @@ interface FrameInfo {
 }
 
 /**
- * Per-contract cache of the two whole-contract CFG analyzers. Both
- * `stackProvenance` and `stackHeights` are PURE functions of the contract, so
- * they are built ONCE per contract and reused across every `pc`. Keyed by the
- * `Contract` object (stable within a `CompilationUnit`); a `WeakMap` lets the
+ * Per-contract cache of the two whole-contract CFG analyzers, one pair per code
+ * image. Both `stackProvenance` and `stackHeights` are PURE functions of the
+ * contract's code image, so they are built ONCE per image and reused across every
+ * `pc`. Keyed by the `Contract` object (stable within a `CompilationUnit`); a `WeakMap` lets the
  * entry be collected with its CU when a debug session ends. Without this the
  * full CFG analysis (O(contract size)) reran on every `variablesAt` call —
  * ~300ms per newly-visited pc on a large viaIR contract.
  */
-const analyzerCache = new WeakMap<Contract, Analyzers>();
+const analyzerCache = {
+  runtime: new WeakMap<Contract, Analyzers>(),
+  init: new WeakMap<Contract, Analyzers>(),
+};
 
 /**
  * Per-function frame facts, keyed by the contract's height analyzer then the
@@ -276,15 +282,16 @@ function analyzersFor(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  contract: Contract
+  contract: Contract,
+  kind: CodeKind
 ): Analyzers {
-  let entry = analyzerCache.get(contract);
+  let entry = analyzerCache[kind].get(contract);
   if (entry === undefined) {
     entry = {
-      provenance: stackProvenance(cu, sourcePath, contractName),
-      heights: stackHeights(cu, sourcePath, contractName),
+      provenance: stackProvenance(cu, sourcePath, contractName, kind),
+      heights: stackHeights(cu, sourcePath, contractName, kind),
     };
-    analyzerCache.set(contract, entry);
+    analyzerCache[kind].set(contract, entry);
   }
   return entry;
 }
@@ -292,6 +299,7 @@ function analyzersFor(
 function frameInfoFor(
   cu: CompilationUnit,
   contract: Contract,
+  kind: CodeKind,
   fnNode: AstNode,
   heights: StackHeights
 ): FrameInfo {
@@ -302,7 +310,7 @@ function frameInfoFor(
   }
   let info = perFn.get(fnNode.id);
   if (info === undefined) {
-    info = computeFrameInfo(cu, contract, fnNode, heights);
+    info = computeFrameInfo(cu, contract, kind, fnNode, heights);
     perFn.set(fnNode.id, info);
   }
   return info;
@@ -320,6 +328,7 @@ function frameInfoFor(
 function computeFrameInfo(
   cu: CompilationUnit,
   contract: Contract,
+  kind: CodeKind,
   fnNode: AstNode,
   heights: StackHeights
 ): FrameInfo {
@@ -349,6 +358,7 @@ function computeFrameInfo(
     frameBase: anchorFrameBase(
       cu,
       contract,
+      kind,
       fnNode,
       params,
       locals,
@@ -378,7 +388,8 @@ function stackVariables(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  pc: number
+  pc: number,
+  kind: CodeKind
 ): ResolvedVariable[] {
   const contract = cu.contract(sourcePath, contractName);
   if (contract === undefined) return [];
@@ -388,17 +399,18 @@ function stackVariables(
   // source map may resolve `pc` to a function INHERITED from a base contract,
   // which a name lookup scoped to `contractName` would miss (degrading to
   // storage-only), and the node also disambiguates overloads.
-  const entry = sourceMapEntryAtPc(contract, pc, 'runtime');
+  const entry = sourceMapEntryAtPc(contract, pc, kind);
   if (entry === undefined) return [];
   const node = nodeAtEntry(cu, entry);
   if (node === undefined) return [];
   const fnNode = closestFunction(node);
   if (fnNode === undefined || fnNode.name === undefined) return [];
 
-  const analyzers = analyzersFor(cu, sourcePath, contractName, contract);
+  const analyzers = analyzersFor(cu, sourcePath, contractName, contract, kind);
   const {fixed, locals, localRankBase, frameBase} = frameInfoFor(
     cu,
     contract,
+    kind,
     fnNode,
     analyzers.heights
   );
@@ -547,6 +559,7 @@ function resolveStackVar(
 function anchorFrameBase(
   cu: CompilationUnit,
   contract: Contract,
+  kind: CodeKind,
   fnNode: AstNode,
   params: ParamDescriptor[],
   locals: LocalDescriptor[],
@@ -554,8 +567,8 @@ function anchorFrameBase(
   heights: StackHeights
 ): number | undefined {
   const external = isExternalEntry(fnNode.visibility);
-  const sourceMap = contract.runtimeSourceMap();
-  const {instructionToPc} = buildInstructionIndex(contract.runtimeBytecode());
+  const {bytecode, sourceMap} = codeImage(contract, kind);
+  const {instructionToPc} = buildInstructionIndex(bytecode);
 
   let prevStmtId: number | undefined;
   for (let i = 0; i < sourceMap.length; i++) {

@@ -22,7 +22,13 @@
  */
 import type {CompilationUnit, Contract} from '@simbolik/solc';
 
-import {Program, StackFlow, type Insn, type StackDomain} from './cfg.js';
+import {
+  Program,
+  StackFlow,
+  type CodeKind,
+  type Insn,
+  type StackDomain,
+} from './cfg.js';
 import {PUSH0, isDup, isPushN, isSwap, stackDelta} from './opcodes.js';
 
 /** The public accessor returned by {@link stackHeights}. */
@@ -120,8 +126,8 @@ class Analyzer {
    */
   private readonly conflicted = new Set<number>();
 
-  constructor(cu: CompilationUnit, contract: Contract) {
-    this.program = new Program(cu, contract, heightDelta);
+  constructor(cu: CompilationUnit, contract: Contract, kind: CodeKind) {
+    this.program = new Program(cu, contract, heightDelta, kind);
     this.flow = new StackFlow(this.program, constantsDomain);
     for (const entryPc of this.program.entryByFn.values()) {
       this.propagateFunction(entryPc);
@@ -179,20 +185,21 @@ class Analyzer {
 }
 
 /**
- * Build the static per-pc stack-height analyzer for one contract's runtime code.
- * See the module doc for the algorithm; the returned {@link StackHeights}
- * exposes {@link StackHeights.frameRelHeightAt}.
+ * Build the static per-pc stack-height analyzer for one contract's runtime (or
+ * init) code. See the module doc for the algorithm; the returned
+ * {@link StackHeights} exposes {@link StackHeights.frameRelHeightAt}.
  */
 export function stackHeights(
   cu: CompilationUnit,
   sourcePath: string,
-  contractName: string
+  contractName: string,
+  kind: CodeKind = 'runtime'
 ): StackHeights {
   const contract = cu.contract(sourcePath, contractName);
   if (contract === undefined) {
     throw new Error(`contract not found: ${sourcePath}:${contractName}`);
   }
-  const analyzer = new Analyzer(cu, contract);
+  const analyzer = new Analyzer(cu, contract, kind);
   return {
     frameRelHeightAt: (pc: number) => analyzer.frameRelHeightAt(pc),
   };

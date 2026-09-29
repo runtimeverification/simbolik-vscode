@@ -2,10 +2,10 @@
  * The control-flow machinery shared by the two static stack analyzers
  * ({@link stackHeights} and {@link stackProvenance}):
  *
- *  - {@link Program}: the decoded runtime bytecode, each instruction attributed
- *    to its enclosing `FunctionDefinition` (source-map entry → innermost node →
- *    `closestFunction`), giving each function's body-entry instruction (lowest
- *    attributed pc).
+ *  - {@link Program}: the decoded bytecode of one code image (runtime or init),
+ *    each instruction attributed to its enclosing `FunctionDefinition`
+ *    (source-map entry → innermost node → `closestFunction`), giving each
+ *    function's body-entry instruction (lowest attributed pc).
  *  - {@link StackFlow}: the successor relation of one instruction over an
  *    ABSTRACT stack (resolving JUMP/JUMPI targets from known PUSH constants —
  *    solc emits `PUSH2 <tag> … JUMP`), with internal calls modelled as a NET
@@ -17,6 +17,7 @@
  * constant; or a constant plus a value number), captured by {@link StackDomain},
  * and in how they merge states at a pc, which each keeps to itself.
  */
+import type {Hex} from '@simbolik/protocol';
 import {
   buildInstructionIndex,
   closestFunction,
@@ -24,6 +25,7 @@ import {
   type CompilationUnit,
   type Contract,
   type Jump,
+  type SourceMapEntry,
 } from '@simbolik/solc';
 
 import {nodeAtEntry} from './ast.js';
@@ -58,7 +60,26 @@ export interface Insn {
   callRets?: number;
 }
 
-/** The decoded runtime code of one contract. */
+/**
+ * Which of a contract's two code images: RUNTIME (deployed) code, or INIT
+ * (creation/constructor) code, which has its own bytecode and source map.
+ */
+export type CodeKind = 'runtime' | 'init';
+
+/** The bytecode + source map of one of a contract's code images. */
+export function codeImage(
+  contract: Contract,
+  kind: CodeKind
+): {bytecode: Hex; sourceMap: SourceMapEntry[]} {
+  return kind === 'init'
+    ? {bytecode: contract.initBytecode(), sourceMap: contract.initSourceMap()}
+    : {
+        bytecode: contract.runtimeBytecode(),
+        sourceMap: contract.runtimeSourceMap(),
+      };
+}
+
+/** The decoded code (one image — see {@link CodeKind}) of one contract. */
 export class Program {
   readonly insns = new Map<number, Insn>();
   /** Every instruction-start pc, in increasing order. */
@@ -70,12 +91,12 @@ export class Program {
   constructor(
     cu: CompilationUnit,
     contract: Contract,
-    deltaOf: (op: number) => number
+    deltaOf: (op: number) => number,
+    kind: CodeKind = 'runtime'
   ) {
-    const bytecode = contract.runtimeBytecode();
+    const {bytecode, sourceMap} = codeImage(contract, kind);
     const bytes = hexToBytes(bytecode);
     const {instructionToPc} = buildInstructionIndex(bytecode);
-    const sourceMap = contract.runtimeSourceMap();
     this.pcs = instructionToPc;
 
     for (let i = 0; i < instructionToPc.length; i++) {

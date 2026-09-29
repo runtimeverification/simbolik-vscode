@@ -40,13 +40,16 @@ export function isFrameLocal(v: ResolvedVariable): boolean {
   return v.kind === 'parameter' || v.kind === 'return' || v.kind === 'local';
 }
 
-/** The live variables of a (Solidity) frame's contract at `pc`. */
-export function variablesAtPc(
+/**
+ * The live variables of a (Solidity) frame's contract at a trace step, resolved
+ * against the code image the step executes (init code in a constructor frame).
+ */
+export function variablesAtStep(
   frame: FrameInfo,
-  pc: number
+  step: {pc: number; isInitCode: boolean}
 ): ResolvedVariable[] {
   return isSolidityFrame(frame)
-    ? liveVariables(frame.contract, frame.cu, pc)
+    ? liveVariables(frame.contract, frame.cu, step.pc, step.isInitCode)
     : [];
 }
 
@@ -112,8 +115,7 @@ export class LocalsHistory {
         this.#addressAt(j) !== frame.address
       )
         continue;
-      if (steps[j]!.isInitCode) continue;
-      const len = variablesAtPc(frame, steps[j]!.pc).find(
+      const len = variablesAtStep(frame, steps[j]!).find(
         x => x.modelStackLength !== undefined
       )?.modelStackLength;
       if (len === undefined) continue;
@@ -311,10 +313,9 @@ export class LocalsHistory {
       if (m.combinedDepth < frameDepth) return; // returned out of this invocation
       if (m.combinedDepth > frameDepth) continue; // inside a sub-call
       if (this.#addressAt(j) !== frame.address) continue;
-      if (steps[j]!.isInitCode) continue; // init code: not modelled
       // Never reach back ACROSS a write to the variable.
       if (writes(m.stmtId)) return;
-      const v = variablesAtPc(frame, steps[j]!.pc).find(
+      const v = variablesAtStep(frame, steps[j]!).find(
         x => x.name === name && isFrameLocal(x)
       );
       if (v === undefined) continue;

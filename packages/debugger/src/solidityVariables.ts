@@ -24,7 +24,7 @@ import {ethdebugProgram} from './contractAnalysis.js';
 import {contractFrame, isSolidityFrame, type FrameInfo} from './frames.js';
 import type {AllocHandle, ComplexKind} from './handles.js';
 import {addressHex, bytesDisplay} from './hex.js';
-import {isFrameLocal, LocalsHistory, variablesAtPc} from './localsHistory.js';
+import {isFrameLocal, LocalsHistory, variablesAtStep} from './localsHistory.js';
 import {
   machineStateFor,
   readPointerBytes,
@@ -215,15 +215,11 @@ export class SolidityVariables {
     const {steps} = this.#trace;
     // Read at the frame's live body position (see LocalsHistory.readStep).
     const step = this.#history.readStep(frame);
-    // Constructor frames run INIT code, whose pcs index the init source map;
-    // `variablesAt` models RUNTIME code only, so resolving them there would name
-    // an unrelated runtime function's variables. Not supported ⇒ none, not wrong.
-    if (steps[step]!.isInitCode) return [];
     const ms = this.#machineState(frame, step);
     const modelRef = this.#history.modelReference(frame, step);
 
     const variables: DebugProtocol.Variable[] = [];
-    for (const v of variablesAtPc(frame, steps[step]!.pc)) {
+    for (const v of variablesAtStep(frame, steps[step]!)) {
       if (!isFrameLocal(v)) continue; // storage lives in another scope.
       try {
         const variable = await this.#local(
@@ -368,7 +364,7 @@ export class SolidityVariables {
       ms = this.#machineState(frame, frame.stepIndex);
     } else {
       const step = this.#history.readStep(frame);
-      parent = variablesAtPc(frame, this.#trace.steps[step]!.pc).find(
+      parent = variablesAtStep(frame, this.#trace.steps[step]!).find(
         v => v.name === varName
       );
       ms = this.#machineState(frame, step);
