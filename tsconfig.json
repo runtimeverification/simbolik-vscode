@@ -15,6 +15,7 @@
     "src/react-app",
     "src/server.ts",
     "src/resolver",
+    "src/**/*.test.ts",
     "sampleWorkspace",
     "node_modules",
     "vendor",

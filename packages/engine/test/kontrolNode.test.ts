@@ -4,6 +4,7 @@ import type {spawn} from 'node:child_process';
 import {describe, expect, it, vi} from 'vitest';
 import {
   KontrolNode,
+  kontrolNodeLaunch,
   devcontainerLaunch,
   anvilLaunch,
   type FetchLike,
@@ -58,6 +59,46 @@ describe('devcontainerLaunch', () => {
   });
 });
 
+describe('kontrolNodeLaunch', () => {
+  it('runs the installed binary with step-tracing on the chosen port', () => {
+    const launch = kontrolNodeLaunch(
+      8899,
+      '/opt/kup/bin/kontrol-node',
+      '/tmp/w',
+    );
+    expect(launch.command).toBe('/opt/kup/bin/kontrol-node');
+    expect(launch.args).toEqual([
+      'run',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '8899',
+      '--steps-tracing',
+    ]);
+    expect(launch.cwd).toBe('/tmp/w');
+  });
+
+  it('defaults the binary to the bare `kontrol-node` command on PATH', () => {
+    expect(kontrolNodeLaunch(8899).command).toBe('kontrol-node');
+  });
+});
+
+describe('devcontainerLaunch — work dir', () => {
+  it('runs nix in the checkout but the node in the work dir', () => {
+    const launch = devcontainerLaunch(
+      8899,
+      '/home/node/kontrol-node',
+      "/tmp/it's",
+    );
+    // `nix develop` needs the checkout's flake; the node's io_dir* scratch
+    // directories must land in the throwaway work dir instead.
+    expect(launch.cwd).toBe('/home/node/kontrol-node');
+    expect(launch.args.at(-1)).toBe(
+      "cd '/tmp/it'\\''s' && '/home/node/kontrol-node'/.venv/bin/kontrol-node run --port 8899 --steps-tracing",
+    );
+  });
+});
+
 describe('KontrolNode', () => {
   it('start() resolves once the node answers eth_chainId', async () => {
     const node = new KontrolNode({
@@ -82,6 +123,25 @@ describe('KontrolNode', () => {
       readyTimeoutMs: 50,
     });
     await expect(node.start()).rejects.toThrow(/exited during startup/);
+  });
+
+  it('start() quotes the output of a node that dies during startup', async () => {
+    const proc = emittingProc();
+    const node = new KontrolNode({
+      port: 8899,
+      launch: kontrolNodeLaunch(8899),
+      fetch: chainIdFails,
+      spawnFn: spawnStub(proc),
+      readyPollMs: 1,
+      readyTimeoutMs: 5000,
+    });
+    const started = node.start();
+    proc.stderr!.emit('data', 'Traceback (most recent call last):\n');
+    proc.stderr!.emit('data', 'RuntimeError: K is not installed\n');
+    (proc as {exitCode: number | null}).exitCode = 1;
+    await expect(started).rejects.toThrow(
+      /exited during startup \(code 1\):\n.*K is not installed/s,
+    );
   });
 
   it('start() fails fast with the real reason when the binary is missing', async () => {

@@ -120,10 +120,10 @@
           ],
           "default": "kontrol-node",
           "markdownEnumDescriptions": [
-            "Kontrol Node — the KEVM (K Framework) execution engine (default). Launched through Nix from `#simbolik.kontrol-node-dir#`.",
-            "Anvil — the Foundry EVM node. Requires [Foundry](https://getfoundry.sh) at `#simbolik.anvil-path#`."
+            "Kontrol Node — the KEVM (K Framework) execution engine (default). Install it with `kup install kontrol-node`; found at `#simbolik.kontrol-node-path#`.",
+            "Anvil — the Foundry EVM node. A fallback with limitations; prefer kontrol-node. Requires [Foundry](https://getfoundry.sh) at `#simbolik.anvil-path#`."
           ],
-          "markdownDescription": "Which execution node the extension auto-starts for launch debugging sessions. Defaults to `kontrol-node`; switch to `anvil` to run against the Foundry EVM instead.",
+          "markdownDescription": "Which execution node the extension auto-starts for launch debugging sessions. Use `kontrol-node` (the default); `anvil` is a fallback with limitations, for when kontrol-node cannot be used.",
           "order": 13
         },
         "simbolik.anvil-path": {
@@ -132,11 +132,17 @@
           "markdownDescription": "Path to the `anvil` binary used to auto-start a node when `#simbolik.rpc-node-type#` is `anvil`. Defaults to `anvil` on your `PATH`; set an absolute path if it is installed elsewhere. Requires [Foundry](https://getfoundry.sh).",
           "order": 14
         },
+        "simbolik.kontrol-node-path": {
+          "type": "string",
+          "default": "kontrol-node",
+          "markdownDescription": "Path to the `kontrol-node` binary used to auto-start a node when `#simbolik.rpc-node-type#` is `kontrol-node`. Defaults to `kontrol-node` on your `PATH` (then the Nix profiles `kup` installs into); set an absolute path if it is installed elsewhere. Install it with `kup install kontrol-node` — see the [installation guide](https://github.com/runtimeverification/simbolik-vscode#installation).",
+          "order": 15
+        },
         "simbolik.kontrol-node-dir": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Directory of the provisioned `kontrol-node` engine used to auto-start a node when `#simbolik.rpc-node-type#` is `kontrol-node`. When empty, falls back to the `KONTROL_NODE_DIR` environment variable, then `/home/node/kontrol-node`. See `.devcontainer/setup-kontrol-node.sh`.",
-          "order": 15
+          "markdownDescription": "**For kontrol-node development.** A kontrol-node source checkout to run through its Nix dev shell instead of `#simbolik.kontrol-node-path#`. When empty, falls back to the `KONTROL_NODE_DIR` environment variable; leave both unset to use the installed `kontrol-node`. See `.devcontainer/setup-kontrol-node.sh`.",
+          "order": 16
         }
       }
     },

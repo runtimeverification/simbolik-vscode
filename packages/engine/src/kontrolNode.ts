@@ -10,30 +10,58 @@ export interface KontrolNodeLaunch {
 }
 
 /**
- * Launch recipe for the dev-container-provisioned engine:
+ * Launch recipe for an installed `kontrol-node` (e.g. `kup install
+ * kontrol-node`), which bundles the K runtime and the KEVM semantics:
+ *   kontrol-node run --host 127.0.0.1 --port <p> --steps-tracing
+ *
+ * `binary` defaults to the bare command name (resolved on `PATH`). The node
+ * writes an `io_dir*` scratch directory (28–250 MB) into its working directory
+ * on every run and never removes it, so pass a throwaway `workDir` and delete
+ * it after the node stops.
+ */
+export function kontrolNodeLaunch(
+  port: number,
+  binary = 'kontrol-node',
+  workDir?: string,
+  host = '127.0.0.1',
+): KontrolNodeLaunch {
+  return {
+    command: binary,
+    args: ['run', '--host', host, '--port', String(port), '--steps-tracing'],
+    cwd: workDir,
+    env: {...process.env},
+  };
+}
+
+/**
+ * Launch recipe for a development checkout of kontrol-node (the dev container's
+ * provisioned engine):
  *   cd $KONTROL_NODE_DIR
- *   nix develop --command bash -c '.venv/bin/kontrol-node run --port <p> --steps-tracing'
+ *   nix develop --command bash -c 'cd <workDir> && $KONTROL_NODE_DIR/.venv/bin/kontrol-node run --port <p> --steps-tracing'
  *
  * The nix dev shell supplies the K runtime (`kompile` etc.); the venv supplies
  * the `kontrol-node` CLI. `KDIST_DIR` must point at the pre-built KEVM
  * semantics (`<dir>/.kdist`), otherwise every RPC call fails with
  * "Target undefined or not built: kontrol-node.simbolik". We set it explicitly
  * rather than rely on ambient container env. See
- * `.devcontainer/setup-kontrol-node.sh`.
+ * `.devcontainer/setup-kontrol-node.sh`. `nix develop` must run in the checkout
+ * (it holds the flake); the node itself runs in `workDir` when given, so its
+ * `io_dir*` scratch directories do not pile up in the checkout (see
+ * {@link kontrolNodeLaunch}).
  */
 export function devcontainerLaunch(
   port: number,
   kontrolNodeDir = process.env.KONTROL_NODE_DIR ?? '/home/node/kontrol-node',
+  workDir?: string,
 ): KontrolNodeLaunch {
+  const run = `.venv/bin/kontrol-node run --port ${port} --steps-tracing`;
+  const script =
+    workDir === undefined
+      ? run
+      : `cd ${shellQuote(workDir)} && ${shellQuote(kontrolNodeDir)}/${run}`;
   return {
     command: 'nix',
-    args: [
-      'develop',
-      '--command',
-      'bash',
-      '-c',
-      `.venv/bin/kontrol-node run --port ${port} --steps-tracing`,
-    ],
+    args: ['develop', '--command', 'bash', '-c', script],
     cwd: kontrolNodeDir,
     env: {
       ...process.env,
@@ -41,6 +69,11 @@ export function devcontainerLaunch(
       KDIST_DIR: process.env.KDIST_DIR || `${kontrolNodeDir}/.kdist`,
     },
   };
+}
+
+/** Quote `s` as a single POSIX shell word. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
@@ -91,12 +124,15 @@ export interface KontrolNodeOptions {
   /** Injectable for tests (passed through to the readiness client). */
   fetch?: FetchLike;
   /**
-   * When set, the child is spawned with piped stdio and every stdout/stderr
-   * chunk is forwarded here (e.g. to a VSCode OutputChannel). When omitted the
-   * child's output is discarded (`stdio: 'ignore'`).
+   * Every stdout/stderr chunk of the child is forwarded here (e.g. to a VSCode
+   * OutputChannel). The output is captured either way: its tail is quoted when
+   * the node dies during startup.
    */
   onLog?: (chunk: string) => void;
 }
+
+/** How much of the child's latest output is kept for startup-failure reports. */
+const OUTPUT_TAIL_CHARS = 4000;
 
 const sleep = (ms: number) =>
   new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -121,6 +157,8 @@ export class KontrolNode {
   #proc?: ChildProcess;
   /** A spawn-level failure (e.g. `ENOENT` — binary not found), captured async. */
   #spawnError?: Error;
+  /** The latest {@link OUTPUT_TAIL_CHARS} of the child's stdout+stderr. */
+  #outputTail = '';
 
   constructor(opts: KontrolNodeOptions) {
     this.host = opts.host ?? '127.0.0.1';
@@ -134,14 +172,21 @@ export class KontrolNode {
     this.#onLog = opts.onLog;
   }
 
+  /**
+   * The latest output of the node process (stdout and stderr interleaved,
+   * truncated to the last few thousand characters).
+   */
+  get outputTail(): string {
+    return this.#outputTail;
+  }
+
   /** Spawn the process (detached, own group) and wait until it accepts RPC. */
   async start(): Promise<void> {
-    const piped = this.#onLog !== undefined;
     this.#proc = this.#spawnFn(this.#launch.command, this.#launch.args, {
       cwd: this.#launch.cwd,
       env: this.#launch.env,
       detached: true,
-      stdio: piped ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     // A missing binary / permission error surfaces asynchronously as an 'error'
     // event; capture it so #waitUntilReady fails fast with the real reason
@@ -149,12 +194,13 @@ export class KontrolNode {
     this.#proc.on?.('error', (err: Error) => {
       this.#spawnError = err;
     });
-    if (piped) {
-      const forward = (chunk: Buffer | string) =>
-        this.#onLog?.(chunk.toString());
-      this.#proc.stdout?.on('data', forward);
-      this.#proc.stderr?.on('data', forward);
-    }
+    const forward = (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      this.#outputTail = (this.#outputTail + text).slice(-OUTPUT_TAIL_CHARS);
+      this.#onLog?.(text);
+    };
+    this.#proc.stdout?.on('data', forward);
+    this.#proc.stderr?.on('data', forward);
     await this.#waitUntilReady();
   }
 
@@ -170,8 +216,10 @@ export class KontrolNode {
         );
       }
       if (this.#proc?.exitCode != null) {
+        const output = this.#outputTail.trim();
         throw new Error(
-          `node exited during startup (code ${this.#proc.exitCode})`,
+          `node exited during startup (code ${this.#proc.exitCode})` +
+            (output === '' ? '' : `:\n${output}`),
         );
       }
       try {
@@ -182,7 +230,7 @@ export class KontrolNode {
       }
       if (Date.now() >= deadline) {
         throw new Error(
-          `kontrol-node not ready after ${this.#readyTimeoutMs}ms: ${String(lastErr)}`,
+          `${this.#launch.command} not ready after ${this.#readyTimeoutMs}ms: ${String(lastErr)}`,
         );
       }
       await sleep(this.#readyPollMs);

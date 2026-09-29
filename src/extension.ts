@@ -32,6 +32,23 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory)
   );
 
+  // Check the execution node's install BEFORE a launch session exists: on a
+  // problem, `checkSetup` shows it with fix-it buttons, and returning
+  // `undefined` cancels the launch without a second, generic error.
+  context.subscriptions.push(
+    vscode.debug.registerDebugConfigurationProvider('solidity', {
+      async resolveDebugConfigurationWithSubstitutedVariables(_folder, config) {
+        if (config.request !== 'launch') return config;
+        // The same source `populateDebugConfiguration` takes the node type from.
+        const rpcNodeType = getConfigValue<'anvil' | 'kontrol-node'>(
+          'rpc-node-type',
+          'kontrol-node'
+        );
+        return (await nodeManager.checkSetup(rpcNodeType)) ? config : undefined;
+      },
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'simbolik.startDebugging',
