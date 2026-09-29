@@ -559,7 +559,7 @@ export class SolidityVariables {
     );
     return {
       name,
-      value: `${resolution.contract.name} (${addr})`,
+      value: `${resolution.contract.name}(${addr})`,
       type: t.typeLabel,
       variablesReference: this.#alloc({kind: 'State', frameId: id}),
     };

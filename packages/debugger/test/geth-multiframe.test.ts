@@ -224,10 +224,7 @@ describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
 
     const callee = locals.find((v) => v.name === 'callee');
     expect(callee).toBeDefined();
-    expect(callee!.value).toContain('Callee');
-    expect(callee!.value.toLowerCase()).toContain(
-      META.calleeAddress.toLowerCase(),
-    );
+    expect(callee!.value).toBe(`Callee(${META.calleeAddress.toLowerCase()})`);
     expect(callee!.variablesReference).toBeGreaterThan(0);
 
     // Expanding it yields the Callee contract's own storage fields.
