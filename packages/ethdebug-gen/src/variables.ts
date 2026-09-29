@@ -9,7 +9,14 @@
  *   - the enclosing function's PARAMETERS and in-scope LOCALS, each with a
  *     concrete STACK pointer (value types) ready to dereference.
  *
- * ── The uniform params+locals model ──────────────────────────────────────────
+ * ── Locating stack variables ─────────────────────────────────────────────────
+ * The PRIMARY, codegen-agnostic location of a param/return/local is the per-pc
+ * stack-PROVENANCE analyzer ({@link stackProvenance}: correct for viaIR's
+ * reordered/reused slots AND legacy). On legacy bytecode only, the classic
+ * frame-relative slot model below completes it where provenance has no
+ * data-flow evidence.
+ *
+ * ── The uniform params+locals model (legacy fallback) ────────────────────────
  * Params and locals are ALL stack variables: a function's params (declaration
  * order) followed by its locals (declaration order, inner-block locals reusing
  * slots freed when an earlier block exits) form one contiguous stack region
@@ -40,104 +47,34 @@ import {
   buildInstructionIndex,
   closestFunction,
   closestStatement,
-  findInnermostNode,
   sourceMapEntryAtPc,
   type AstNode,
   type CompilationUnit,
   type Contract,
 } from '@simbolik/solc';
 
-import {generateEthdebugProgram} from './index.js';
+import {nodeAtEntry} from './ast.js';
 import {
-  describeDeclValueType,
-  describeValueTypeString,
+  isLocalLiveAt,
+  localsFromFunctionNode,
+  type LocalDescriptor,
+} from './functionLocals.js';
+import {
   parametersFromFunctionNode,
   type ParamDescriptor,
 } from './functionParameters.js';
 import {
-  localsFromFunctionNode,
-  referenceTypeId,
-  type LocalDescriptor,
-} from './functionLocals.js';
-import {stackHeights} from './stackHeights.js';
-import {stackProvenance} from './stackProvenance.js';
-
-/**
- * One value-type member of a reference-type variable (a memory struct),
- * with a CONCRETE ethdebug pointer that resolves the member's bytes at
- * dereference time (a `Group` whose value region reads the struct's runtime
- * memory offset out of the parent's stack slot).
- */
-export interface StructMember {
-  name: string;
-  /** Solidity type string for display, e.g. `uint256`. */
-  typeLabel: string;
-  /** solc storage-style type id, e.g. `t_uint256` (empty for reference members). */
-  solcType: string;
-  numberOfBytes: number;
-  /** Concrete member pointer, ready to dereference (value-type members only). */
-  pointer?: Pointer;
-}
-
-/**
- * For a DYNAMIC MEMORY ARRAY variable, its element layout. The array's
- * stack slot holds the array's memory offset; `pointer` is a dereferenceable
- * `List` (wrapped in a `Group` that first names `base` = the stack slot and
- * `len` = the memory word at `base` = the element count) whose per-element
- * regions are NAMED `'element'` (index order). The consumer collects the values
- * via `regions.named('element')`. The variable itself stays `isValueType:false`
- * with no top-level pointer and no `members`.
- */
-export interface ArrayLayout {
-  /** Concrete `List` pointer, ready to dereference (element regions = `'element'`). */
-  pointer: Pointer;
-  /** solc storage-style element type id, e.g. `t_uint256`. */
-  elementSolcType: string;
-  /** Solidity element type string for display, e.g. `uint256`. */
-  elementTypeLabel: string;
-  /** Element size in bytes (1..32). */
-  elementNumberOfBytes: number;
-  /**
-   * For an array of DYNAMIC-BYTES elements (`bytes[]` / `string[]`), each
-   * `'element'` region is NOT a value word but the element's MEMORY OFFSET; the
-   * consumer dereferences it as a raw byte string via
-   * {@link bytesLayoutAtMemoryOffset} (`isString` selects UTF-8 vs `0x…`).
-   * Absent for value-type element arrays (the `'element'` word IS the value).
-   */
-  elementBytes?: {isString: boolean};
-}
-
-/**
- * For a MEMORY STRING / BYTES variable, its raw-byte layout. The stack
- * slot holds the memory offset; `pointer` is a `Group` (named `base` = the stack
- * slot, `len` = the memory word at `base` = the byte length) whose FINAL region
- * is the raw byte string (dynamic `length: {$read:'len'}` at `base+32`). The
- * consumer reads the final region as bytes and decodes (string → UTF-8, bytes →
- * hex). `isString` is true for `string`, false for `bytes`.
- */
-export interface BytesLayout {
-  /** Concrete `Group` pointer whose final region is the raw bytes. */
-  pointer: Pointer;
-  /** True for `string` (UTF-8 decode); false for `bytes` (hex). */
-  isString: boolean;
-}
-
-/**
- * For a dynamic-`bytes`-encoded STORAGE `string`/`bytes` var, the layout
- * facts the session parity-selects on. `flagPointer` addresses the inline/flag word
- * (the base slot's full 32-byte word: HIGH bytes = inline short data, LOW byte =
- * length*2 with the parity bit); `longBaseSlot` is the CONCRETE `keccak256(pad32(
- * slot))` base for the long-form consecutive data words (static → computed at gen
- * time, no runtime `$keccak256`); `isString` selects UTF-8 vs `0x…` rendering.
- */
-export interface BytesStorageLayout {
-  /** Storage pointer at the inline/flag word (the base slot's full 32-byte word). */
-  flagPointer: Pointer;
-  /** CONCRETE keccak256(pad32(slot)) base slot for the long-form data words. */
-  longBaseSlot: string;
-  /** True for `string` (UTF-8 decode); false for `bytes` (hex). */
-  isString: boolean;
-}
+  memoryReferenceLayout,
+  type ArrayLayout,
+  type BytesLayout,
+  type BytesStorageLayout,
+  type MappingLayout,
+  type StructMember,
+} from './layouts.js';
+import {generateEthdebugProgram} from './program.js';
+import {stackHeights, type StackHeights} from './stackHeights.js';
+import {stackProvenance, type StackProvenance} from './stackProvenance.js';
+import {declTypeFacts, type DeclTypeFacts} from './valueTypes.js';
 
 /** A resolved live variable at a pc, with a concrete pointer for value types. */
 export interface ResolvedVariable {
@@ -189,7 +126,7 @@ export interface ResolvedVariable {
    * ids. Kept in sync with the producer; harmless — the session reads
    * #stateVariables from generateEthdebugProgram directly.
    */
-  mapping?: {baseSlot: number; keyType: string; valueType: string};
+  mapping?: MappingLayout;
 }
 
 /**
@@ -202,14 +139,14 @@ export function variablesAt(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  pc: number,
+  pc: number
 ): ResolvedVariable[] {
   const out: ResolvedVariable[] = [];
 
-  // 1. Storage variables — always present, with their static storage pointers.
+  // Storage variables — always present, with their static storage pointers.
   out.push(...storageVariables(cu, sourcePath, contractName));
 
-  // 2..5. Stack variables (params + locals) of the enclosing function, if any.
+  // Stack variables (params + locals) of the enclosing function, if any.
   try {
     out.push(...stackVariables(cu, sourcePath, contractName, pc));
   } catch {
@@ -222,31 +159,32 @@ export function variablesAt(
 // Storage
 // ---------------------------------------------------------------------------
 
+/** pc-independent, so computed once per contract (`variablesAt` runs per pc). */
+const storageVarCache = new WeakMap<Contract, ResolvedVariable[]>();
+
 /** The contract's storage variables as {@link ResolvedVariable}s (kind 'storage'). */
 function storageVariables(
   cu: CompilationUnit,
   sourcePath: string,
-  contractName: string,
+  contractName: string
 ): ResolvedVariable[] {
-  // pc-independent: computed once per contract (variablesAt runs per pc).
   const contract = cu.contract(sourcePath, contractName);
-  const cached = contract === undefined ? undefined : storageVarCache.get(contract);
+  const cached =
+    contract === undefined ? undefined : storageVarCache.get(contract);
   if (cached !== undefined) return cached;
   const vars = computeStorageVariables(cu, sourcePath, contractName);
   if (contract !== undefined) storageVarCache.set(contract, vars);
   return vars;
 }
 
-const storageVarCache = new WeakMap<Contract, ResolvedVariable[]>();
-
 function computeStorageVariables(
   cu: CompilationUnit,
   sourcePath: string,
-  contractName: string,
+  contractName: string
 ): ResolvedVariable[] {
   try {
     const program = generateEthdebugProgram(cu, sourcePath, contractName);
-    return program.storageVariables.map((sv) => {
+    return program.storageVariables.map(sv => {
       const rv: ResolvedVariable = {
         name: sv.name,
         kind: 'storage' as const,
@@ -282,19 +220,37 @@ function isValueSolcType(solcType: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Stack region (params + locals)
+// Stack region (params + returns + locals)
 // ---------------------------------------------------------------------------
 
 /** One ordered stack variable (param, return, or local) in the uniform live list. */
-interface StackVar {
+interface StackVar extends DeclTypeFacts {
   name: string;
   /** AST declaration id — the key the stack-provenance analyzer tags slots by. */
   declId: number;
   kind: 'parameter' | 'return' | 'local';
-  solcType: string;
-  typeLabel: string;
-  numberOfBytes: number;
-  isValueType: boolean;
+}
+
+/** A stack variable with its frame-relative rank (legacy slot model). */
+interface RankedVar {
+  v: StackVar;
+  rank: number;
+}
+
+/** The two whole-contract CFG analyzers. */
+interface Analyzers {
+  provenance: StackProvenance;
+  heights: StackHeights;
+}
+
+/** Per-function (pc-independent) frame facts. */
+interface FrameInfo {
+  /** Params, then NAMED returns, with their fixed ranks. */
+  fixed: RankedVar[];
+  locals: LocalDescriptor[];
+  /** Rank of the first live local: past every param AND every reserved return slot. */
+  localRankBase: number;
+  frameBase: number | undefined;
 }
 
 /**
@@ -306,34 +262,22 @@ interface StackVar {
  * full CFG analysis (O(contract size)) reran on every `variablesAt` call —
  * ~300ms per newly-visited pc on a large viaIR contract.
  */
-/** Per-function (pc-independent) frame facts, keyed by the contract's analyzer. */
-const frameInfoCache = new WeakMap<
-  object,
-  Map<
-    number,
-    {
-      params: ReturnType<typeof parametersFromFunctionNode>;
-      locals: ReturnType<typeof localsFromFunctionNode>;
-      returnNodes: ReturnType<AstNode['returnParameters']>;
-      frameBase: number | undefined;
-    }
-  >
->();
+const analyzerCache = new WeakMap<Contract, Analyzers>();
 
-const analyzerCache = new WeakMap<
-  Contract,
-  {
-    provenance: ReturnType<typeof stackProvenance>;
-    heights: ReturnType<typeof stackHeights>;
-  }
->();
+/**
+ * Per-function frame facts, keyed by the contract's height analyzer then the
+ * function id: `variablesAt` runs for every pc the debugger inspects (incl. the
+ * last-known backward scan), and `anchorFrameBase` alone scans the contract's
+ * whole source map.
+ */
+const frameInfoCache = new WeakMap<StackHeights, Map<number, FrameInfo>>();
 
 function analyzersFor(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  contract: Contract,
-): {provenance: ReturnType<typeof stackProvenance>; heights: ReturnType<typeof stackHeights>} {
+  contract: Contract
+): Analyzers {
   let entry = analyzerCache.get(contract);
   if (entry === undefined) {
     entry = {
@@ -345,60 +289,12 @@ function analyzersFor(
   return entry;
 }
 
-/** Resolve the enclosing function's live params+locals at `pc` to pointers. */
-function stackVariables(
+function frameInfoFor(
   cu: CompilationUnit,
-  sourcePath: string,
-  contractName: string,
-  pc: number,
-): ResolvedVariable[] {
-  const contract = cu.contract(sourcePath, contractName);
-  if (contract === undefined) return [];
-
-  // 2. Enclosing function at pc: source map → innermost node → closestFunction.
-  const entry = sourceMapEntryAtPc(contract, pc, 'runtime');
-  if (entry === undefined || entry.fileId < 0) return [];
-  const source = cu.sourceById(entry.fileId);
-  if (source === undefined) return [];
-  const node = findInnermostNode(source.ast(), entry.start, entry.length);
-  if (node === undefined) return [];
-  const fnNode = closestFunction(node);
-  const fnName = fnNode?.name;
-  if (fnNode === undefined || fnName === undefined) return [];
-
-  // Derive params/locals from the RESOLVED function node (not a by-name lookup):
-  // the source map may resolve `pc` to a function INHERITED from a base contract,
-  // which a name lookup scoped to `contractName` would miss (degrading to
-  // storage-only), and the node also disambiguates overloads.
-  // Everything below that depends only on the FUNCTION (not the pc) is computed
-  // once per (contract analyzers, function): `variablesAt` runs for every pc the
-  // debugger inspects (incl. the last-known backward scan), and `anchorFrameBase`
-  // alone scans the contract's whole source map.
-
-  // Value-type params/locals are located by the per-pc stack-PROVENANCE analyzer
-  // (codegen-agnostic: correct for viaIR's reordered/reused slots AND legacy). The
-  // frame-relative height model below is retained ONLY to place reference-type
-  // layouts (structs/arrays/strings), which the provenance analyzer does not track.
-  const {provenance, heights} = analyzersFor(
-    cu,
-    sourcePath,
-    contractName,
-    contract,
-  );
-  // `heightHere`/`frameBase` may be undefined (analyzer couldn't resolve this pc,
-  // or the frame couldn't be anchored). That no longer suppresses value-type
-  // variables — they come from provenance — only the reference-type layouts below.
-
-  const heightHere = heights.frameRelHeightAt(pc);
-
-  // A frame reserves a stack slot for EACH return parameter between the params and
-  // the locals (the return values, zero-initialised in the prologue). This holds
-  // for BOTH external and internal entry, so the count is unconditional. ALL
-  // declared returns (including UNNAMED ones) reserve a slot, so locals rank past
-  // them correctly. Those slots must be counted so params, returns AND locals rank
-  // correctly.
-  // 3. frameBase — anchored ONCE per function via the static analyzer (used only
-  //    for reference-type layouts; value types no longer depend on it).
+  contract: Contract,
+  fnNode: AstNode,
+  heights: StackHeights
+): FrameInfo {
   let perFn = frameInfoCache.get(heights);
   if (perFn === undefined) {
     perFn = new Map();
@@ -406,374 +302,211 @@ function stackVariables(
   }
   let info = perFn.get(fnNode.id);
   if (info === undefined) {
-    const params = parametersFromFunctionNode(fnNode, cu);
-    const locals = localsFromFunctionNode(fnNode, cu);
-    const returnNodes = fnNode.returnParameters();
-    info = {
-      params,
-      locals,
-      returnNodes,
-      frameBase: anchorFrameBase(
-        cu,
-        contract,
-        fnNode,
-        params,
-        locals,
-        returnNodes.length,
-        heights,
-      ),
-    };
+    info = computeFrameInfo(cu, contract, fnNode, heights);
     perFn.set(fnNode.id, info);
   }
-  const {params, locals, returnNodes, frameBase} = info;
-  const returnSlots = returnNodes.length;
+  return info;
+}
 
-  // 4. Uniform LIVE ordering: params (always live), then return params (always
-  //    live once entered), then in-scope locals — all in declaration order;
-  //    reference vars are included so they consume a rank. The reserved
-  //    return-value slot(s) sit BETWEEN the params and the locals: a return param
-  //    at declaration index `i` ranks at `params.length + i`, and the locals' ranks
-  //    are offset past ALL reserved return slots (`returnSlots`). UNNAMED returns
-  //    are NOT emitted as variables but STILL reserve a slot (they count toward
-  //    `returnSlots` and consume a return rank), so named returns and locals after
-  //    them rank correctly.
-  const offset = entry.start;
-  const paramVars = params.map(paramToStackVar);
-  const returnRanked: Array<{v: StackVar; rank: number}> = [];
+/**
+ * A frame reserves a stack slot for EACH return parameter between the params and
+ * the locals (the return values, zero-initialised in the prologue). This holds
+ * for BOTH external and internal entry, so the count is unconditional. ALL
+ * declared returns (including UNNAMED ones) reserve a slot: a return param at
+ * declaration index `i` ranks at `params.length + i`, and the locals rank past
+ * ALL reserved return slots. UNNAMED returns are NOT emitted as variables but
+ * STILL reserve a slot, so named returns and locals after them rank correctly.
+ */
+function computeFrameInfo(
+  cu: CompilationUnit,
+  contract: Contract,
+  fnNode: AstNode,
+  heights: StackHeights
+): FrameInfo {
+  const params = parametersFromFunctionNode(fnNode, cu);
+  const locals = localsFromFunctionNode(fnNode, cu);
+  const returnNodes = fnNode.returnParameters();
+
+  const fixed: RankedVar[] = params.map((p, i) => ({
+    v: toStackVar(p, 'parameter'),
+    rank: i,
+  }));
   returnNodes.forEach((node, i) => {
     const name = node.name;
     if (name === undefined || name === '') return; // unnamed: reserved, not emitted.
-    returnRanked.push({
-      v: returnParamToStackVar(node, name, cu),
-      rank: paramVars.length + i,
+    fixed.push({
+      // A user-defined value-type return resolves to its underlying type;
+      // reference returns get `isValueType:false` but still consume a rank.
+      v: {name, declId: node.id, kind: 'return', ...declTypeFacts(node, cu)},
+      rank: params.length + i,
     });
   });
-  const localVars = locals.filter((l) => isLive(l, offset)).map(localToStackVar);
-  const ranked: Array<{v: StackVar; rank: number}> = [
-    ...paramVars.map((v, i) => ({v, rank: i})),
-    ...returnRanked,
-    ...localVars.map((v, j) => ({v, rank: paramVars.length + returnSlots + j})),
-  ];
 
-  // 5. Per-variable stack pointer at this pc.
-  return ranked.map(({v, rank}) => {
-    const result: ResolvedVariable = {
-      name: v.name,
-      kind: v.kind,
-      declId: v.declId,
-      solcType: v.solcType,
-      typeLabel: v.typeLabel,
-      numberOfBytes: v.numberOfBytes,
-      isValueType: v.isValueType,
-    };
-    // Frame-relative fixed-slot depth (legacy codegen model). Used for value
-    // types only as a completeness FALLBACK on legacy bytecode, and for
-    // reference-type layouts.
-    const frameDepth =
-      heightHere !== undefined && frameBase !== undefined
-        ? heightHere - 1 - (frameBase + rank)
-        : undefined;
-
-    if (v.isValueType) {
-      // PRIMARY, codegen-agnostic location: the per-pc stack-provenance analyzer
-      // (sound for viaIR's reordered/reused slots AND legacy). `undefined` means
-      // the value is not known to be on the stack here.
-      let depth = provenance.variableDepthAt(pc, v.declId);
-      const modelled = depth !== undefined ? provenance.stackLengthAt(pc) : undefined;
-
-      // FALLBACK (legacy bytecode, non-parameters only): where provenance has no
-      // data-flow evidence, the classic "height − declarationRank" slot is a sound
-      // completion on the classic pipeline — it locates a value at a stable frame
-      // slot that provenance can't anchor without a read: a return parameter's
-      // reserved (still-zero) slot, or a loop variable whose value number changes
-      // each iteration. It is NOT used under viaIR (the model is invalid there),
-      // nor for value PARAMETERS (the fixed-rank model mislocated them even on
-      // legacy — provenance is authoritative for params).
-      if (
-        depth === undefined &&
-        !cu.viaIR() &&
-        v.kind !== 'parameter' &&
-        frameDepth !== undefined &&
-        frameDepth >= 0
-      ) {
-        depth = frameDepth;
-      }
-
-      if (depth === undefined) return result; // unavailable at this pc → omit.
-      if (modelled !== undefined) result.modelStackLength = modelled;
-      result.pointer = {
-        location: 'stack',
-        slot: depth,
-        offset: v.solcType.startsWith('t_bytes') ? 0 : 32 - v.numberOfBytes,
-        length: v.numberOfBytes,
-      };
-      return result;
-    }
-
-    // Reference/dynamic types: locate the stack slot that holds the reference's
-    // handle (a MEMORY struct/array/string's memory offset) PER-PC via the
-    // provenance analyzer first — correct under viaIR's reordered/reused slots,
-    // exactly as for value types — and fall back to the legacy frame-relative slot
-    // only where provenance has no evidence (classic codegen).
-    let depth = provenance.variableDepthAt(pc, v.declId);
-    if (depth !== undefined) {
-      const modelled = provenance.stackLengthAt(pc);
-      if (modelled !== undefined) result.modelStackLength = modelled;
-    }
-    // FALLBACK — legacy only. The frame-relative slot is sound on the classic
-    // pipeline (fixed frame slots) but NOT under viaIR, whose stack scheduler
-    // reorders and reuses slots: the differential uniswap campaign showed it
-    // decoding plausible-but-WRONG values there (a `bytes params` showing another
-    // local's string, an array shown as its sibling). Under viaIR reference
-    // handles are located by provenance instead (parameter entry claims,
-    // declaration-end claims, and reads); unlocated ⇒ listed without a layout.
-    if (depth === undefined && !cu.viaIR()) depth = frameDepth;
-    if (depth === undefined) {
-      return result; // unresolved → list reference var without a layout.
-    }
-
-    // Reference/dynamic: listed, no top-level pointer (still consumed a rank).
-    // A MEMORY STRUCT of value-type members is expanded into per-member
-    // pointers (a `Group` reading the struct's memory offset from its stack slot).
-    // Arrays/strings/mappings stay bare. The expansion is
-    // gated to MEMORY structs (the solc typeIdentifier carries the data location,
-    // e.g. `t_struct$_Point_$10_memory_ptr`): a STORAGE or CALLDATA struct local/
-    // param holds a storage-slot / calldata offset in its stack slot — NOT a memory
-    // offset — so the memory member pointers below would decode WRONG values from
-    // it. Those are left bare (listed, no members) until their own cycle rather than
-    // mis-decoded. (Fixtures only exercise a memory struct.)
-    if (depth >= 0 && v.solcType.includes('_memory')) {
-      if (v.solcType.startsWith('t_struct')) {
-        const members = structMemberPointers(cu, v.solcType, depth);
-        if (members.length > 0) {
-          result.members = members;
-        }
-      } else if (v.solcType.startsWith('t_array')) {
-        // A DYNAMIC memory array of value-type elements → a `List` layout.
-        const array = arrayLayout(v.solcType, v.typeLabel, depth);
-        if (array !== undefined) {
-          result.array = array;
-        }
-      } else if (
-        v.solcType.startsWith('t_string') ||
-        v.solcType.startsWith('t_bytes_')
-      ) {
-        // A memory string/bytes → a raw-byte layout (final region = bytes).
-        result.bytes = bytesLayout(v.solcType.startsWith('t_string'), depth);
-      }
-    }
-    // KNOWN GAP: a CALLDATA dynamic bytes/string (`bytes calldata` / `string
-    // calldata` param) is listed but NOT given a layout. Under viaIR it is a
-    // 2-slot value (calldata offset + byte length), and — verified across Uniswap
-    // frames — the offset can sit ABOVE or BELOW the length on the stack (e.g.
-    // off@slot2/len@slot1 in `PoolManager.unlock` but off@slot0/len@slot1 in
-    // `ActionsRouter`-style callees), so a single provenance-anchored slot plus a
-    // fixed direction picks the wrong slot and decodes GARBAGE. Fail-safe: show
-    // nothing (rather than a wrong value) until stackProvenance identifies BOTH
-    // slots of a calldata slice. See the calldatafwd fixture.
-    return result;
-  });
-}
-
-/**
- * The value-type members of a MEMORY struct, each with a concrete ethdebug
- * pointer. The struct's memory offset lives in the local's stack slot at `depth`;
- * member k (a value type of `N` bytes) sits at memory word k of the struct. Each
- * member pointer is a `Group`:
- *   - a NAMED base region over the stack slot (`{name:'base', slot: depth, …}`),
- *     whose 32-byte value IS the struct's runtime memory offset;
- *   - a memory value region at `{$sum:[{$read:'base'}, k*32 + inWord]}` of length
- *     `N`, where `inWord` right-aligns non-`bytesN` value types within the word
- *     (`32 − N`; `bytesN` are left-aligned so `inWord = 0`).
- * The producer supplies only this LAYOUT; `@ethdebug/pointers` resolves the
- * `$read`/`$sum` against the machine state at dereference. Reference-type members
- * (out of scope) are listed without a pointer rather than crashing.
- */
-function structMemberPointers(
-  cu: CompilationUnit,
-  structSolcType: string,
-  depth: number,
-): StructMember[] {
-  return cu.structMembers(structSolcType).map((m, k) => {
-    const desc = describeValueTypeString(m.typeString);
-    if (desc === undefined) {
-      // Reference-type member (nested struct / array / string): out of scope.
-      return {
-        name: m.name,
-        typeLabel: m.typeString,
-        solcType: '',
-        numberOfBytes: 0,
-      };
-    }
-    const n = desc.numberOfBytes;
-    const inWord = desc.typeId.startsWith('t_bytes') ? 0 : 32 - n;
-    const pointer: Pointer = {
-      group: [
-        {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
-        {
-          location: 'memory',
-          offset: {$sum: [{$read: 'base'}, k * 32 + inWord]},
-          length: n,
-        },
-      ],
-    };
-    return {
-      name: m.name,
-      typeLabel: m.typeString,
-      solcType: desc.typeId,
-      numberOfBytes: n,
-      pointer,
-    };
-  });
-}
-
-/**
- * The `List` layout of a DYNAMIC memory array of VALUE-TYPE elements.
- * The array's memory offset lives in the local's stack slot at `depth`; the
- * element count is the memory word at that offset, and element `i` (a value type
- * of one word) sits at `offset + 32 + i*32`. The pointer is a `Group`:
- *   - `base` — the stack slot (its 32-byte value IS the array's memory offset);
- *   - `len` — the memory word at `base` (the element count);
- *   - a `List` of `count:{$read:'len'}` regions NAMED `'element'`, each a 32-byte
- *     memory word at `{$sum:[{$read:'base'}, 32, {$product:['i', 32]}]}`.
- * The producer supplies only this LAYOUT; `@ethdebug/pointers` resolves the
- * `$read`/`$sum`/`$product` against the machine state at dereference. Returns
- * `undefined` for a non-value-type element (out of scope this cycle).
- *
- * FIXED-size arrays (`t_array$_…_$<N>_memory_ptr`) are also handled here: a fixed
- * memory `T[N]` is inline with NO length word — the stack slot points DIRECTLY at
- * element 0, so element `i` sits at `base + i*32` and the count is the static `N`.
- * The pointer drops the `len` region and the leading `+32` of the dynamic form.
- */
-function arrayLayout(
-  arraySolcType: string,
-  arrayTypeLabel: string,
-  depth: number,
-): ArrayLayout | undefined {
-  // Dynamic OR fixed memory arrays: `t_array$_<elemId>_$(dyn|<N>)_memory_ptr`.
-  const m = /^t_array\$_(.+)_\$(dyn|\d+)_memory_ptr$/.exec(arraySolcType);
-  if (m === null) return undefined;
-  const sizeToken = m[2]!;
-  const elementId = m[1]!;
-  const isDynamic = sizeToken === 'dyn';
-  // Element type/size from the array's display label (`uint256[]` → `uint256`),
-  // reusing the value-type describer. `elementSolcType` comes from the same
-  // describer so it matches the value-decode path.
-  const elementTypeLabel = arrayTypeLabel.replace(/\[\d*\]\s*(memory|calldata|storage)?\s*$/, '').trim();
-  const desc = describeValueTypeString(elementTypeLabel);
-  // A DYNAMIC-BYTES element (`bytes[]` / `string[]`): each element slot holds a
-  // memory OFFSET to the element's bytes, so the value describer returns nothing.
-  // Other reference-type elements (nested structs/arrays) stay out of scope.
-  const bytesElement = /^t_(bytes|string)_memory_ptr$/.exec(elementId);
-  if (desc === undefined && bytesElement === null) return undefined;
-
-  // The element `List` reads each element's 32-byte word (element `i` at
-  // `base + 32 + i*32` for dynamic, `base + i*32` for fixed). For value-type
-  // elements that word IS the value; for bytes/string elements it is the memory
-  // offset the consumer dereferences.
-  const pointer: Pointer = isDynamic
-    ? {
-        group: [
-          {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
-          {name: 'len', location: 'memory', offset: {$read: 'base'}, length: 32},
-          {
-            list: {
-              count: {$read: 'len'},
-              each: 'i',
-              is: {
-                name: 'element',
-                location: 'memory',
-                offset: {$sum: [{$read: 'base'}, 32, {$product: ['i', 32]}]},
-                length: 32,
-              },
-            },
-          },
-        ],
-      }
-    : {
-        // Fixed `T[N]`: no `len` region, static count, element i at base + i*32.
-        group: [
-          {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
-          {
-            list: {
-              count: Number(sizeToken),
-              each: 'i',
-              is: {
-                name: 'element',
-                location: 'memory',
-                offset: {$sum: [{$read: 'base'}, {$product: ['i', 32]}]},
-                length: 32,
-              },
-            },
-          },
-        ],
-      };
-  if (desc === undefined) {
-    // bytes/string element array: element regions are memory offsets.
-    return {
-      pointer,
-      elementSolcType: elementId,
-      elementTypeLabel,
-      elementNumberOfBytes: 32,
-      elementBytes: {isString: bytesElement![1] === 'string'},
-    };
-  }
   return {
-    pointer,
-    elementSolcType: desc.typeId,
-    elementTypeLabel,
-    elementNumberOfBytes: desc.numberOfBytes,
+    fixed,
+    locals,
+    localRankBase: params.length + returnNodes.length,
+    frameBase: anchorFrameBase(
+      cu,
+      contract,
+      fnNode,
+      params,
+      locals,
+      returnNodes.length,
+      heights
+    ),
   };
 }
 
-/**
- * The raw-byte layout of a memory string/bytes. The memory offset lives
- * in the local's stack slot at `depth`; the byte length is the memory word at
- * that offset, and the raw bytes follow at `offset + 32`. The pointer is a
- * `Group`:
- *   - `base` — the stack slot (the memory offset);
- *   - `len` — the memory word at `base` (the byte length);
- *   - a raw byte region of dynamic `length:{$read:'len'}` at `{$sum:[{$read:
- *     'base'}, 32]}` — the FINAL region, which the consumer reads as bytes.
- */
-function bytesLayout(isString: boolean, depth: number): BytesLayout {
-  const pointer: Pointer = {
-    group: [
-      {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32},
-      {name: 'len', location: 'memory', offset: {$read: 'base'}, length: 32},
-      {
-        location: 'memory',
-        offset: {$sum: [{$read: 'base'}, 32]},
-        length: {$read: 'len'},
-      },
-    ],
+function toStackVar(
+  d: ParamDescriptor | LocalDescriptor,
+  kind: 'parameter' | 'local'
+): StackVar {
+  return {
+    name: d.name,
+    declId: d.declId,
+    kind,
+    solcType: d.solcType,
+    typeLabel: d.typeLabel,
+    numberOfBytes: d.numberOfBytes,
+    isValueType: d.isValueType,
   };
-  return {pointer, isString};
+}
+
+/** Resolve the enclosing function's live params+locals at `pc` to pointers. */
+function stackVariables(
+  cu: CompilationUnit,
+  sourcePath: string,
+  contractName: string,
+  pc: number
+): ResolvedVariable[] {
+  const contract = cu.contract(sourcePath, contractName);
+  if (contract === undefined) return [];
+
+  // Enclosing function at pc: source map → innermost node → closestFunction.
+  // Params/locals come from this RESOLVED node (not a by-name lookup): the
+  // source map may resolve `pc` to a function INHERITED from a base contract,
+  // which a name lookup scoped to `contractName` would miss (degrading to
+  // storage-only), and the node also disambiguates overloads.
+  const entry = sourceMapEntryAtPc(contract, pc, 'runtime');
+  if (entry === undefined) return [];
+  const node = nodeAtEntry(cu, entry);
+  if (node === undefined) return [];
+  const fnNode = closestFunction(node);
+  if (fnNode === undefined || fnNode.name === undefined) return [];
+
+  const analyzers = analyzersFor(cu, sourcePath, contractName, contract);
+  const {fixed, locals, localRankBase, frameBase} = frameInfoFor(
+    cu,
+    contract,
+    fnNode,
+    analyzers.heights
+  );
+  // `heightHere`/`frameBase` may be undefined (analyzer couldn't resolve this pc,
+  // or the frame couldn't be anchored). That only disables the legacy fallback.
+  const heightHere = analyzers.heights.frameRelHeightAt(pc);
+  const frameDepthOf = (rank: number): number | undefined =>
+    heightHere !== undefined && frameBase !== undefined
+      ? heightHere - 1 - (frameBase + rank)
+      : undefined;
+
+  // Uniform LIVE ordering: params (always live), then return params (always
+  // live once entered), then in-scope locals — all in declaration order;
+  // reference vars are included so they consume a rank.
+  const ranked: RankedVar[] = [
+    ...fixed,
+    ...locals
+      .filter(l => isLocalLiveAt(l, entry.start))
+      .map((l, j) => ({v: toStackVar(l, 'local'), rank: localRankBase + j})),
+  ];
+  return ranked.map(({v, rank}) =>
+    resolveStackVar(cu, analyzers.provenance, pc, v, frameDepthOf(rank))
+  );
 }
 
 /**
- * The raw-byte layout of a memory string/bytes whose data lives at a KNOWN
- * absolute memory offset (rather than behind a stack slot). Used for each element
- * of a `bytes[]`/`string[]`: the array's element word IS the element's memory
- * offset, resolved at render time, so this takes the concrete offset directly.
- * The byte length is the memory word at `memOffset`; the raw bytes follow at
- * `memOffset + 32` (the FINAL region, read as bytes by the consumer).
+ * One stack variable at `pc`: located by provenance first, falling back (legacy
+ * codegen only) to its frame-relative slot `frameDepth`; a value type gets a
+ * stack pointer, a memory reference type its layout. Unlocated ⇒ listed bare.
  */
-export function bytesLayoutAtMemoryOffset(
-  memOffset: number,
-  isString: boolean,
-): BytesLayout {
-  const pointer: Pointer = {
-    group: [
-      {name: 'len', location: 'memory', offset: memOffset, length: 32},
-      {
-        location: 'memory',
-        offset: memOffset + 32,
-        length: {$read: 'len'},
-      },
-    ],
+function resolveStackVar(
+  cu: CompilationUnit,
+  provenance: StackProvenance,
+  pc: number,
+  v: StackVar,
+  frameDepth: number | undefined
+): ResolvedVariable {
+  const result: ResolvedVariable = {
+    name: v.name,
+    kind: v.kind,
+    declId: v.declId,
+    solcType: v.solcType,
+    typeLabel: v.typeLabel,
+    numberOfBytes: v.numberOfBytes,
+    isValueType: v.isValueType,
   };
-  return {pointer, isString};
+  // PRIMARY, codegen-agnostic location. `undefined` means the value is not known
+  // to be on the stack here.
+  let depth = provenance.variableDepthAt(pc, v.declId);
+  const modelled =
+    depth !== undefined ? provenance.stackLengthAt(pc) : undefined;
+
+  if (v.isValueType) {
+    // FALLBACK (legacy bytecode, non-parameters only): where provenance has no
+    // data-flow evidence, the classic "height − declarationRank" slot is a sound
+    // completion on the classic pipeline — it locates a value at a stable frame
+    // slot that provenance can't anchor without a read: a return parameter's
+    // reserved (still-zero) slot, or a loop variable whose value number changes
+    // each iteration. It is NOT used under viaIR (the model is invalid there),
+    // nor for value PARAMETERS (the fixed-rank model mislocated them even on
+    // legacy — provenance is authoritative for params).
+    if (
+      depth === undefined &&
+      !cu.viaIR() &&
+      v.kind !== 'parameter' &&
+      frameDepth !== undefined &&
+      frameDepth >= 0
+    ) {
+      depth = frameDepth;
+    }
+    if (depth === undefined) return result; // unavailable at this pc → omit.
+    if (modelled !== undefined) result.modelStackLength = modelled;
+    result.pointer = {
+      location: 'stack',
+      slot: depth,
+      offset: v.solcType.startsWith('t_bytes') ? 0 : 32 - v.numberOfBytes,
+      length: v.numberOfBytes,
+    };
+    return result;
+  }
+
+  // Reference/dynamic types: the stack slot holds the reference's handle (a
+  // MEMORY struct/array/string's memory offset). No top-level pointer.
+  if (modelled !== undefined) result.modelStackLength = modelled;
+  // FALLBACK — legacy only. The frame-relative slot is sound on the classic
+  // pipeline (fixed frame slots) but NOT under viaIR, whose stack scheduler
+  // reorders and reuses slots: the differential uniswap campaign showed it
+  // decoding plausible-but-WRONG values there (a `bytes params` showing another
+  // local's string, an array shown as its sibling). Under viaIR reference
+  // handles are located by provenance instead (parameter entry claims,
+  // declaration-end claims, and reads); unlocated ⇒ listed without a layout.
+  if (depth === undefined && !cu.viaIR()) depth = frameDepth;
+  if (depth !== undefined && depth >= 0) {
+    Object.assign(
+      result,
+      memoryReferenceLayout(cu, v.solcType, v.typeLabel, depth)
+    );
+  }
+  // KNOWN GAP: a CALLDATA dynamic bytes/string (`bytes calldata` / `string
+  // calldata` param) is listed but NOT given a layout. Under viaIR it is a
+  // 2-slot value (calldata offset + byte length), and — verified across Uniswap
+  // frames — the offset can sit ABOVE or BELOW the length on the stack (e.g.
+  // off@slot2/len@slot1 in `PoolManager.unlock` but off@slot0/len@slot1 in
+  // `ActionsRouter`-style callees), so a single provenance-anchored slot plus a
+  // fixed direction picks the wrong slot and decodes GARBAGE. Fail-safe: show
+  // nothing (rather than a wrong value) until stackProvenance identifies BOTH
+  // slots of a calldata slice. See the calldatafwd fixture.
+  return result;
 }
 
 /**
@@ -807,31 +540,28 @@ export function bytesLayoutAtMemoryOffset(
  *   below-entry params and the body locals), so the caller counts `returnSlots`
  *   into the LOCALS' ranks — an internal function with BOTH stack return slots AND
  *   body locals (e.g. the `helper` fixture: param `y`, return `out`, local `local`)
- *   now ranks its locals correctly. (`frameBase` itself does NOT add `returnSlots`
+ *   ranks its locals correctly. (`frameBase` itself does NOT add `returnSlots`
  *   for internal entry: the params sit below the height-0 entry, unaffected by the
  *   later-reserved return slots.)
  */
 function anchorFrameBase(
   cu: CompilationUnit,
   contract: Contract,
-  fnNode: {id: number; visibility?: string},
+  fnNode: AstNode,
   params: ParamDescriptor[],
   locals: LocalDescriptor[],
   returnSlots: number,
-  heights: ReturnType<typeof stackHeights>,
+  heights: StackHeights
 ): number | undefined {
   const external = isExternalEntry(fnNode.visibility);
-  const bytecode = contract.runtimeBytecode();
   const sourceMap = contract.runtimeSourceMap();
-  const {instructionToPc} = buildInstructionIndex(bytecode);
+  const {instructionToPc} = buildInstructionIndex(contract.runtimeBytecode());
 
   let prevStmtId: number | undefined;
   for (let i = 0; i < sourceMap.length; i++) {
     const smEntry = sourceMap[i];
-    if (smEntry === undefined || smEntry.fileId < 0) continue;
-    const src = cu.sourceById(smEntry.fileId);
-    if (src === undefined) continue;
-    const n = findInnermostNode(src.ast(), smEntry.start, smEntry.length);
+    if (smEntry === undefined) continue;
+    const n = nodeAtEntry(cu, smEntry);
     if (n === undefined) continue;
 
     const owningFnId = closestFunction(n)?.id;
@@ -857,7 +587,7 @@ function anchorFrameBase(
     const liveVarCount =
       params.length +
       returnSlots +
-      locals.filter((l) => isLive(l, smEntry.start)).length;
+      locals.filter(l => isLocalLiveAt(l, smEntry.start)).length;
     return height - liveVarCount;
   }
   return undefined;
@@ -878,67 +608,5 @@ function isExternalEntry(visibility: string | undefined): boolean {
     visibility === undefined ||
     visibility === 'public' ||
     visibility === 'external'
-  );
-}
-
-function paramToStackVar(p: ParamDescriptor): StackVar {
-  return {
-    name: p.name,
-    declId: p.declId,
-    kind: 'parameter',
-    solcType: p.solcType,
-    typeLabel: p.typeLabel,
-    numberOfBytes: p.numberOfBytes,
-    isValueType: p.isValueType,
-  };
-}
-
-/**
- * A NAMED return parameter's AST node → an ordered stack variable (kind 'return'),
- * reusing the same value-type mapping as params/locals ({@link describeDeclValueType},
- * so a user-defined value-type return resolves to its underlying type).
- * Reference/dynamic returns get `isValueType:false` and no pointer downstream, but
- * still consume a rank/slot.
- */
-function returnParamToStackVar(
-  node: AstNode,
-  name: string,
-  cu: CompilationUnit,
-): StackVar {
-  const typeLabel = node.typeString ?? '';
-  const desc = describeDeclValueType(node, cu);
-  return {
-    name,
-    declId: node.id,
-    kind: 'return',
-    // Reference-type returns carry their solc structural type id.
-    solcType: desc?.typeId ?? referenceTypeId(node),
-    typeLabel,
-    numberOfBytes: desc?.numberOfBytes ?? 0,
-    isValueType: desc !== undefined,
-  };
-}
-
-function localToStackVar(l: LocalDescriptor): StackVar {
-  return {
-    name: l.name,
-    declId: l.declId,
-    kind: 'local',
-    solcType: l.solcType,
-    typeLabel: l.typeLabel,
-    numberOfBytes: l.numberOfBytes,
-    isValueType: l.isValueType,
-  };
-}
-
-/**
- * Whether a local is live at source `offset`: its enclosing lexical scope covers
- * the offset AND its declaration statement has completed.
- */
-function isLive(local: LocalDescriptor, offset: number): boolean {
-  return (
-    offset >= local.declEnd &&
-    offset >= local.scopeStart &&
-    offset < local.scopeEnd
   );
 }

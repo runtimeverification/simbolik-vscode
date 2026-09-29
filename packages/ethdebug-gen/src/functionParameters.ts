@@ -7,13 +7,12 @@
  * that the debugger later binds to a concrete ethdebug pointer per runtime frame
  * (calldata for externally-entered frames, the stack for internally-entered ones).
  *
- * The value-type classification lives here (rather than in the debugger) because
- * it is a build-info-derived fact shared by the static inventory and the runtime
- * reader; the debugger re-exports {@link describeValueTypeString} from this module.
+ * The value-type classification itself lives in `valueTypes.ts`.
  */
 import type {AstNode, CompilationUnit} from '@simbolik/solc';
 
-import {referenceTypeId} from './functionLocals.js';
+import {requireFunction} from './ast.js';
+import {declTypeFacts} from './valueTypes.js';
 
 /** A single function input parameter's static descriptor. */
 export interface ParamDescriptor {
@@ -34,87 +33,6 @@ export interface ParamDescriptor {
 }
 
 /**
- * The value-type shape of a solc `typeString` (as carried by an AST
- * `VariableDeclaration.typeDescriptions.typeString`): its storage-style type id
- * and byte width, plus the enum simple name when applicable. Returns `undefined`
- * for reference/dynamic types (bytes/string/array/struct/mapping), which are out
- * of scope for the value-type inventory.
- */
-export function describeValueTypeString(
-  typeString: string,
-): {typeId: string; numberOfBytes: number; enumName?: string} | undefined {
-  const ts = typeString.trim();
-
-  if (ts === 'bool') {
-    return {typeId: 't_bool', numberOfBytes: 1};
-  }
-  if (ts === 'address' || ts.startsWith('address ')) {
-    return {typeId: 't_address', numberOfBytes: 20};
-  }
-
-  const uint = /^uint(\d+)$/.exec(ts);
-  if (uint) {
-    return {typeId: `t_uint${uint[1]}`, numberOfBytes: Number(uint[1]) / 8};
-  }
-  const int = /^int(\d+)$/.exec(ts);
-  if (int) {
-    return {typeId: `t_int${int[1]}`, numberOfBytes: Number(int[1]) / 8};
-  }
-  const bytes = /^bytes(\d+)$/.exec(ts);
-  if (bytes) {
-    return {typeId: `t_bytes${bytes[1]}`, numberOfBytes: Number(bytes[1])};
-  }
-  const contract = /^contract\s+(.+)$/.exec(ts);
-  if (contract) {
-    return {typeId: 't_contract', numberOfBytes: 20};
-  }
-  const enumMatch = /^enum\s+(?:.+\.)?(\w+)$/.exec(ts);
-  if (enumMatch) {
-    return {typeId: 't_enum', numberOfBytes: 1, enumName: enumMatch[1]};
-  }
-
-  return undefined;
-}
-
-/**
- * The value-type descriptor for a `VariableDeclaration`, resolving a USER-DEFINED
- * VALUE TYPE (`type X is <elementary>`) to its underlying type.
- *
- * A UDVT variable's `typeString` is the alias name (e.g. `Currency`), which
- * {@link describeValueTypeString} does not recognise, so such a local/param would
- * be misclassified as a reference type and shown without a value. Its
- * declaration's `UserDefinedTypeName` child carries a `referencedDeclaration`
- * pointing at the `UserDefinedValueTypeDefinition` (possibly in another source),
- * whose `ElementaryTypeName` child is the real value type (e.g. `address`). Falls
- * back to `undefined` for genuine reference/dynamic types.
- */
-export function describeDeclValueType(
-  decl: AstNode,
-  cu: CompilationUnit,
-): {typeId: string; numberOfBytes: number; enumName?: string} | undefined {
-  const direct = describeValueTypeString(decl.typeString ?? '');
-  if (direct !== undefined) return direct;
-  if (!(decl.typeIdentifier ?? '').startsWith('t_userDefinedValueType')) {
-    return undefined;
-  }
-  const typeName = decl
-    .children()
-    .find((c) => c.nodeType === 'UserDefinedTypeName');
-  const ref = typeName?.referencedDeclaration;
-  if (ref === undefined) return undefined;
-  const defn = cu.nodeById(ref);
-  if (defn === undefined || defn.nodeType !== 'UserDefinedValueTypeDefinition') {
-    return undefined;
-  }
-  const underlying = defn
-    .children()
-    .find((c) => c.nodeType === 'ElementaryTypeName');
-  return underlying?.typeString === undefined
-    ? undefined
-    : describeValueTypeString(underlying.typeString);
-}
-
-/**
  * The static input-parameter inventory for `contractName.methodName`, in
  * declaration order. Reference/dynamic parameters are still listed (so indices
  * stay aligned with the ABI) but carry `isValueType: false` and are skipped by
@@ -124,14 +42,9 @@ export function functionParameters(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  methodName: string,
+  methodName: string
 ): ParamDescriptor[] {
-  const fn = cu.functionDefinition(sourcePath, contractName, methodName);
-  if (fn === undefined) {
-    throw new Error(
-      `function not found: ${sourcePath}:${contractName}.${methodName}`,
-    );
-  }
+  const fn = requireFunction(cu, sourcePath, contractName, methodName);
   return parametersFromFunctionNode(fn, cu);
 }
 
@@ -145,20 +58,12 @@ export function functionParameters(
  */
 export function parametersFromFunctionNode(
   fn: AstNode,
-  cu: CompilationUnit,
+  cu: CompilationUnit
 ): ParamDescriptor[] {
-  return fn.parameters().map((param, index) => {
-    const typeLabel = param.typeString ?? '';
-    const desc = describeDeclValueType(param, cu);
-    return {
-      name: param.name ?? `arg${index}`,
-      declId: param.id,
-      index,
-      // Reference-type params carry their solc structural type id.
-      solcType: desc?.typeId ?? referenceTypeId(param),
-      typeLabel,
-      numberOfBytes: desc?.numberOfBytes ?? 0,
-      isValueType: desc !== undefined,
-    };
-  });
+  return fn.parameters().map((param, index) => ({
+    name: param.name ?? `arg${index}`,
+    declId: param.id,
+    index,
+    ...declTypeFacts(param, cu),
+  }));
 }

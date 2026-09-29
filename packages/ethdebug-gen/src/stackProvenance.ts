@@ -17,10 +17,11 @@
  * wrong at some pcs.)
  *
  * ── Value numbering ──────────────────────────────────────────────────────────
- * A per-function CFG worklist (mirroring {@link stackHeights}) propagates an
- * abstract stack whose every slot carries an optional known PUSH CONSTANT (to
- * resolve JUMP targets, exactly as the height analyzer does) and a deterministic
- * ORIGIN id — a value number identifying WHICH runtime value occupies the slot:
+ * A per-function CFG worklist (sharing {@link StackFlow} with
+ * {@link stackHeights}) propagates an abstract stack whose every slot carries an
+ * optional known PUSH CONSTANT (to resolve JUMP targets, exactly as the height
+ * analyzer does) and a deterministic ORIGIN id — a value number identifying WHICH
+ * runtime value occupies the slot:
  *   - a value CREATED by an instruction at pc `p` (a PUSH, or any opcode result)
  *     gets origin derived from `p` — stable across worklist revisits;
  *   - the frame's below-entry (caller) slots get distinct per-function origins;
@@ -52,23 +53,40 @@
  * where paths disagree (e.g. a variable assigned in both branches of an if/else,
  * or a loop variable at the loop head) the slot gets a φ value number for that
  * join — it holds one runtime value from the join on, which a LATER read can
- * name. A φ never inherits a pre-join variable claim, so this stays sound. A pc reached at two conflicting heights (optimizer block-sharing,
- * inline assembly, …) is marked ambiguous and reports `undefined`, never a guess.
+ * name. A φ never inherits a pre-join variable claim, so this stays sound. A pc
+ * reached at two conflicting heights (optimizer block-sharing, inline assembly,
+ * …) is marked ambiguous and reports `undefined`, never a guess.
  *
  * PURE-STATIC: solc artifacts only, no trace. Never throws for a single pc query.
  */
 import {
-  buildInstructionIndex,
   closestFunction,
   closestStatement,
-  findInnermostNode,
   type AstNode,
   type CompilationUnit,
   type Contract,
-  type Jump,
-  type SourceMapEntry,
 } from '@simbolik/solc';
-import {indirectCallReturns} from './stackHeights.js';
+
+import {walkAllSources} from './ast.js';
+import {
+  Program,
+  StackFlow,
+  type Insn,
+  type OnCallResume,
+  type StackDomain,
+} from './cfg.js';
+import {
+  AND,
+  JUMP,
+  JUMPDEST,
+  PUSH0,
+  endsBlock,
+  isDup,
+  isPushN,
+  isSwap,
+  stackDelta,
+  stackInOut,
+} from './opcodes.js';
 
 /** The public accessor returned by {@link stackProvenance}. */
 export interface StackProvenance {
@@ -88,182 +106,8 @@ export interface StackProvenance {
 }
 
 // ---------------------------------------------------------------------------
-// Opcode stack input/output arity (source of truth; delta = out − in)
+// Value-numbered abstract stack
 // ---------------------------------------------------------------------------
-
-/**
- * Precise `{in, out}` stack arity of a straight-line opcode (NOT push/dup/swap/
- * jump, which are handled specially). Unlike a net delta, the separate input
- * count is what lets a consumed slot be dropped and each result be freshly
- * value-numbered — e.g. `ISZERO`/`NOT` (in 1, out 1) must give the top a new
- * origin even though their net delta is 0. Deltas here match the validated
- * {@link stackHeights} table exactly.
- */
-function stackInOut(op: number): {nIn: number; nOut: number} {
-  if (op >= 0xa0 && op <= 0xa4) {
-    return {nIn: 2 + (op - 0xa0), nOut: 0}; // LOG0..LOG4
-  }
-  switch (op) {
-    // Binary arithmetic / comparison / bitwise: pop 2, push 1.
-    case 0x01: // ADD
-    case 0x02: // MUL
-    case 0x03: // SUB
-    case 0x04: // DIV
-    case 0x05: // SDIV
-    case 0x06: // MOD
-    case 0x07: // SMOD
-    case 0x0a: // EXP
-    case 0x0b: // SIGNEXTEND
-    case 0x10: // LT
-    case 0x11: // GT
-    case 0x12: // SLT
-    case 0x13: // SGT
-    case 0x14: // EQ
-    case 0x16: // AND
-    case 0x17: // OR
-    case 0x18: // XOR
-    case 0x1a: // BYTE
-    case 0x1b: // SHL
-    case 0x1c: // SHR
-    case 0x1d: // SAR
-    case 0x20: // KECCAK256
-      return {nIn: 2, nOut: 1};
-    // Unary: pop 1, push 1.
-    case 0x15: // ISZERO
-    case 0x19: // NOT
-      return {nIn: 1, nOut: 1};
-    // Ternary arithmetic: pop 3, push 1.
-    case 0x08: // ADDMOD
-    case 0x09: // MULMOD
-      return {nIn: 3, nOut: 1};
-    // Load-from-1: pop 1, push 1.
-    case 0x51: // MLOAD
-    case 0x54: // SLOAD
-    case 0x5c: // TLOAD
-    case 0x31: // BALANCE
-    case 0x3b: // EXTCODESIZE
-    case 0x3f: // EXTCODEHASH
-    case 0x35: // CALLDATALOAD
-    case 0x40: // BLOCKHASH
-    case 0x49: // BLOBHASH
-      return {nIn: 1, nOut: 1};
-    // Store: pop 2.
-    case 0x52: // MSTORE
-    case 0x53: // MSTORE8
-    case 0x55: // SSTORE
-    case 0x5d: // TSTORE
-      return {nIn: 2, nOut: 0};
-    case 0x50: // POP
-      return {nIn: 1, nOut: 0};
-    case 0x56: // JUMP (handled specially; here for completeness)
-      return {nIn: 1, nOut: 0};
-    case 0x57: // JUMPI (handled specially)
-      return {nIn: 2, nOut: 0};
-    case 0x5b: // JUMPDEST
-    case 0x00: // STOP
-    case 0xfe: // INVALID
-      return {nIn: 0, nOut: 0};
-    // Nullary pushes (env/state): push 1.
-    case 0x30: // ADDRESS
-    case 0x32: // ORIGIN
-    case 0x33: // CALLER
-    case 0x34: // CALLVALUE
-    case 0x36: // CALLDATASIZE
-    case 0x38: // CODESIZE
-    case 0x3a: // GASPRICE
-    case 0x3d: // RETURNDATASIZE
-    case 0x41: // COINBASE
-    case 0x42: // TIMESTAMP
-    case 0x43: // NUMBER
-    case 0x44: // PREVRANDAO
-    case 0x45: // GASLIMIT
-    case 0x46: // CHAINID
-    case 0x47: // SELFBALANCE
-    case 0x48: // BASEFEE
-    case 0x4a: // BLOBBASEFEE
-    case 0x58: // PC
-    case 0x59: // MSIZE
-    case 0x5a: // GAS
-      return {nIn: 0, nOut: 1};
-    // Copies: pop 3.
-    case 0x37: // CALLDATACOPY
-    case 0x39: // CODECOPY
-    case 0x3e: // RETURNDATACOPY
-    case 0x5e: // MCOPY
-      return {nIn: 3, nOut: 0};
-    case 0x3c: // EXTCODECOPY: pop 4.
-      return {nIn: 4, nOut: 0};
-    case 0xf0: // CREATE: pop 3, push 1.
-      return {nIn: 3, nOut: 1};
-    case 0xf5: // CREATE2: pop 4, push 1.
-      return {nIn: 4, nOut: 1};
-    case 0xf1: // CALL: pop 7, push 1.
-    case 0xf2: // CALLCODE
-      return {nIn: 7, nOut: 1};
-    case 0xf4: // DELEGATECALL: pop 6, push 1.
-    case 0xfa: // STATICCALL
-      return {nIn: 6, nOut: 1};
-    case 0xf3: // RETURN: pop 2.
-    case 0xfd: // REVERT
-      return {nIn: 2, nOut: 0};
-    case 0xff: // SELFDESTRUCT: pop 1.
-      return {nIn: 1, nOut: 0};
-    default:
-      // Unknown opcode: conservatively clear the top and push one fresh result so
-      // a value identity can never leak through an unmodelled op.
-      return {nIn: 1, nOut: 1};
-  }
-}
-
-/** Net stack effect of an opcode (out − in), consistent with the arity table. */
-function stackDelta(op: number): number {
-  if (op === 0x5f || (op >= 0x60 && op <= 0x7f)) return 1; // PUSH0 / PUSHn
-  if (op >= 0x80 && op <= 0x8f) return 1; // DUPn
-  if (op >= 0x90 && op <= 0x9f) return 0; // SWAPn
-  const {nIn, nOut} = stackInOut(op);
-  return nOut - nIn;
-}
-
-/** Opcodes that end a basic block with no in-frame fall-through successor. */
-function isBlockTerminator(op: number): boolean {
-  return (
-    op === 0x00 || // STOP
-    op === 0xf3 || // RETURN
-    op === 0xfd || // REVERT
-    op === 0xfe || // INVALID
-    op === 0xff // SELFDESTRUCT
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Disassembly + attribution
-// ---------------------------------------------------------------------------
-
-/** One decoded instruction with everything the analysis needs, precomputed. */
-interface Insn {
-  pc: number;
-  op: number;
-  size: number;
-  pushValue: number;
-  delta: number;
-  jump: Jump;
-  /** Enclosing `FunctionDefinition` AST id, or `undefined` (helper/dispatcher). */
-  fnId: number | undefined;
-  /**
-   * A variable-READ anchor: a `DUPn`/`SWAPn` whose source-map node is an
-   * `Identifier` referring to the param/local with `declId`; `depth` (= n) is the
-   * depth-from-top of the slot it reads, which holds that variable's value. `kind`
-   * is `'dup'` (a copy read — reliable) or `'swap'` (a last-use move — subordinate:
-   * viaIR's coarse attribution can tag a stack-shuffle SWAP with an unrelated
-   * variable's Identifier, so a SWAP anchor never overrides or invalidates a DUP
-   * one; see {@link Analyzer.recordRead}).
-   */
-  anchor?: {declId: number; depth: number; kind: 'dup' | 'swap'; at?: number};
-  /** For a `JUMP [in]`: the call's return-value count (for indirect calls). */
-  callRets?: number;
-  /** For a `JUMP [in]`: AST id of its innermost source node (the call). */
-  callNode?: number;
-}
 
 /** One abstract stack slot: an optional known constant + a value-number origin. */
 interface Slot {
@@ -276,12 +120,7 @@ interface Slot {
 type Stack = Slot[];
 
 function cloneStack(s: Stack): Stack {
-  return s.map((slot) => ({...slot}));
-}
-
-/** Top-of-stack constant (`undefined` if unknown/empty). */
-function topConst(s: Stack): number | undefined {
-  return s.length > 0 ? s[s.length - 1]!.const : undefined;
+  return s.map(slot => ({...slot}));
 }
 
 /** Whether two stacks are identical in both constants and origins. */
@@ -319,13 +158,22 @@ function mergeStack(a: Stack, b: Stack, pc: number): Stack {
   return out;
 }
 
-/**
- * The φ value number of stack slot `index` (from the bottom) at join `pc`: a
- * range disjoint from pc-derived origins (≥ 0) and below-entry origins
- * (> −2^32 for any real contract size).
- */
+// Value-number ranges, pairwise disjoint:
+//   freshOrigin       ≥ 0
+//   below-entry       (−2^32, 0)   (see baseStack; for any real contract size)
+//   phiOrigin         (−2^44, −2^40]
+//   callReturnOrigin  ≤ −2^44
+const PHI_BASE = -(2 ** 40);
+const CALL_RETURN_BASE = -(2 ** 44);
+
+/** A freshly value-numbered result of the instruction at `pc` (output index `k`). */
+function freshOrigin(pc: number, k: number): number {
+  return pc * 8 + k; // pc-derived ⇒ stable across worklist revisits; k < 8.
+}
+
+/** The φ value number of stack slot `index` (from the bottom) at join `pc`. */
 function phiOrigin(pc: number, index: number): number {
-  return -(2 ** 40) - (pc * 1024 + index);
+  return PHI_BASE - (pc * 1024 + index);
 }
 
 /**
@@ -335,20 +183,31 @@ function phiOrigin(pc: number, index: number): number {
  * label pushed right after a call was tagged as the call's returned variable).
  */
 function callReturnOrigin(returnPc: number, k: number): number {
-  return -(2 ** 44) - (returnPc * 4096 + k);
+  return CALL_RETURN_BASE - (returnPc * 4096 + k);
 }
 
 /** The pc at which a value number was created (fresh, φ or call-return), if any. */
 function originBirthPc(origin: number): number | undefined {
-  if (origin >= 0) return Math.floor(origin / 8); // freshOrigin
-  if (origin <= -(2 ** 44)) return Math.floor((-(2 ** 44) - origin) / 4096); // callReturnOrigin
-  if (origin <= -(2 ** 40)) return Math.floor((-(2 ** 40) - origin) / 1024); // phiOrigin
+  if (origin >= 0) return Math.floor(origin / 8);
+  if (origin <= CALL_RETURN_BASE) {
+    return Math.floor((CALL_RETURN_BASE - origin) / 4096);
+  }
+  if (origin <= PHI_BASE) return Math.floor((PHI_BASE - origin) / 1024);
   return undefined; // below-entry (caller) slot
 }
 
-/** A freshly value-numbered result of the instruction at `pc` (output index `k`). */
-function freshOrigin(pc: number, k: number): number {
-  return pc * 8 + k; // pc-derived ⇒ stable across worklist revisits; k < 8.
+/**
+ * A fresh abstract stack seeded with the frame's below-entry (caller) slots, each
+ * given a distinct per-function value number so a below-entry variable (an
+ * internally-passed parameter) can be identified and tracked like any other.
+ */
+function baseStack(entryPc: number): Stack {
+  const s: Stack = new Array<Slot>(64);
+  // Distinct, negative, function-unique origins (128 spacing > 64 slots ⇒ no
+  // overlap between functions; never collides with a pc-derived origin ≥ 0).
+  const base = -(entryPc * 128) - 1;
+  for (let i = 0; i < s.length; i++) s[i] = {origin: base - i};
+  return s;
 }
 
 /**
@@ -358,22 +217,22 @@ function freshOrigin(pc: number, k: number): number {
  */
 function applyToStack(s: Stack, insn: Insn): void {
   const {op, pc} = insn;
-  if (op === 0x5f) {
-    s.push({const: 0, origin: freshOrigin(pc, 0)}); // PUSH0
+  if (op === PUSH0) {
+    s.push({const: 0, origin: freshOrigin(pc, 0)});
     return;
   }
-  if (op >= 0x60 && op <= 0x7f) {
-    s.push({const: insn.pushValue, origin: freshOrigin(pc, 0)}); // PUSHn
+  if (isPushN(op)) {
+    s.push({const: insn.pushValue, origin: freshOrigin(pc, 0)});
     return;
   }
-  if (op >= 0x80 && op <= 0x8f) {
+  if (isDup(op)) {
     // DUPn duplicates the slot at depth n (DUP1 → the top): copy const AND origin.
     const n = op - 0x80;
     const src = s[s.length - 1 - n];
     s.push(src ? {...src} : {origin: freshOrigin(pc, 0)});
     return;
   }
-  if (op >= 0x90 && op <= 0x9f) {
+  if (isSwap(op)) {
     // SWAPn swaps the top with the slot at depth n (origins follow values).
     const n = op - 0x90 + 1;
     const i = s.length - 1;
@@ -385,14 +244,17 @@ function applyToStack(s: Stack, insn: Insn): void {
     }
     return;
   }
-  if (op === 0x16) {
+  if (op === AND) {
     // AND of two known constants stays known: legacy masks internal-call targets
     // (`PUSH2 tag; …; PUSH4 0xffffffff; AND; JUMP [in]`), which must resolve or
     // the call is mistaken for a frame return and the rest of the body is lost.
     const a = s.pop()?.const;
     const b = s.pop()?.const;
     const known =
-      a !== undefined && b !== undefined && Number.isSafeInteger(a) && Number.isSafeInteger(b);
+      a !== undefined &&
+      b !== undefined &&
+      Number.isSafeInteger(a) &&
+      Number.isSafeInteger(b);
     s.push({
       ...(known ? {const: Number(BigInt(a) & BigInt(b))} : {}),
       origin: freshOrigin(pc, 0),
@@ -404,19 +266,58 @@ function applyToStack(s: Stack, insn: Insn): void {
   for (let k = 0; k < nOut; k++) s.push({origin: freshOrigin(pc, k)});
 }
 
+const provenanceDomain: StackDomain<Stack> = {
+  base: baseStack,
+  clone: cloneStack,
+  length: s => s.length,
+  constAt: (s, depth) => s[s.length - 1 - depth]?.const,
+  pop: (s, n) => {
+    for (let k = 0; k < n; k++) s.pop();
+  },
+  pushCallResults: (s, returnPc, count) => {
+    for (let k = 0; k < count; k++) {
+      s.push({origin: callReturnOrigin(returnPc, k)});
+    }
+  },
+  apply: applyToStack,
+};
+
 // ---------------------------------------------------------------------------
 // The analyzer
 // ---------------------------------------------------------------------------
 
+/**
+ * A variable-READ anchor: a `DUPn`/`SWAPn` whose source-map node is an
+ * `Identifier` referring to the param/local with `declId`; `depth` (= n) is the
+ * depth-from-top of the slot it reads, which holds that variable's value. `kind`
+ * is `'dup'` (a copy read — reliable) or `'swap'` (a last-use move — subordinate:
+ * viaIR's coarse attribution can tag a stack-shuffle SWAP with an unrelated
+ * variable's Identifier, so a SWAP anchor never overrides or invalidates a DUP
+ * one; see {@link Analyzer.recordRead}). `at` is the identifier occurrence's
+ * source offset.
+ */
+interface ReadAnchor {
+  declId: number;
+  depth: number;
+  kind: ReadKind;
+  at?: number;
+}
+
+type ReadKind = 'dup' | 'swap';
+
 class Analyzer {
-  private readonly insns = new Map<number, Insn>();
-  private readonly jumpdests = new Set<number>();
-  private readonly entryByFn = new Map<number, number>();
+  private readonly cu: CompilationUnit;
+  private readonly program: Program;
+  private readonly flow: StackFlow<Stack>;
   /** Per-pc recorded arrival stack (least fixpoint). */
   private readonly recorded = new Map<number, Stack>();
   private readonly conflicted = new Set<number>();
+  /** Distinct predecessor pcs seen per pc (a pc with ≥ 2 is a join). */
+  private readonly preds = new Map<number, Set<number>>();
   /** AST ids of function params/locals (the taggable stack variables). */
   private readonly varDeclIds = new Set<number>();
+  /** Per DUPn/SWAPn pc: the variable read it performs (see {@link ReadAnchor}). */
+  private readonly anchors = new Map<number, ReadAnchor>();
   /** Value number (origin) → the variable declId a DUP read proved it to hold. */
   private readonly originToDecl = new Map<number, number>();
   /**
@@ -432,103 +333,33 @@ class Analyzer {
   private readonly originAmbiguous = new Set<number>();
   /** Origins a SWAP read tied to two different variables (dropped from SWAP map). */
   private readonly swapOriginAmbiguous = new Set<number>();
+
+  // viaIR-only anchors (empty on legacy code).
+
   /**
-   * viaIR only: internal-call ENTRY pcs of a function → its parameters' entry
-   * depths. The Yul code transform enters a function with
-   * `…, returnLabel, paramN, …, param1` (param 1 on top), so at the call target
-   * the slot at depth Σ(slots of params before i) provably holds param i. This is
-   * the only anchor a single-use parameter gets under viaIR (it is consumed in
-   * place, never DUP-read by an Identifier-tagged instruction).
+   * Internal-call ENTRY pcs of a function → its parameters' entry depths. The
+   * Yul code transform enters a function with `…, returnLabel, paramN, …,
+   * param1` (param 1 on top), so at the call target the slot at depth
+   * Σ(slots of params before i) provably holds param i. This is the only anchor a
+   * single-use parameter gets under viaIR (it is consumed in place, never
+   * DUP-read by an Identifier-tagged instruction).
    */
   private readonly paramEntryClaims = new Map<
     number,
     {declId: number; depth: number}[]
   >();
   /**
-   * viaIR only: pc → local declared by the single-variable
-   * `VariableDeclarationStatement` (with an initializer) whose code falls
-   * through to that pc. On arrival the initializer's value — the new local — is
-   * on top of the stack. The only anchor a single-use local gets under viaIR (it
-   * is consumed where it sits). Recorded as a SUBORDINATE (swap-level) claim, so
-   * any DUP read wins and conflicting claims cancel.
+   * pc → local declared by the single-variable `VariableDeclarationStatement`
+   * (with an initializer) whose code falls through to that pc. On arrival the
+   * initializer's value — the new local — is on top of the stack. The only anchor
+   * a single-use local gets under viaIR (it is consumed where it sits). Recorded
+   * as a SUBORDINATE (swap-level) claim, so any DUP read wins and conflicting
+   * claims cancel.
    */
   private readonly declEndClaims = new Map<number, number>();
-  /** Per instruction: its enclosing statement's AST id (for declEndClaims). */
-  private readonly stmtOf = new Map<number, number>();
-  /** Distinct predecessor pcs seen per pc (a pc with ≥ 2 is a join). */
-  private readonly preds = new Map<number, Set<number>>();
-  private readonly netCache = new Map<number, number | undefined>();
-  private readonly netInProgress = new Set<number>();
-
-  private readonly writesCache = new Map<number, Set<number>>();
-
-  /** Declarations a statement WRITES: an assignment's LHS identifiers, or the
-   * variables a declaration statement declares. */
-  private statementWrites(stmtId: number): Set<number> {
-    let w = this.writesCache.get(stmtId);
-    if (w !== undefined) return w;
-    w = new Set<number>();
-    const stmt = this.cu.nodeById(stmtId);
-    if (stmt !== undefined) {
-      if (stmt.nodeType === 'VariableDeclarationStatement') {
-        for (const d of stmt.children()) {
-          if (d.nodeType === 'VariableDeclaration') w.add(d.id);
-        }
-      }
-      const visit = (n: AstNode): void => {
-        if (n.nodeType === 'Assignment') {
-          const kids = n.children();
-          const rhs = kids.reduce((a, b) => (b.srcStart > a.srcStart ? b : a), kids[0]!);
-          for (const k of kids) {
-            if (k === rhs) continue;
-            const lhs = (m: AstNode): void => {
-              if (m.nodeType === 'Identifier' && m.referencedDeclaration !== undefined) {
-                w!.add(m.referencedDeclaration);
-              } else if (m.nodeType === 'TupleExpression') {
-                for (const c of m.children()) lhs(c);
-              }
-            };
-            lhs(k);
-          }
-        }
-        for (const c of n.children()) {
-          // Only the statement's OWN expressions, not nested statements (bodies).
-          const t = c.nodeType;
-          if (
-            t === 'Block' ||
-            t === 'UncheckedBlock' ||
-            t.endsWith('Statement') ||
-            t === 'Return' ||
-            t === 'InlineAssembly'
-          ) {
-            continue;
-          }
-          visit(c);
-        }
-      };
-      visit(stmt);
-    }
-    this.writesCache.set(stmtId, w);
-    return w;
-  }
-
-  private readonly cu: CompilationUnit;
-
-  constructor(cu: CompilationUnit, contract: Contract) {
-    this.cu = cu;
-    this.collectVarDeclIds(cu);
-    this.disassemble(cu, contract);
-    this.dropShuffleSwaps();
-    if (cu.viaIR()) {
-      this.collectParamEntryClaims(cu);
-      this.collectDeclEndClaims(cu);
-      this.collectInitCallDecls(cu);
-    }
-  }
-
   /**
-   * viaIR: AST id of a declaration statement's initializer CALL → the variables
-   * it declares, in order. At that call's return landing the top n slots are the
+   * AST id of a declaration statement's initializer CALL → the variables it
+   * declares, in order. At that call's return landing the top n slots are the
    * returned values, the LAST one on top (verified on uniswap `_accountDelta`:
    * `(previous, next) = currency.applyDelta(…)` ⇒ top = next, then previous) —
    * the only anchor for tuple-destructured locals used once.
@@ -537,322 +368,31 @@ class Analyzer {
     number,
     {slots: (number | null)[]; callee: number}
   >();
+  /** Per instruction: its enclosing statement's AST id. */
+  private readonly stmtOf = new Map<number, number>();
+  /** Statement id → the declarations it writes (see {@link statementWrites}). */
+  private readonly writesCache = new Map<number, Set<number>>();
 
-  private collectInitCallDecls(cu: CompilationUnit): void {
-    for (const source of cu.sources()) {
-      let root;
-      try {
-        root = source.ast();
-      } catch {
-        continue;
-      }
-      const visit = (n: AstNode): void => {
-        if (n.nodeType === 'VariableDeclarationStatement') {
-          const init = n.children().find((c) => c.nodeType === 'FunctionCall');
-          // `assignments` lists the tuple components IN ORDER, `null` for a
-          // skipped one (`(a, b, , ) = f()`) — every returned value occupies a
-          // slot, so gaps must be counted (a gap-blind mapping shifted names by
-          // one onto the skipped values: uniswap `(sqrtPriceX96, tick, , ) = getSlot0`).
-          const slots = n.assignments();
-          // The called function (`f(…)` / `x.f(…)`): only a jump INTO that very
-          // function returns the initializer's values. Other internal jumps
-          // attributed to the call node (the ABI encode/decode helpers of an
-          // external call) return pointers, not the declared values.
-          // The called expression is the child starting where the call starts
-          // (children() follow the raw key order, where `arguments` come first).
-          const callee = init
-            ?.children()
-            .find((c) => c.srcStart === init.srcStart)?.referencedDeclaration;
-          if (
-            init !== undefined &&
-            callee !== undefined &&
-            slots.length >= 1 &&
-            slots.some((id) => id !== null) &&
-            slots.every((id) => id === null || this.varDeclIds.has(id))
-          ) {
-            this.initCallDecls.set(init.id, {slots, callee});
-          }
-        }
-        for (const c of n.children()) visit(c);
-      };
-      visit(root);
+  constructor(cu: CompilationUnit, contract: Contract) {
+    this.cu = cu;
+    this.collectVarDeclIds();
+    this.program = new Program(cu, contract, stackDelta);
+    this.flow = new StackFlow(this.program, provenanceDomain);
+    this.collectAnchors();
+    this.dropShuffleSwaps();
+    if (cu.viaIR()) {
+      this.collectParamEntryClaims();
+      this.collectDeclEndClaims();
+      this.collectInitCallDecls();
     }
-  }
-
-  /** See {@link declEndClaims}. */
-  private collectDeclEndClaims(cu: CompilationUnit): void {
-    // Last instruction (in code order) of each statement.
-    const lastPc = new Map<number, number>();
-    for (const [pc, stmtId] of this.stmtOf) {
-      const prev = lastPc.get(stmtId);
-      if (prev === undefined || pc > prev) lastPc.set(stmtId, pc);
-    }
-    for (const [stmtId, pc] of lastPc) {
-      const stmt = cu.nodeById(stmtId);
-      if (stmt === undefined || stmt.nodeType !== 'VariableDeclarationStatement') continue;
-      const children = stmt.children();
-      const decls = children.filter((c) => c.nodeType === 'VariableDeclaration');
-      // Exactly one declared variable AND an initializer (a tuple destructuring
-      // leaves several values; a bare declaration may be materialised lazily).
-      if (decls.length !== 1 || children.length !== 2) continue;
-      const declId = decls[0]!.id;
-      if (!this.varDeclIds.has(declId)) continue;
-      const insn = this.insns.get(pc)!;
-      // Only a FALL-THROUGH end: a jump/terminator ends elsewhere.
-      if (insn.op === 0x56 || insn.op === 0x57 || isBlockTerminator(insn.op)) continue;
-      const next = pc + insn.size;
-      const nextInsn = this.insns.get(next);
-      if (nextInsn === undefined || nextInsn.fnId !== insn.fnId) continue;
-      if (this.stmtOf.get(next) === stmtId) continue;
-      this.declEndClaims.set(next, declId);
-    }
-  }
-
-  /**
-   * A SWAP anchor ADJACENT to a DUP anchor on the same identifier occurrence is a
-   * stack shuffle around the real read (the DUP): e.g. viaIR reads `y` in
-   * `y < 0` as `SWAP1; DUP2`, where the SWAP only brings an unrelated slot (a
-   * return label) up. Its depth-n slot is not the variable — drop the anchor.
-   */
-  private dropShuffleSwaps(): void {
-    // One identifier OCCURRENCE is one read; when a DUP anchor for it exists in
-    // the same basic block (viaIR emits e.g. `SWAPn; PUSH2 <ret>; DUP(n+2)` for
-    // `x.f()`), that DUP is the read and the SWAP only shuffles.
-    const pcs = [...this.insns.keys()].sort((a, b) => a - b);
-    const blockEnd = (op: number): boolean =>
-      op === 0x56 || op === 0x57 || isBlockTerminator(op);
-    for (let i = 0; i < pcs.length; i++) {
-      const insn = this.insns.get(pcs[i]!)!;
-      const a = insn.anchor;
-      if (a === undefined || a.kind !== 'swap' || a.at === undefined) continue;
-      const sameRead = (k: number): boolean => {
-        const b = this.insns.get(pcs[k]!)?.anchor;
-        return b !== undefined && b.kind === 'dup' && b.declId === a.declId && b.at === a.at;
-      };
-      let found = false;
-      // forward to the end of the block
-      for (let k = i + 1; k < pcs.length && !found; k++) {
-        const op = this.insns.get(pcs[k]!)!.op;
-        if (op === 0x5b) break; // JUMPDEST starts a new block
-        if (sameRead(k)) found = true;
-        if (blockEnd(op)) break;
-      }
-      // backward to the start of the block
-      for (let k = i - 1; k >= 0 && !found; k--) {
-        const op = this.insns.get(pcs[k]!)!.op;
-        if (blockEnd(op)) break;
-        if (sameRead(k)) found = true;
-        if (op === 0x5b) break;
-      }
-      if (found) delete insn.anchor;
-    }
-  }
-
-  /** See {@link paramEntryClaims}. */
-  private collectParamEntryClaims(cu: CompilationUnit): void {
-    // An internal call is `PUSH <target>; JUMP [in]` into ANOTHER function.
-    let prev: Insn | undefined;
-    for (const pc of [...this.insns.keys()].sort((a, b) => a - b)) {
-      const insn = this.insns.get(pc)!;
-      if (
-        insn.op === 0x56 &&
-        insn.jump === 'i' &&
-        prev !== undefined &&
-        prev.op >= 0x60 &&
-        prev.op <= 0x7f
-      ) {
-        const target = prev.pushValue;
-        const targetFn = this.insns.get(target)?.fnId;
-        if (
-          this.jumpdests.has(target) &&
-          targetFn !== undefined &&
-          targetFn !== insn.fnId &&
-          !this.paramEntryClaims.has(target)
-        ) {
-          const claims = this.entryDepths(cu, targetFn);
-          if (claims !== undefined) this.paramEntryClaims.set(target, claims);
-        }
-      }
-      prev = insn;
-    }
-  }
-
-  /** Entry depth of each single-slot parameter of function `fnId` (viaIR layout). */
-  private entryDepths(
-    cu: CompilationUnit,
-    fnId: number,
-  ): {declId: number; depth: number}[] | undefined {
-    const fn = cu.nodeById(fnId);
-    if (fn === undefined || fn.nodeType !== 'FunctionDefinition') return undefined;
-    const claims: {declId: number; depth: number}[] = [];
-    let depth = 0;
-    for (const p of fn.parameters()) {
-      const slots = stackSlotsOf(p.typeIdentifier);
-      if (slots === 1 && this.varDeclIds.has(p.id)) claims.push({declId: p.id, depth});
-      depth += slots;
-    }
-    return claims.length > 0 ? claims : undefined;
-  }
-
-  /** All function param/local `VariableDeclaration` ids across the unit. */
-  private collectVarDeclIds(cu: CompilationUnit): void {
-    for (const source of cu.sources()) {
-      let ast;
-      try {
-        ast = source.ast();
-      } catch {
-        continue;
-      }
-      const visit = (node: {
-        nodeType: string;
-        id: number;
-        children(): unknown[];
-      }): void => {
-        if (
-          node.nodeType === 'VariableDeclaration' &&
-          node.id >= 0 &&
-          // A param/local sits inside a FunctionDefinition; a state variable does
-          // not (it is a direct child of the ContractDefinition).
-          closestFunction(node as never) !== undefined
-        ) {
-          this.varDeclIds.add(node.id);
-        }
-        for (const child of node.children() as (typeof node)[]) {
-          visit(child);
-        }
-      };
-      visit(ast as never);
-    }
-  }
-
-  /** Decode every instruction; attribute to a function; detect read anchors. */
-  private disassemble(cu: CompilationUnit, contract: Contract): void {
-    const bytecode = contract.runtimeBytecode();
-    const bytes = hexToBytes(bytecode);
-    const {instructionToPc} = buildInstructionIndex(bytecode);
-    const sourceMap = contract.runtimeSourceMap();
-
-    for (let i = 0; i < instructionToPc.length; i++) {
-      const pc = instructionToPc[i]!;
-      const op = bytes[pc]!;
-      let size = 1;
-      let pushValue = 0;
-      if (op >= 0x60 && op <= 0x7f) {
-        const n = op - 0x5f;
-        size += n;
-        for (let k = 0; k < n; k++) {
-          pushValue = pushValue * 256 + (bytes[pc + 1 + k] ?? 0);
-        }
-      }
-      if (op === 0x5b) {
-        this.jumpdests.add(pc);
-      }
-      const entry = sourceMap[i];
-      const fnId = entry ? this.attributeFunction(cu, entry) : undefined;
-      if (entry !== undefined && entry.fileId >= 0 && cu.viaIR()) {
-        const src = cu.sourceById(entry.fileId);
-        const n = src && findInnermostNode(src.ast(), entry.start, entry.length);
-        const stmt = n ? closestStatement(n) : undefined;
-        if (stmt !== undefined) this.stmtOf.set(pc, stmt.id);
-      }
-      const anchor =
-        entry && op >= 0x80 && op <= 0x9f // DUPn (0x80–0x8f) or SWAPn (0x90–0x9f)
-          ? this.readAnchor(cu, entry, op)
-          : undefined;
-      const callRets =
-        op === 0x56 && entry?.jump === 'i' ? indirectCallReturns(cu, entry) : undefined;
-      let callNode: number | undefined;
-      if (op === 0x56 && entry?.jump === 'i' && entry.fileId >= 0 && cu.viaIR()) {
-        const src = cu.sourceById(entry.fileId);
-        callNode = src && findInnermostNode(src.ast(), entry.start, entry.length)?.id;
-      }
-      this.insns.set(pc, {
-        pc,
-        op,
-        size,
-        pushValue,
-        delta: stackDelta(op),
-        jump: entry?.jump ?? '-',
-        fnId,
-        ...(anchor ? {anchor} : {}),
-        ...(callRets !== undefined ? {callRets} : {}),
-        ...(callNode !== undefined ? {callNode} : {}),
-      });
-      if (fnId !== undefined) {
-        const prev = this.entryByFn.get(fnId);
-        if (prev === undefined || pc < prev) {
-          this.entryByFn.set(fnId, pc);
-        }
-      }
-    }
-  }
-
-  /**
-   * If `entry`'s innermost node is an `Identifier` reading a known param/local, a
-   * read anchor for a `DUPn` OR `SWAPn` (`op`): the slot at depth `n` holds that
-   * variable in the INCOMING stack. For `DUPn` (`n = op − 0x80`) the value is
-   * COPIED to the top (a non-consuming read); for `SWAPn` (`n = op − 0x8f`) it is
-   * moved to the top to be consumed — solc emits this for a value-type local's
-   * LAST use under viaIR, which the DUP-only anchor missed. Either way the slot at
-   * depth `n` provably holds the variable at this pc, so anchoring its value number
-   * is sound (the value number identifies the value throughout its life, so the
-   * variable is then reported at every pc where that value is still live —
-   * including BEFORE this read).
-   */
-  private readAnchor(
-    cu: CompilationUnit,
-    entry: SourceMapEntry,
-    op: number,
-  ): {declId: number; depth: number; kind: 'dup' | 'swap'; at?: number} | undefined {
-    if (entry.fileId < 0) return undefined;
-    const source = cu.sourceById(entry.fileId);
-    if (source === undefined) return undefined;
-    const node = findInnermostNode(source.ast(), entry.start, entry.length);
-    if (node === undefined || node.nodeType !== 'Identifier') return undefined;
-    const declId = node.referencedDeclaration;
-    if (declId === undefined || !this.varDeclIds.has(declId)) return undefined;
-    const isSwap = op >= 0x90;
-    // An identifier on the LEFT of an assignment is a WRITE, not a read: under
-    // viaIR `x = e` is a SWAPn moving e's value (the top) INTO x's position, so the
-    // slot at depth n is x's OLD position (a stale value, or an unrelated slot such
-    // as the return label when x is an unassigned return variable) — claiming it
-    // named the wrong value. The value moved there IS x's new value: claim the top.
-    const parent = node.parent();
-    if (parent?.nodeType === 'TupleExpression') {
-      const grand = parent.parent();
-      if (grand?.nodeType === 'Assignment' && grand.srcStart === parent.srcStart) {
-        return undefined; // tuple destructuring: which element is which is unknown
-      }
-    }
-    if (parent?.nodeType === 'Assignment' && parent.srcStart === node.srcStart) {
-      return isSwap ? {declId, depth: 0, kind: 'swap'} : undefined;
-    }
-    return {
-      declId,
-      depth: isSwap ? op - 0x8f : op - 0x80,
-      kind: isSwap ? 'swap' : 'dup',
-      at: node.srcStart,
-    };
-  }
-
-  private attributeFunction(
-    cu: CompilationUnit,
-    entry: SourceMapEntry,
-  ): number | undefined {
-    if (entry.fileId < 0) return undefined;
-    const source = cu.sourceById(entry.fileId);
-    if (source === undefined) return undefined;
-    const node = findInnermostNode(source.ast(), entry.start, entry.length);
-    if (node === undefined) return undefined;
-    const fn = closestFunction(node);
-    return fn === undefined ? undefined : fn.id;
-  }
-
-  analyze(): void {
-    for (const entryPc of this.entryByFn.values()) {
+    for (const entryPc of this.program.entryByFn.values()) {
       this.propagateFunction(entryPc);
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Queries
+  // -------------------------------------------------------------------------
 
   stackLengthAt(pc: number): number | undefined {
     if (this.conflicted.has(pc)) return undefined;
@@ -868,11 +408,20 @@ class Analyzer {
     // stop at `x = c ? a : b`'s join sees the new value on top already). Skip
     // origins born inside the current statement when it writes this variable.
     const stmt = this.stmtOf.get(pc);
-    const writesHere = stmt !== undefined && this.statementWrites(stmt).has(declId);
+    const writesHere =
+      stmt !== undefined && this.statementWrites(stmt).has(declId);
     const bornHere = (origin: number): boolean => {
       if (!writesHere) return false;
       const birth = originBirthPc(origin);
       return birth !== undefined && this.stmtOf.get(birth) === stmt;
+    };
+    const shallowest = (holds: (origin: number) => boolean) => {
+      for (let depth = 0; depth < stack.length; depth++) {
+        const origin = stack[stack.length - 1 - depth]!.origin;
+        if (origin === undefined || this.originAmbiguous.has(origin)) continue;
+        if (holds(origin) && !bornHere(origin)) return depth;
+      }
+      return undefined;
     };
     // Shallowest slot (closest to top) whose value was proved to be this
     // variable. A DUP-proved (authoritative) slot ALWAYS wins over a SWAP-claimed
@@ -880,23 +429,291 @@ class Analyzer {
     // Yul scheduler has already DUP'd it to the top, an Identifier-tagged SWAP that
     // merely moves it down would otherwise claim the UNRELATED slot it swapped
     // with (observed on real viaIR code: `absTick`, `zeroForOne`, `target`).
-    for (let depth = 0; depth < stack.length; depth++) {
-      const origin = stack[stack.length - 1 - depth]!.origin;
-      if (origin === undefined || this.originAmbiguous.has(origin)) continue;
-      if (this.originToDecl.get(origin) === declId && !bornHere(origin)) return depth;
-    }
-    for (let depth = 0; depth < stack.length; depth++) {
-      const origin = stack[stack.length - 1 - depth]!.origin;
-      if (origin === undefined || this.originAmbiguous.has(origin)) continue;
+    return (
+      shallowest(o => this.originToDecl.get(o) === declId) ??
+      shallowest(
+        o =>
+          !this.originToDecl.has(o) && this.swapOriginToDecl.get(o) === declId
+      )
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Static anchor collection
+  // -------------------------------------------------------------------------
+
+  /** All function param/local `VariableDeclaration` ids across the unit. */
+  private collectVarDeclIds(): void {
+    walkAllSources(this.cu, node => {
       if (
-        !this.originToDecl.has(origin) &&
-        this.swapOriginToDecl.get(origin) === declId &&
-        !bornHere(origin)
+        node.nodeType === 'VariableDeclaration' &&
+        node.id >= 0 &&
+        // A param/local sits inside a FunctionDefinition; a state variable does
+        // not (it is a direct child of the ContractDefinition).
+        closestFunction(node) !== undefined
       ) {
-        return depth;
+        this.varDeclIds.add(node.id);
+      }
+    });
+  }
+
+  /** Detect every instruction's read anchor (and, under viaIR, its statement). */
+  private collectAnchors(): void {
+    const viaIR = this.cu.viaIR();
+    for (const insn of this.program.insns.values()) {
+      if (insn.node === undefined) continue;
+      if (viaIR) {
+        const stmt = closestStatement(insn.node);
+        if (stmt !== undefined) this.stmtOf.set(insn.pc, stmt.id);
+      }
+      if (isDup(insn.op) || isSwap(insn.op)) {
+        const anchor = this.readAnchor(insn.node, insn.op);
+        if (anchor !== undefined) this.anchors.set(insn.pc, anchor);
       }
     }
-    return undefined;
+  }
+
+  /**
+   * If `node` is an `Identifier` reading a known param/local, a read anchor for a
+   * `DUPn` OR `SWAPn` (`op`): the slot at depth `n` holds that variable in the
+   * INCOMING stack. For `DUPn` (`n = op − 0x80`) the value is COPIED to the top (a
+   * non-consuming read); for `SWAPn` (`n = op − 0x8f`) it is moved to the top to
+   * be consumed — solc emits this for a value-type local's LAST use under viaIR,
+   * which the DUP-only anchor missed. Either way the slot at depth `n` provably
+   * holds the variable at this pc, so anchoring its value number is sound (the
+   * value number identifies the value throughout its life, so the variable is
+   * then reported at every pc where that value is still live — including BEFORE
+   * this read).
+   */
+  private readAnchor(node: AstNode, op: number): ReadAnchor | undefined {
+    if (node.nodeType !== 'Identifier') return undefined;
+    const declId = node.referencedDeclaration;
+    if (declId === undefined || !this.varDeclIds.has(declId)) return undefined;
+    const swap = isSwap(op);
+    // An identifier on the LEFT of an assignment is a WRITE, not a read: under
+    // viaIR `x = e` is a SWAPn moving e's value (the top) INTO x's position, so the
+    // slot at depth n is x's OLD position (a stale value, or an unrelated slot such
+    // as the return label when x is an unassigned return variable) — claiming it
+    // named the wrong value. The value moved there IS x's new value: claim the top.
+    const parent = node.parent();
+    if (parent?.nodeType === 'TupleExpression') {
+      const grand = parent.parent();
+      if (
+        grand?.nodeType === 'Assignment' &&
+        grand.srcStart === parent.srcStart
+      ) {
+        return undefined; // tuple destructuring: which element is which is unknown
+      }
+    }
+    if (
+      parent?.nodeType === 'Assignment' &&
+      parent.srcStart === node.srcStart
+    ) {
+      return swap ? {declId, depth: 0, kind: 'swap'} : undefined;
+    }
+    return {
+      declId,
+      depth: swap ? op - 0x8f : op - 0x80,
+      kind: swap ? 'swap' : 'dup',
+      at: node.srcStart,
+    };
+  }
+
+  /**
+   * A SWAP anchor ADJACENT to a DUP anchor on the same identifier occurrence is a
+   * stack shuffle around the real read (the DUP): e.g. viaIR reads `y` in
+   * `y < 0` as `SWAP1; DUP2`, where the SWAP only brings an unrelated slot (a
+   * return label) up. Its depth-n slot is not the variable — drop the anchor.
+   */
+  private dropShuffleSwaps(): void {
+    // One identifier OCCURRENCE is one read; when a DUP anchor for it exists in
+    // the same basic block (viaIR emits e.g. `SWAPn; PUSH2 <ret>; DUP(n+2)` for
+    // `x.f()`), that DUP is the read and the SWAP only shuffles.
+    const {pcs, insns} = this.program;
+    const opAt = (k: number): number => insns.get(pcs[k]!)!.op;
+    for (let i = 0; i < pcs.length; i++) {
+      const a = this.anchors.get(pcs[i]!);
+      if (a === undefined || a.kind !== 'swap' || a.at === undefined) continue;
+      const sameRead = (k: number): boolean => {
+        const b = this.anchors.get(pcs[k]!);
+        return (
+          b !== undefined &&
+          b.kind === 'dup' &&
+          b.declId === a.declId &&
+          b.at === a.at
+        );
+      };
+      let found = false;
+      // forward to the end of the block
+      for (let k = i + 1; k < pcs.length && !found; k++) {
+        const op = opAt(k);
+        if (op === JUMPDEST) break; // JUMPDEST starts a new block
+        if (sameRead(k)) found = true;
+        if (endsBlock(op)) break;
+      }
+      // backward to the start of the block
+      for (let k = i - 1; k >= 0 && !found; k--) {
+        const op = opAt(k);
+        if (endsBlock(op)) break;
+        if (sameRead(k)) found = true;
+        if (op === JUMPDEST) break;
+      }
+      if (found) this.anchors.delete(pcs[i]!);
+    }
+  }
+
+  /** See {@link paramEntryClaims}. */
+  private collectParamEntryClaims(): void {
+    // An internal call is `PUSH <target>; JUMP [in]` into ANOTHER function.
+    let prev: Insn | undefined;
+    for (const pc of this.program.pcs) {
+      const insn = this.program.insns.get(pc)!;
+      if (
+        insn.op === JUMP &&
+        insn.jump === 'i' &&
+        prev !== undefined &&
+        isPushN(prev.op)
+      ) {
+        const target = prev.pushValue;
+        const targetFn = this.program.insns.get(target)?.fnId;
+        if (
+          this.program.jumpdests.has(target) &&
+          targetFn !== undefined &&
+          targetFn !== insn.fnId &&
+          !this.paramEntryClaims.has(target)
+        ) {
+          const claims = this.entryDepths(targetFn);
+          if (claims !== undefined) this.paramEntryClaims.set(target, claims);
+        }
+      }
+      prev = insn;
+    }
+  }
+
+  /** Entry depth of each single-slot parameter of function `fnId` (viaIR layout). */
+  private entryDepths(
+    fnId: number
+  ): {declId: number; depth: number}[] | undefined {
+    const fn = this.cu.nodeById(fnId);
+    if (fn === undefined || fn.nodeType !== 'FunctionDefinition') {
+      return undefined;
+    }
+    const claims: {declId: number; depth: number}[] = [];
+    let depth = 0;
+    for (const p of fn.parameters()) {
+      const slots = stackSlotsOf(p.typeIdentifier);
+      if (slots === 1 && this.varDeclIds.has(p.id)) {
+        claims.push({declId: p.id, depth});
+      }
+      depth += slots;
+    }
+    return claims.length > 0 ? claims : undefined;
+  }
+
+  /** See {@link declEndClaims}. */
+  private collectDeclEndClaims(): void {
+    // Last instruction (in code order) of each statement.
+    const lastPc = new Map<number, number>();
+    for (const [pc, stmtId] of this.stmtOf) {
+      const prev = lastPc.get(stmtId);
+      if (prev === undefined || pc > prev) lastPc.set(stmtId, pc);
+    }
+    for (const [stmtId, pc] of lastPc) {
+      const stmt = this.cu.nodeById(stmtId);
+      if (stmt?.nodeType !== 'VariableDeclarationStatement') continue;
+      const children = stmt.children();
+      const decls = children.filter(c => c.nodeType === 'VariableDeclaration');
+      // Exactly one declared variable AND an initializer (a tuple destructuring
+      // leaves several values; a bare declaration may be materialised lazily).
+      if (decls.length !== 1 || children.length !== 2) continue;
+      const declId = decls[0]!.id;
+      if (!this.varDeclIds.has(declId)) continue;
+      const insn = this.program.insns.get(pc)!;
+      // Only a FALL-THROUGH end: a jump/terminator ends elsewhere.
+      if (endsBlock(insn.op)) continue;
+      const next = pc + insn.size;
+      const nextInsn = this.program.insns.get(next);
+      if (nextInsn === undefined || nextInsn.fnId !== insn.fnId) continue;
+      if (this.stmtOf.get(next) === stmtId) continue;
+      this.declEndClaims.set(next, declId);
+    }
+  }
+
+  /** See {@link initCallDecls}. */
+  private collectInitCallDecls(): void {
+    walkAllSources(this.cu, n => {
+      if (n.nodeType !== 'VariableDeclarationStatement') return;
+      const init = n.children().find(c => c.nodeType === 'FunctionCall');
+      // `assignments` lists the tuple components IN ORDER, `null` for a
+      // skipped one (`(a, b, , ) = f()`) — every returned value occupies a
+      // slot, so gaps must be counted (a gap-blind mapping shifted names by
+      // one onto the skipped values: uniswap `(sqrtPriceX96, tick, , ) = getSlot0`).
+      const slots = n.assignments();
+      // The called function (`f(…)` / `x.f(…)`): only a jump INTO that very
+      // function returns the initializer's values. Other internal jumps
+      // attributed to the call node (the ABI encode/decode helpers of an
+      // external call) return pointers, not the declared values.
+      // The called expression is the child starting where the call starts
+      // (children() follow the raw key order, where `arguments` come first).
+      const callee = init
+        ?.children()
+        .find(c => c.srcStart === init.srcStart)?.referencedDeclaration;
+      if (
+        init !== undefined &&
+        callee !== undefined &&
+        slots.length >= 1 &&
+        slots.some(id => id !== null) &&
+        slots.every(id => id === null || this.varDeclIds.has(id))
+      ) {
+        this.initCallDecls.set(init.id, {slots, callee});
+      }
+    });
+  }
+
+  /**
+   * Declarations a statement WRITES: an assignment's LHS identifiers, or the
+   * variables a declaration statement declares.
+   */
+  private statementWrites(stmtId: number): Set<number> {
+    let w = this.writesCache.get(stmtId);
+    if (w !== undefined) return w;
+    const writes = new Set<number>();
+    const stmt = this.cu.nodeById(stmtId);
+    if (stmt !== undefined) {
+      if (stmt.nodeType === 'VariableDeclarationStatement') {
+        for (const d of stmt.children()) {
+          if (d.nodeType === 'VariableDeclaration') writes.add(d.id);
+        }
+      }
+      const lhs = (m: AstNode): void => {
+        if (
+          m.nodeType === 'Identifier' &&
+          m.referencedDeclaration !== undefined
+        ) {
+          writes.add(m.referencedDeclaration);
+        } else if (m.nodeType === 'TupleExpression') {
+          for (const c of m.children()) lhs(c);
+        }
+      };
+      const visit = (n: AstNode): void => {
+        if (n.nodeType === 'Assignment') {
+          const kids = n.children();
+          const rhs = kids.reduce(
+            (a, b) => (b.srcStart > a.srcStart ? b : a),
+            kids[0]!
+          );
+          for (const k of kids) if (k !== rhs) lhs(k);
+        }
+        for (const c of n.children()) {
+          // Only the statement's OWN expressions, not nested statements (bodies).
+          if (!isNestedBody(c.nodeType)) visit(c);
+        }
+      };
+      visit(stmt);
+    }
+    w = writes;
+    this.writesCache.set(stmtId, w);
+    return w;
   }
 
   // -------------------------------------------------------------------------
@@ -904,118 +721,141 @@ class Analyzer {
   // -------------------------------------------------------------------------
 
   private propagateFunction(entryPc: number): void {
-    const fnId = this.insns.get(entryPc)?.fnId;
-    interface Item {
-      pc: number;
-      stack: Stack;
-      /** The predecessor pc this state flows from (−1 for the entry). */
-      from: number;
-    }
-    const work: Item[] = [{pc: entryPc, stack: baseStack(entryPc), from: -1}];
+    const fnId = this.program.insns.get(entryPc)?.fnId;
+    /** `from`: the predecessor pc this state flows from (−1 for the entry). */
+    const work: {pc: number; stack: Stack; from: number}[] = [
+      {pc: entryPc, stack: baseStack(entryPc), from: -1},
+    ];
     // Defensive iteration cap (the monotone-descending lattice terminates well
     // before this; guards against pathological optimizer output).
     let budget = 2000000;
 
     while (work.length > 0 && budget-- > 0) {
       const {pc, stack: incoming, from} = work.pop()!;
-      const insn = this.insns.get(pc);
+      const insn = this.program.insns.get(pc);
       if (insn === undefined) continue; // into push data / past end.
       if (this.conflicted.has(pc)) continue;
-      let preds = this.preds.get(pc);
-      if (preds === undefined) {
-        preds = new Set();
-        this.preds.set(pc, preds);
+      const cur = this.arrive(pc, incoming, from);
+      if (cur === undefined) continue; // conflicted, or no new information.
+
+      this.recordClaimsAt(insn, cur);
+
+      for (const next of this.flow.successors(
+        insn,
+        cur,
+        fnId,
+        this.claimInitializerResults
+      )) {
+        work.push({pc: next.pc, stack: next.stack, from: pc});
       }
-      preds.add(from);
-
-      const prev = this.recorded.get(pc);
-      let cur: Stack;
-      if (prev === undefined) {
-        cur = cloneStack(incoming);
-        this.recorded.set(pc, cur);
-      } else if (prev.length !== incoming.length) {
-        // Two conflicting heights reach this pc — the frame-relative model can't
-        // assign a single depth; report unknown rather than guess.
-        this.conflicted.add(pc);
-        continue;
-      } else if (preds.size <= 1) {
-        // A single-predecessor pc is NOT a join: its state is exactly its
-        // predecessor's (refined on a revisit), so take it over. Merging here
-        // would mint a fresh φ at every instruction downstream of a revisited
-        // join, changing a value's identity per instruction and confining a read's
-        // claim to the read's own pc.
-        if (stacksEqual(incoming, prev)) continue;
-        cur = cloneStack(incoming);
-        this.recorded.set(pc, cur);
-      } else {
-        const merged = mergeStack(prev, incoming, pc);
-        if (stacksEqual(merged, prev)) continue; // fixpoint for this pc.
-        cur = merged;
-        this.recorded.set(pc, cur);
-      }
-
-      // viaIR function entry: the parameter slots are proved by the calling
-      // convention — authoritative, like a DUP read.
-      const entryClaims = this.paramEntryClaims.get(pc);
-      if (entryClaims !== undefined) {
-        for (const {declId, depth} of entryClaims) {
-          const origin = cur[cur.length - 1 - depth]?.origin;
-          if (origin !== undefined) this.recordRead(origin, declId, 'dup');
-        }
-      }
-
-      const declared = this.declEndClaims.get(pc);
-      if (declared !== undefined) {
-        const origin = cur[cur.length - 1]?.origin;
-        if (origin !== undefined) this.recordRead(origin, declared, 'swap');
-      }
-
-      // Read anchor: the duplicated slot's VALUE is proved to be `declId` — record
-      // that value number so the variable is reported wherever this value lives.
-      if (insn.anchor !== undefined) {
-        const {declId, depth, kind} = insn.anchor;
-        const idx = cur.length - 1 - depth;
-        const origin = idx >= 0 ? cur[idx]!.origin : undefined;
-        // A SWAP read is only believable when the variable's value is not ALREADY
-        // known to sit elsewhere on this stack (then the SWAP just moves it).
-        const liveElsewhere =
-          kind === 'swap' &&
-          cur.some(
-            (slot, k) =>
-              k !== idx &&
-              slot.origin !== undefined &&
-              this.originToDecl.get(slot.origin) === declId,
-          );
-        if (origin !== undefined && !liveElsewhere) {
-          this.recordRead(origin, declId, kind);
-        }
-      }
-
-      if (isBlockTerminator(insn.op)) continue;
-
-      if (insn.op === 0x56) {
-        this.handleJump(cur, insn, fnId, (next) => work.push({...next, from: pc}));
-        continue;
-      }
-
-      if (insn.op === 0x57) {
-        // JUMPI: pop dest + cond; propagate to target and fall-through.
-        const target = topConst(cur);
-        const branched = cloneStack(cur);
-        branched.pop(); // dest
-        branched.pop(); // cond
-        if (target !== undefined && this.jumpdests.has(target)) {
-          work.push({pc: target, stack: cloneStack(branched), from: pc});
-        }
-        work.push({pc: pc + insn.size, stack: branched, from: pc});
-        continue;
-      }
-
-      const nextStack = cloneStack(cur);
-      applyToStack(nextStack, insn);
-      work.push({pc: pc + insn.size, stack: nextStack, from: pc});
     }
   }
+
+  /**
+   * Fold an `incoming` stack (from predecessor `from`) into `pc`'s recorded
+   * arrival state. Returns the new state to propagate, or `undefined` when the
+   * state did not change (fixpoint) or the pc became conflicted.
+   */
+  private arrive(pc: number, incoming: Stack, from: number): Stack | undefined {
+    let preds = this.preds.get(pc);
+    if (preds === undefined) {
+      preds = new Set();
+      this.preds.set(pc, preds);
+    }
+    preds.add(from);
+
+    const prev = this.recorded.get(pc);
+    let cur: Stack;
+    if (prev === undefined) {
+      cur = cloneStack(incoming);
+    } else if (prev.length !== incoming.length) {
+      // Two conflicting heights reach this pc — the frame-relative model can't
+      // assign a single depth; report unknown rather than guess.
+      this.conflicted.add(pc);
+      return undefined;
+    } else if (preds.size <= 1) {
+      // A single-predecessor pc is NOT a join: its state is exactly its
+      // predecessor's (refined on a revisit), so take it over. Merging here
+      // would mint a fresh φ at every instruction downstream of a revisited
+      // join, changing a value's identity per instruction and confining a read's
+      // claim to the read's own pc.
+      if (stacksEqual(incoming, prev)) return undefined;
+      cur = cloneStack(incoming);
+    } else {
+      const merged = mergeStack(prev, incoming, pc);
+      if (stacksEqual(merged, prev)) return undefined; // fixpoint for this pc.
+      cur = merged;
+    }
+    this.recorded.set(pc, cur);
+    return cur;
+  }
+
+  /** Record the variable claims the instruction at `insn.pc` proves on `cur`. */
+  private recordClaimsAt(insn: Insn, cur: Stack): void {
+    const originAt = (depth: number): number | undefined =>
+      cur[cur.length - 1 - depth]?.origin;
+
+    // viaIR function entry: the parameter slots are proved by the calling
+    // convention — authoritative, like a DUP read.
+    for (const {declId, depth} of this.paramEntryClaims.get(insn.pc) ?? []) {
+      const origin = originAt(depth);
+      if (origin !== undefined) this.recordRead(origin, declId, 'dup');
+    }
+
+    const declared = this.declEndClaims.get(insn.pc);
+    if (declared !== undefined) {
+      const origin = originAt(0);
+      if (origin !== undefined) this.recordRead(origin, declared, 'swap');
+    }
+
+    // Read anchor: the read slot's VALUE is proved to be `declId` — record that
+    // value number so the variable is reported wherever this value lives.
+    const anchor = this.anchors.get(insn.pc);
+    if (anchor !== undefined) {
+      const {declId, depth, kind} = anchor;
+      const idx = cur.length - 1 - depth;
+      const origin = idx >= 0 ? cur[idx]!.origin : undefined;
+      // A SWAP read is only believable when the variable's value is not ALREADY
+      // known to sit elsewhere on this stack (then the SWAP just moves it).
+      const liveElsewhere =
+        kind === 'swap' &&
+        cur.some(
+          (slot, k) =>
+            k !== idx &&
+            slot.origin !== undefined &&
+            this.originToDecl.get(slot.origin) === declId
+        );
+      if (origin !== undefined && !liveElsewhere) {
+        this.recordRead(origin, declId, kind);
+      }
+    }
+  }
+
+  /**
+   * A declaration's initializer call: its returned values ARE the declared
+   * variables (last one on top) — see {@link initCallDecls}.
+   */
+  private readonly claimInitializerResults: OnCallResume<Stack> = (
+    insn,
+    target,
+    resumed,
+    returnSlots
+  ) => {
+    const init =
+      insn.node === undefined
+        ? undefined
+        : this.initCallDecls.get(insn.node.id);
+    if (init === undefined) return;
+    if (this.program.insns.get(target)?.fnId !== init.callee) return;
+    const decls = init.slots;
+    // Exactly one returned value per component; otherwise the mapping is unsure.
+    if (decls.length !== returnSlots) return;
+    decls.forEach((declId, k) => {
+      if (declId === null) return;
+      const origin = resumed[resumed.length - decls.length + k]?.origin;
+      if (origin !== undefined) this.recordRead(origin, declId, 'swap');
+    });
+  };
 
   /**
    * Tie a value number to the variable a read proved it to hold, guarding
@@ -1026,7 +866,7 @@ class Analyzer {
    * marked ambiguous — viaIR mis-attributes stack-shuffle SWAPs), and two SWAP
    * reads disagreeing on one origin drop it from the SWAP map.
    */
-  private recordRead(origin: number, declId: number, kind: 'dup' | 'swap'): void {
+  private recordRead(origin: number, declId: number, kind: ReadKind): void {
     if (kind === 'dup') {
       // A DUP claim overrides any tentative SWAP claim for this origin.
       this.swapOriginToDecl.delete(origin);
@@ -1051,197 +891,17 @@ class Analyzer {
       this.swapOriginAmbiguous.add(origin);
     }
   }
+}
 
-  private handleJump(
-    stack: Stack,
-    insn: Insn,
-    fnId: number | undefined,
-    push: (item: {pc: number; stack: Stack}) => void,
-  ): void {
-    const target = topConst(stack);
-    if (target === undefined || !this.jumpdests.has(target)) {
-      // Dynamic target = return address ⇒ frame return — unless an INDIRECT
-      // CALL (`[in]` through a function pointer): resume at its return tag.
-      const resume = this.indirectResume(stack, insn, fnId);
-      if (resume !== undefined) push({pc: resume.pc, stack: resume.stack});
-      return;
-    }
-    if (this.isCall(insn, fnId, target)) {
-      const net = this.netEffect(target);
-      if (net === undefined) return; // callee never returns.
-      const depth = this.returnTagDepth(stack, fnId);
-      if (depth === undefined) return;
-      const returnConst = stack[stack.length - 1 - depth]!.const;
-      if (returnConst === undefined) return;
-      const resumed = cloneStack(stack);
-      for (let k = 0; k <= depth; k++) resumed.pop();
-      const returnSlots = net + depth + 1;
-      for (let k = 0; k < returnSlots; k++) {
-        resumed.push({origin: callReturnOrigin(returnConst, k)}); // callee returns.
-      }
-      // A declaration's initializer call: its returned values ARE the declared
-      // variables (last one on top).
-      const init = insn.callNode === undefined ? undefined : this.initCallDecls.get(insn.callNode);
-      const decls =
-        init !== undefined && this.insns.get(target)?.fnId === init.callee ? init.slots : undefined;
-      // Exactly one returned value per component; otherwise the mapping is unsure.
-      if (decls !== undefined && decls.length === returnSlots) {
-        decls.forEach((declId, k) => {
-          if (declId === null) return;
-          const origin = resumed[resumed.length - decls.length + k]?.origin;
-          if (origin !== undefined) this.recordRead(origin, declId, 'swap');
-        });
-      }
-      push({pc: returnConst, stack: resumed});
-      return;
-    }
-    // Internal jump within the same function: pop the destination and continue.
-    const nextStack = cloneStack(stack);
-    nextStack.pop();
-    push({pc: target, stack: nextStack});
-  }
-
-  /**
-   * An indirect internal call (`JUMP [in]` to a function-pointer target): resume
-   * at the return tag with `callRets` freshly-numbered return values.
-   */
-  private indirectResume(
-    stack: Stack,
-    insn: Insn,
-    fnId: number | undefined,
-  ): {pc: number; stack: Stack; net: number} | undefined {
-    if (insn.jump !== 'i' || insn.callRets === undefined) return undefined;
-    const depth = this.returnTagDepth(stack, fnId);
-    if (depth === undefined) return undefined;
-    const returnConst = stack[stack.length - 1 - depth]!.const;
-    if (returnConst === undefined) return undefined;
-    const resumed = cloneStack(stack);
-    for (let k = 0; k <= depth; k++) resumed.pop();
-    for (let k = 0; k < insn.callRets; k++) {
-      resumed.push({origin: callReturnOrigin(returnConst, k)});
-    }
-    return {pc: returnConst, stack: resumed, net: insn.callRets - depth - 1};
-  }
-
-  private isCall(
-    insn: Insn,
-    fnId: number | undefined,
-    target: number,
-  ): boolean {
-    if (insn.jump !== 'i') return false;
-    const targetFn = this.insns.get(target)?.fnId;
-    const sameFunction =
-      fnId !== undefined && targetFn !== undefined && fnId === targetFn;
-    return !sameFunction;
-  }
-
-  private returnTagDepth(
-    stack: Stack,
-    ownerFnId: number | undefined,
-  ): number | undefined {
-    for (let depth = 1; depth < stack.length; depth++) {
-      const value = stack[stack.length - 1 - depth]!.const;
-      if (value === undefined || !this.jumpdests.has(value)) continue;
-      if (ownerFnId !== undefined && this.insns.get(value)?.fnId !== ownerFnId) {
-        continue;
-      }
-      return depth;
-    }
-    return undefined;
-  }
-
-  // -------------------------------------------------------------------------
-  // Subroutine net-effect analysis (const-only; mirrors stackHeights)
-  // -------------------------------------------------------------------------
-
-  private netEffect(entryPc: number): number | undefined {
-    const cached = this.netCache.get(entryPc);
-    if (cached !== undefined || this.netCache.has(entryPc)) return cached;
-    if (this.netInProgress.has(entryPc)) return undefined;
-    this.netInProgress.add(entryPc);
-
-    interface Item {
-      pc: number;
-      height: number;
-      stack: Stack;
-    }
-    const localHeights = new Map<number, number>();
-    const work: Item[] = [{pc: entryPc, height: 0, stack: baseStack(entryPc)}];
-    let hret: number | undefined;
-    let hretOut: number | undefined;
-
-    while (work.length > 0) {
-      const {pc, height, stack} = work.pop()!;
-      const insn = this.insns.get(pc);
-      if (insn === undefined) continue;
-      if (localHeights.has(pc)) continue; // first visit wins (heights agree).
-      localHeights.set(pc, height);
-
-      if (isBlockTerminator(insn.op)) continue;
-
-      if (insn.op === 0x56) {
-        const target = topConst(stack);
-        if (target === undefined || !this.jumpdests.has(target)) {
-          // A dynamic jump is the RETURN only if it is not a call (`[in]`, e.g. a
-          // call through a function pointer whose target we can't resolve). An
-          // `[out]` jump is authoritative; an untagged one is a weaker candidate.
-          if (insn.jump === 'o') {
-            if (hretOut === undefined) hretOut = height;
-          } else if (insn.jump !== 'i' && hret === undefined) {
-            hret = height;
-          } else if (insn.jump === 'i') {
-            const resume = this.indirectResume(stack, insn, insn.fnId);
-            if (resume !== undefined) {
-              work.push({pc: resume.pc, height: height + resume.net, stack: resume.stack});
-            }
-          }
-          continue;
-        }
-        if (this.isCall(insn, insn.fnId, target)) {
-          const net = this.netEffect(target);
-          if (net === undefined) continue;
-          const depth = this.returnTagDepth(stack, insn.fnId);
-          if (depth === undefined) continue;
-          const returnConst = stack[stack.length - 1 - depth]!.const;
-          if (returnConst === undefined) continue;
-          const resumed = cloneStack(stack);
-          for (let k = 0; k <= depth; k++) resumed.pop();
-          for (let k = 0; k < net + depth + 1; k++) {
-            resumed.push({origin: callReturnOrigin(returnConst, k)});
-          }
-          work.push({pc: returnConst, height: height + net, stack: resumed});
-          continue;
-        }
-        const nextStack = cloneStack(stack);
-        nextStack.pop();
-        work.push({pc: target, height: height + insn.delta, stack: nextStack});
-        continue;
-      }
-
-      if (insn.op === 0x57) {
-        const target = topConst(stack);
-        const branched = cloneStack(stack);
-        branched.pop();
-        branched.pop();
-        const nextHeight = height + insn.delta;
-        if (target !== undefined && this.jumpdests.has(target)) {
-          work.push({pc: target, height: nextHeight, stack: cloneStack(branched)});
-        }
-        work.push({pc: pc + insn.size, height: nextHeight, stack: branched});
-        continue;
-      }
-
-      const nextStack = cloneStack(stack);
-      applyToStack(nextStack, insn);
-      work.push({pc: pc + insn.size, height: height + insn.delta, stack: nextStack});
-    }
-
-    this.netInProgress.delete(entryPc);
-    const ret = hretOut ?? hret;
-    const net = ret === undefined ? undefined : ret - 2;
-    this.netCache.set(entryPc, net);
-    return net;
-  }
+/** Child node types that are nested statement bodies, not a statement's own expressions. */
+function isNestedBody(nodeType: string): boolean {
+  return (
+    nodeType === 'Block' ||
+    nodeType === 'UncheckedBlock' ||
+    nodeType.endsWith('Statement') ||
+    nodeType === 'Return' ||
+    nodeType === 'InlineAssembly'
+  );
 }
 
 /**
@@ -1251,34 +911,14 @@ class Analyzer {
  */
 function stackSlotsOf(typeIdentifier: string | undefined): number {
   if (typeIdentifier === undefined) return 1;
-  if (/_calldata_ptr$/.test(typeIdentifier) && /^t_(bytes|string)_|_dyn_calldata_ptr$/.test(typeIdentifier)) {
+  if (
+    /_calldata_ptr$/.test(typeIdentifier) &&
+    /^t_(bytes|string)_|_dyn_calldata_ptr$/.test(typeIdentifier)
+  ) {
     return 2;
   }
   if (/^t_function_external/.test(typeIdentifier)) return 2;
   return 1;
-}
-
-/**
- * A fresh abstract stack seeded with the frame's below-entry (caller) slots, each
- * given a distinct per-function value number so a below-entry variable (an
- * internally-passed parameter) can be identified and tracked like any other.
- */
-function baseStack(entryPc: number): Stack {
-  const s: Stack = new Array<Slot>(64);
-  // Distinct, negative, function-unique origins (128 spacing > 64 slots ⇒ no
-  // overlap between functions; never collides with a pc-derived origin ≥ 0).
-  const base = -(entryPc * 128) - 1;
-  for (let i = 0; i < s.length; i++) s[i] = {origin: base - i};
-  return s;
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const body = hex.startsWith('0x') ? hex.slice(2) : hex;
-  const out = new Uint8Array(body.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(body.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
 }
 
 /**
@@ -1289,14 +929,13 @@ function hexToBytes(hex: string): Uint8Array {
 export function stackProvenance(
   cu: CompilationUnit,
   sourcePath: string,
-  contractName: string,
+  contractName: string
 ): StackProvenance {
   const contract = cu.contract(sourcePath, contractName);
   if (contract === undefined) {
     throw new Error(`contract not found: ${sourcePath}:${contractName}`);
   }
   const analyzer = new Analyzer(cu, contract);
-  analyzer.analyze();
   return {
     variableDepthAt: (pc: number, declId: number) =>
       analyzer.variableDepthAt(pc, declId),

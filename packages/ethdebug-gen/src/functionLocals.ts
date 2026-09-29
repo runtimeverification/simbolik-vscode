@@ -29,7 +29,8 @@
  */
 import type {AstNode, CompilationUnit} from '@simbolik/solc';
 
-import {describeDeclValueType} from './functionParameters.js';
+import {requireFunction, srcEnd, walkAst} from './ast.js';
+import {declTypeFacts} from './valueTypes.js';
 
 /** A single function local variable's static descriptor. */
 export interface LocalDescriptor {
@@ -56,15 +57,15 @@ export interface LocalDescriptor {
 }
 
 /**
- * The solc structural type id of a REFERENCE declaration (struct/array/string/
- * bytes/mapping), e.g. `t_struct$_Point_$10_memory_ptr`,
- * `t_array$_t_uint256_$dyn_memory_ptr`, `t_string_memory_ptr` — otherwise `''`.
- * Value types carry their id via {@link describeValueTypeString}; this is the
- * fallback for the reference types the variable producer detects and expands
- * (memory struct → members; dynamic memory array/string/bytes).
+ * Whether a local is live at source `offset`: its enclosing lexical scope covers
+ * the offset AND its declaration statement has completed.
  */
-export function referenceTypeId(decl: AstNode): string {
-  return decl.typeIdentifier ?? '';
+export function isLocalLiveAt(local: LocalDescriptor, offset: number): boolean {
+  return (
+    offset >= local.declEnd &&
+    offset >= local.scopeStart &&
+    offset < local.scopeEnd
+  );
 }
 
 /**
@@ -88,7 +89,7 @@ function enclosingScope(decl: AstNode): AstNode | undefined {
 /** Collect the local `VariableDeclaration`s of a function body, in source order. */
 function collectLocalDeclarations(fnNode: AstNode): AstNode[] {
   const out: AstNode[] = [];
-  const visit = (node: AstNode): void => {
+  walkAst(fnNode, node => {
     if (
       node.nodeType === 'VariableDeclaration' &&
       node.name !== undefined &&
@@ -96,11 +97,7 @@ function collectLocalDeclarations(fnNode: AstNode): AstNode[] {
     ) {
       out.push(node);
     }
-    for (const child of node.children()) {
-      visit(child);
-    }
-  };
-  visit(fnNode);
+  });
   // Source order = execution/stack order for straight-line declarations.
   out.sort((a, b) => a.srcStart - b.srcStart);
   return out;
@@ -111,14 +108,9 @@ export function functionLocals(
   cu: CompilationUnit,
   sourcePath: string,
   contractName: string,
-  methodName: string,
+  methodName: string
 ): LocalDescriptor[] {
-  const fn = cu.functionDefinition(sourcePath, contractName, methodName);
-  if (fn === undefined) {
-    throw new Error(
-      `function not found: ${sourcePath}:${contractName}.${methodName}`,
-    );
-  }
+  const fn = requireFunction(cu, sourcePath, contractName, methodName);
   return localsFromFunctionNode(fn, cu);
 }
 
@@ -131,31 +123,19 @@ export function functionLocals(
  */
 export function localsFromFunctionNode(
   fn: AstNode,
-  cu: CompilationUnit,
+  cu: CompilationUnit
 ): LocalDescriptor[] {
   return collectLocalDeclarations(fn).map((decl, index) => {
-    const typeLabel = decl.typeString ?? '';
-    const desc = describeDeclValueType(decl, cu);
     const stmt = decl.parent()!; // the VariableDeclarationStatement
-    const scope = enclosingScope(decl);
+    const scope = enclosingScope(decl) ?? fn;
     return {
       name: decl.name!,
       declId: decl.id,
       index,
-      // Value types carry their storage-style id; a reference type (a memory
-      // struct, or a dynamic memory array/string/bytes — so
-      // `describeValueTypeString` is undefined) still carries its solc
-      // structural type id so the producer can resolve its shape.
-      solcType: desc?.typeId ?? referenceTypeId(decl),
-      typeLabel,
-      numberOfBytes: desc?.numberOfBytes ?? 0,
-      isValueType: desc !== undefined,
-      declEnd: stmt.srcStart + stmt.srcLength,
-      scopeStart: scope?.srcStart ?? fn.srcStart,
-      scopeEnd:
-        scope !== undefined
-          ? scope.srcStart + scope.srcLength
-          : fn.srcStart + fn.srcLength,
+      ...declTypeFacts(decl, cu),
+      declEnd: srcEnd(stmt),
+      scopeStart: scope.srcStart,
+      scopeEnd: srcEnd(scope),
     };
   });
 }
