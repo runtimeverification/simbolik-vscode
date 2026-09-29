@@ -102,7 +102,7 @@ interface RawAbiInput {
   components?: RawAbiInput[];
 }
 
-/** A raw ABI entry (only `type:'event'` is consumed by {@link Contract.events}). */
+/** A raw ABI entry (`type:'event'` and `type:'error'` entries are consumed). */
 interface RawAbiEntry {
   type?: string;
   name?: string;
@@ -118,6 +118,25 @@ export interface EventParam {
   /** The ABI canonical type label (e.g. `uint256`, `address`). */
   typeLabel: string;
   indexed: boolean;
+}
+
+/** One typed parameter of a custom error. */
+export interface ErrorParam {
+  name: string;
+  /** A solc-style type id (e.g. `t_uint256`) mapped from the ABI canonical type. */
+  solcType: string;
+  /** The ABI canonical type label (e.g. `uint256`, `address`). */
+  typeLabel: string;
+}
+
+/** A custom error: its name, canonical signature, 4-byte selector and parameters. */
+export interface ErrorInfo {
+  name: string;
+  /** Canonical signature, e.g. `TooSmall(uint256,uint256)`. */
+  signature: string;
+  /** `'0x'` + the first 4 bytes of keccak256 of the signature. */
+  selector: string;
+  params: ErrorParam[];
 }
 
 /** A contract event: its name, topic-0 selector, and typed parameters. */
@@ -299,6 +318,39 @@ export class Contract {
     }
     return out;
   }
+
+  /** The contract's custom errors (see {@link errorsOf}). */
+  errors(): ErrorInfo[] {
+    return errorsOf(this.#raw.abi ?? []);
+  }
+}
+
+/**
+ * The custom errors the contract can revert with, from the build-info ABI
+ * (solc lists every error the contract's code can raise, including ones
+ * declared in libraries or other contracts). Each carries the canonical
+ * signature and its 4-byte selector, which prefixes the revert data.
+ */
+function errorsOf(abi: RawAbiEntry[]): ErrorInfo[] {
+  return abi
+    .filter((entry) => entry.type === 'error')
+    .map((entry) => {
+      const inputs = entry.inputs ?? [];
+      const signature = `${entry.name ?? ''}(${inputs
+        .map(abiCanonicalType)
+        .join(',')})`;
+      return {
+        name: entry.name ?? '',
+        signature,
+        selector:
+          '0x' + bytesToHex(keccak256(utf8ToBytes(signature))).slice(0, 8),
+        params: inputs.map((i) => ({
+          name: i.name ?? '',
+          solcType: canonicalToSolcType(i.type ?? ''),
+          typeLabel: i.type ?? '',
+        })),
+      };
+    });
 }
 
 /** Coerce a raw `storageLayout.types` entry to a {@link StorageType}. */

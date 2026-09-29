@@ -10,11 +10,21 @@ import {
   StateCursor,
   type Step,
 } from '@simbolik/lifting';
-import {loadBuildInfo, type CompilationUnit} from '@simbolik/solc';
+import {
+  loadBuildInfo,
+  type CompilationUnit,
+  type ErrorInfo,
+} from '@simbolik/solc';
 
+import {
+  findExceptions,
+  placeExceptions,
+  type TraceException,
+} from './exceptions.js';
 import {addressHex} from './hex.js';
 import type {LaunchInputs} from './launchInputs.js';
 import {CodeRegistry} from './registry.js';
+import {errorsBySelector} from './revertData.js';
 import {SteppingModel} from './stepping.js';
 
 export interface Trace {
@@ -24,6 +34,10 @@ export interface Trace {
   steps: Step[];
   cursor: StateCursor;
   model: SteppingModel;
+  /** Where each exception originates, in step order (see `exceptions.ts`). */
+  exceptions: TraceException[];
+  /** Every loaded contract's custom errors, by 4-byte selector. */
+  errors: Map<string, ErrorInfo>;
 }
 
 /** Load and wire a recorded transaction per `inputs`. */
@@ -43,7 +57,12 @@ export function loadTrace(inputs: LaunchInputs): Trace {
   const model = new SteppingModel(cursor, i =>
     registry.contractAt(addressHex(steps[i]!.codeAddress))
   );
-  return {cus, registry, steps, cursor, model};
+  const exceptions = findExceptions(steps, cursor);
+  placeExceptions(exceptions, steps, i => model.at(i).stmtId !== undefined);
+  const errors = errorsBySelector(
+    cus.flatMap(cu => cu.contracts().flatMap(c => c.errors()))
+  );
+  return {cus, registry, steps, cursor, model, exceptions, errors};
 }
 
 /** Parse the raw `debug_traceTransaction` response into steps, per dialect. */

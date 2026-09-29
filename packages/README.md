@@ -26,7 +26,11 @@ See the design plan for full architecture, decisions, and the milestone roadmap.
   contract/CU, or foreign). The static per-contract caches (pc → source, positions,
   disassembly, ethdebug program, `variablesAt`) live in `contractAnalysis.ts`, shared with
   `stepping.ts`. Also: `frames.ts` (call-stack reconstruction), `breakpoints.ts` (line,
-  instruction and exception-filter breakpoints plus run-to-stop), `sources.ts` (DAP
+  instruction and exception-filter breakpoints plus run-to-stop), `exceptions.ts` (where
+  each exception originates — REVERT, INVALID, exceptional halt or a failed atomic call
+  such as a cheatcode — and whether it was caught, re-thrown or expected; backs the
+  "Uncaught Reverts"/"All Reverts" filters and the DAP `exceptionInfo` request),
+  `revertData.ts` (decodes `Error(string)`, `Panic` codes and custom errors), `sources.ts` (DAP
   `Source` and `sourceReference`), `handles.ts` (typed `variablesReference` handles).
   Per-scope renderers: `solidityVariables.ts` (State, Locals and nested values),
   `localsHistory.ts` (last-known values, stale copies, model offset), `writes.ts`

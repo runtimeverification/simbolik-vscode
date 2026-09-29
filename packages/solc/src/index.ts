@@ -18,6 +18,8 @@ export {
   SourceFile,
   loadBuildInfo,
   sourceMapEntryAtPc,
+  type ErrorInfo,
+  type ErrorParam,
   type EventInfo,
   type EventParam,
   type OptimizerSettings,

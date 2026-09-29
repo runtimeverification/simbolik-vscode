@@ -59,6 +59,7 @@ const SESSION_COMMANDS = new Set<string>([
   'setBreakpoints',
   'setInstructionBreakpoints',
   'setExceptionBreakpoints',
+  'exceptionInfo',
   'disconnect',
 ]);
 
@@ -248,6 +249,8 @@ export class DapDispatcher {
         return reply(session.setInstructionBreakpoints(a));
       case 'setExceptionBreakpoints':
         return reply(session.setExceptionBreakpoints(a));
+      case 'exceptionInfo':
+        return reply(session.exceptionInfo(a));
       case 'disconnect':
         session.disconnect();
         return [

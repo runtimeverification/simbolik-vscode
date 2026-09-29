@@ -220,7 +220,7 @@ function decodeLogStep(
 }
 
 /** Whether a solc type id / ABI label denotes a value type (not a hashed ref). */
-function isValueType(solcType: string, typeLabel: string): boolean {
+export function isValueType(solcType: string, typeLabel: string): boolean {
   if (solcType === 't_string' || typeLabel === 'string') return false;
   if (solcType === 't_bytes' || typeLabel === 'bytes') return false; // dynamic
   if (typeLabel.includes('[') || typeLabel.startsWith('tuple')) return false;
@@ -235,7 +235,7 @@ function isValueType(solcType: string, typeLabel: string): boolean {
 }
 
 /** The byte width of a value type, for ABI-word normalization + decoding. */
-function numberOfBytesForType(solcType: string, typeLabel: string): number {
+export function numberOfBytesForType(solcType: string, typeLabel: string): number {
   let m: RegExpExecArray | null;
   if ((m = /^t_uint(\d+)$/.exec(solcType)) || (m = /^uint(\d+)$/.exec(typeLabel))) {
     return Number(m[1]) / 8;

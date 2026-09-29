@@ -19,6 +19,7 @@ import {Breakpoints, EXCEPTION_BREAKPOINT_FILTERS} from './breakpoints.js';
 import type {Disassembly} from './contractAnalysis.js';
 import {encodeInstructionAddress} from './disassemble.js';
 import {disassembleView, type DisassembleArgs} from './disassemblyView.js';
+import {describeException, type TraceException} from './exceptions.js';
 import {
   decodedEvents,
   eventArgVariables,
@@ -54,13 +55,14 @@ export const CAPABILITIES: DebugProtocol.Capabilities = {
   supportsSteppingGranularity: true,
   supportsDisassembleRequest: true,
   supportsInstructionBreakpoints: true,
-  // "Dynamic" breakpoints (stop-on-call/create/revert/…) shown as toggles in
-  // the Breakpoints panel; matched during continue.
+  supportsExceptionInfoRequest: true,
+  // Exception filters (uncaught / all reverts) and "dynamic" breakpoints
+  // (stop-on-call/create/…) shown as toggles in the Breakpoints panel.
   exceptionBreakpointFilters: EXCEPTION_BREAKPOINT_FILTERS.map(f => ({
     filter: f.filter,
     label: f.label,
     description: f.description,
-    default: false,
+    default: f.default ?? false,
   })),
 };
 
@@ -137,7 +139,7 @@ export class SolidityDebugSession {
     const launched: Launched = {
       trace,
       stop: trace.model.entryStop(),
-      breakpoints: new Breakpoints(trace.steps, trace.model),
+      breakpoints: new Breakpoints(trace.steps, trace.model, trace.exceptions),
       sources: new SourceRegistry(inputs.sourceRoot),
       variables: new SolidityVariables(
         trace,
@@ -148,6 +150,8 @@ export class SolidityDebugSession {
       foreignDisassembly: new Map(),
     };
     this.#launched = launched;
+    const failure = trace.exceptions.find(e => !e.caught);
+    if (failure !== undefined) this.#reportFailure(failure);
     this.#stop('entry');
   }
 
@@ -269,8 +273,37 @@ export class SolidityDebugSession {
   }
 
   /**
+   * The exception the session is paused at (DAP `exceptionInfo`, which the
+   * client requests after a `stopped` event with reason `exception`).
+   */
+  exceptionInfo(_args?: {
+    threadId?: number;
+  }): DebugProtocol.ExceptionInfoResponse['body'] {
+    const s = this.#require();
+    const exception = s.trace.exceptions.find(
+      e => e.stop === s.stop.step || e.step === s.stop.step
+    );
+    if (exception === undefined) {
+      throw new Error('not paused at an exception');
+    }
+    const reason = this.#describe(exception);
+    return {
+      exceptionId: reason.id,
+      description: reason.message,
+      breakMode: exception.caught ? 'always' : 'unhandled',
+      details: {
+        message: reason.message,
+        ...(reason.signature !== undefined ? {typeName: reason.signature} : {}),
+        stackTrace: this.#stackTraceText(exception.stop),
+      },
+    };
+  }
+
+  /**
    * A forward step: a single-instruction move at `instruction` granularity,
    * else a statement-level move that ends the session when it runs off the end.
+   * A statement step stops early where an exception an enabled filter breaks
+   * on originates, so stepping over a failing call does not run past it.
    */
   #forward(
     args: StepArgs | undefined,
@@ -282,8 +315,18 @@ export class SolidityDebugSession {
       s.stop = {step: instruction(s.stop.step), beforeModifier: false};
       this.#stop('step');
     } else {
-      s.stop = statement(s.stop);
-      this.#stopOrEnd('step');
+      const target = statement(s.stop);
+      const exception = s.breakpoints.exceptionBetween(
+        s.stop.step,
+        target.step
+      );
+      if (exception !== undefined) {
+        s.stop = {step: exception.stop, beforeModifier: false};
+        this.#stop('exception', exception);
+      } else {
+        s.stop = target;
+        this.#stopOrEnd('step');
+      }
     }
     return {};
   }
@@ -292,7 +335,10 @@ export class SolidityDebugSession {
     const s = this.#require();
     const {target, reason} = s.breakpoints.runToStop(s.stop, dir);
     s.stop = {step: target, beforeModifier: false};
-    this.#stop(reason);
+    this.#stop(
+      reason,
+      reason === 'exception' ? s.breakpoints.exceptionAt(target) : undefined
+    );
     return {};
   }
 
@@ -489,15 +535,70 @@ export class SolidityDebugSession {
     return frames.find(f => f.id === id) ?? frames.at(-1);
   }
 
-  /** Queue a `stopped` event on the single thread. */
-  #stop(reason: string): void {
-    const stopped: DebugProtocol.StoppedEvent = {
+  /**
+   * Queue a `stopped` event on the single thread. A stop at an `exception`
+   * carries the exception's name (DAP `text`); the client asks `exceptionInfo`
+   * for the rest.
+   */
+  #stop(reason: string, exception?: TraceException): void {
+    const body: DebugProtocol.StoppedEvent['body'] = {
+      reason,
+      threadId: 1,
+      allThreadsStopped: true,
+    };
+    if (exception !== undefined) {
+      body.description = exception.caught
+        ? 'Paused on exception'
+        : 'Paused on uncaught exception';
+      body.text = this.#describe(exception).id;
+    }
+    this.#events.push({
       seq: this.#seq++,
       type: 'event',
       event: 'stopped',
-      body: {reason, threadId: 1, allThreadsStopped: true},
+      body,
+    });
+  }
+
+  /** Tell the user, in the debug console, why the transaction failed. */
+  #reportFailure(exception: TraceException): void {
+    const output =
+      `The transaction failed: ${this.#describe(exception).summary}\n` +
+      this.#stackTraceText(exception.stop) +
+      '\n';
+    const event: DebugProtocol.OutputEvent = {
+      seq: this.#seq++,
+      type: 'event',
+      event: 'output',
+      body: {category: 'stderr', output},
     };
-    this.#events.push(stopped);
+    this.#events.push(event);
+  }
+
+  #describe(exception: TraceException) {
+    const {trace} = this.#require();
+    return describeException(
+      exception,
+      trace.steps,
+      trace.cursor,
+      trace.errors
+    );
+  }
+
+  /** The call stack at `step`, innermost first, one `at name (path:line)` per frame. */
+  #stackTraceText(step: number): string {
+    const frames = reconstructFrames(this.#require().trace, {
+      step,
+      beforeModifier: false,
+    });
+    return frames
+      .reverse()
+      .map(f =>
+        f.cu === undefined
+          ? `    at ${f.name} (${f.address})`
+          : `    at ${f.name} (${f.path}:${f.line})`
+      )
+      .join('\n');
   }
 
   /**

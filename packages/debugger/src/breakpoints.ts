@@ -11,19 +11,28 @@ import {
   decodeInstructionAddress,
   encodeInstructionAddress,
 } from './disassemble.js';
+import type {TraceException} from './exceptions.js';
 import {addressHex} from './hex.js';
 import type {SteppingModel, Stop} from './stepping.js';
 
 /**
  * A DAP exception-breakpoint filter (a "dynamic" breakpoint): a toggle in the
- * Breakpoints panel that makes `continue` stop on any opcode in a category (e.g.
- * "stop on external calls"). `ops` is the set of EVM opcodes that trip it.
+ * Breakpoints panel. The two exception filters stop where an exception
+ * originates (see `exceptions.ts`) — `exceptions: 'all'` on every one,
+ * `'uncaught'` only on the one that fails the transaction — during `continue`
+ * AND statement steps, so stepping over a failing call stops at the failure
+ * instead of running off the end. The others make `continue` stop on any opcode
+ * in a category (e.g. "stop on external calls"); `ops` is the set of EVM
+ * opcodes that trip them.
  */
 export interface ExceptionFilterDef {
   filter: string;
   label: string;
   description: string;
   ops: readonly string[];
+  exceptions?: 'all' | 'uncaught';
+  /** Whether the client enables the filter by default. */
+  default?: boolean;
 }
 
 /**
@@ -31,6 +40,23 @@ export interface ExceptionFilterDef {
  * `initialize` capability and continue-time matching). Mirrors the Python server.
  */
 export const EXCEPTION_BREAKPOINT_FILTERS: readonly ExceptionFilterDef[] = [
+  {
+    filter: 'break-on-uncaught-revert',
+    label: 'Uncaught Reverts',
+    description:
+      'Break where the revert, failed assertion or exceptional halt that fails the transaction originates',
+    ops: [],
+    exceptions: 'uncaught',
+    default: true,
+  },
+  {
+    filter: 'break-on-revert',
+    label: 'All Reverts',
+    description:
+      'Break where any revert, failed assertion or exceptional halt originates, even one a caller catches',
+    ops: [],
+    exceptions: 'all',
+  },
   {
     filter: 'break-on-call',
     label: 'External Calls',
@@ -48,12 +74,6 @@ export const EXCEPTION_BREAKPOINT_FILTERS: readonly ExceptionFilterDef[] = [
     label: 'Returns',
     description: 'Break on RETURN and STOP',
     ops: ['RETURN', 'STOP'],
-  },
-  {
-    filter: 'break-on-revert',
-    label: 'Reverts',
-    description: 'Break on REVERT and INVALID',
-    ops: ['REVERT', 'INVALID'],
   },
   {
     filter: 'break-on-sstore',
@@ -112,10 +132,17 @@ export class Breakpoints {
 
   readonly #steps: readonly Step[];
   readonly #model: SteppingModel;
+  /** The trace's exceptions, keyed by the step the debugger shows them at. */
+  readonly #exceptions: ReadonlyMap<number, TraceException>;
 
-  constructor(steps: readonly Step[], model: SteppingModel) {
+  constructor(
+    steps: readonly Step[],
+    model: SteppingModel,
+    exceptions: readonly TraceException[] = []
+  ) {
     this.#steps = steps;
     this.#model = model;
+    this.#exceptions = new Map(exceptions.map(e => [e.stop, e]));
   }
 
   /** Arm `lines` for `path`, replacing that source's previous set. */
@@ -168,9 +195,35 @@ export class Breakpoints {
   }
 
   /**
+   * The exception shown at `step` (its {@link TraceException.stop}), when an
+   * enabled filter breaks on it.
+   */
+  exceptionAt(step: number): TraceException | undefined {
+    const exception = this.#exceptions.get(step);
+    if (exception === undefined) return undefined;
+    const uncaught = this.#exceptionFilters.has('break-on-uncaught-revert');
+    const all = this.#exceptionFilters.has('break-on-revert');
+    return all || (uncaught && !exception.caught) ? exception : undefined;
+  }
+
+  /**
+   * The first exception an enabled filter breaks on in `(from, to]` — where a
+   * forward step from `from` to `to` must stop instead.
+   */
+  exceptionBetween(from: number, to: number): TraceException | undefined {
+    let first: TraceException | undefined;
+    for (const stop of this.#exceptions.keys()) {
+      if (stop > from && stop <= to && stop < (first?.stop ?? Infinity)) {
+        first = this.exceptionAt(stop) ?? first;
+      }
+    }
+    return first;
+  }
+
+  /**
    * The nearest stop from `from` in direction `dir`, folding the three stop
    * kinds (source-line, instruction, exception filter) into one target and a
-   * `stopped` reason. A revert filter reports `'exception'`; every other stop
+   * `stopped` reason. An exception (in either direction) reports `'exception'`; every other stop
    * reports `'breakpoint'`; running to the end/start reports `'step'`.
    */
   runToStop(from: Stop, dir: 1 | -1): RunTarget {
@@ -187,17 +240,21 @@ export class Breakpoints {
       from.step,
       dir,
       this.#exceptionFilters.size,
-      j => this.#exceptionFilterAt(j) !== undefined
+      j =>
+        this.#exceptionFilterAt(j) !== undefined ||
+        this.exceptionAt(j) !== undefined
     );
     if (exc !== undefined) candidates.push(exc);
     const target =
       dir === 1 ? Math.min(...candidates) : Math.max(...candidates);
 
-    const filter = this.#exceptionFilterAt(target);
+    // Re-running from the terminal step lands where it started: that is the end
+    // of the trace, not a second hit of an exception raised there.
     let reason = 'step';
-    if (filter !== undefined) {
-      reason = filter === 'break-on-revert' ? 'exception' : 'breakpoint';
+    if (target !== from.step && this.exceptionAt(target) !== undefined) {
+      reason = 'exception';
     } else if (
+      this.#exceptionFilterAt(target) !== undefined ||
       this.#model.isArmedStop(target, this.#lines) ||
       this.#isInstructionStop(target)
     ) {

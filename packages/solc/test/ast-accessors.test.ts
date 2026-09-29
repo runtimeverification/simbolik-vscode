@@ -208,3 +208,38 @@ describe('Contract.events() event inventory + selectors', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Contract.errors() custom-error inventory + selectors.
+//
+// Exceptions.sol's `Thrower` declares `error TooSmall(uint256 got, uint256
+// min)`; the `Exceptions` contract calls `Thrower.check`, which can raise it.
+// Ground truth: the recorded kontrol trace of `Exceptions.mixed()` reverts with
+// revert data starting `0xe94fe3af` — the 4-byte selector of the canonical
+// signature `TooSmall(uint256,uint256)`.
+// ---------------------------------------------------------------------------
+
+describe('Contract.errors() custom-error inventory + selectors', () => {
+  const exceptions = (): CompilationUnit =>
+    loadBuildInfo(loadFixture('exceptions-legacy-build-info.json'));
+
+  it('lists TooSmall with its signature, 4-byte selector and typed params', () => {
+    const thrower = exceptions().contract('src/Exceptions.sol', 'Thrower')!;
+    expect(thrower.errors()).toEqual([
+      {
+        name: 'TooSmall',
+        signature: 'TooSmall(uint256,uint256)',
+        selector: '0xe94fe3af',
+        params: [
+          {name: 'got', solcType: 't_uint256', typeLabel: 'uint256'},
+          {name: 'min', solcType: 't_uint256', typeLabel: 'uint256'},
+        ],
+      },
+    ]);
+  });
+
+  it('is empty for a contract whose ABI declares no errors', () => {
+    const vars = loadBuildInfo(loadFixture('vars-build-info.json'));
+    for (const c of vars.contracts()) expect(c.errors()).toEqual([]);
+  });
+});

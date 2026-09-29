@@ -1,0 +1,10 @@
+{
+ "contractAddress": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+ "calldata": "0x2a6233d6",
+ "callTxHash": "0x0a3f7f350ad8008162bc0a5aaed4950cf095ba08c508a7256bed3522c52c4c40",
+ "status": "0x0",
+ "failed": true,
+ "returnValue": "",
+ "traceStepCount": 206,
+ "note": "Exceptions.assertion() — legacy, recorded on kontrol-node (fresh node)"
+}
