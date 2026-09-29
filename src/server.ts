@@ -72,7 +72,7 @@ export const notWiredResolver: SessionResolver = async () => {
   throw new Error(
     'Simbolik debug server: no live SessionResolver is wired yet ' +
       '(forge build → kontrol-node → trace). Inject a resolver via ' +
-      'createDispatcher(resolve) / startServer({resolve}).',
+      'createDispatcher(resolve) / startServer({resolve}).'
   );
 };
 
@@ -160,12 +160,15 @@ function toFsPath(entry: unknown): string {
     const o = entry as Record<string, unknown>;
     if (typeof o['fsPath'] === 'string') return o['fsPath'];
     if (typeof o['path'] === 'string') return o['path'];
-    if (typeof o['external'] === 'string' && o['external'].startsWith('file://')) {
+    if (
+      typeof o['external'] === 'string' &&
+      o['external'].startsWith('file://')
+    ) {
       return fileURLToPath(o['external']);
     }
   }
   throw new Error(
-    `buildInfoFiles: cannot resolve a filesystem path from ${JSON.stringify(entry)}`,
+    `buildInfoFiles: cannot resolve a filesystem path from ${JSON.stringify(entry)}`
   );
 }
 
@@ -188,7 +191,7 @@ function selectorFrom(
   raw: RawBuildInfo,
   sourcePath: string,
   contractName: string,
-  methodSignature: string,
+  methodSignature: string
 ): string | undefined {
   const contracts = raw.output?.contracts ?? raw.contracts;
   const ids = contracts?.[sourcePath]?.[contractName]?.evm?.methodIdentifiers;
@@ -197,7 +200,7 @@ function selectorFrom(
 }
 
 const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+  new Promise(resolve => setTimeout(resolve, ms));
 
 /** A transaction receipt, as far as this resolver cares about it. */
 interface TxReceipt {
@@ -217,7 +220,7 @@ interface TxReceipt {
 async function waitForReceipt(
   client: JsonRpcClient,
   txHash: string,
-  {timeoutMs = 30_000, pollMs = 50}: {timeoutMs?: number; pollMs?: number} = {},
+  {timeoutMs = 30_000, pollMs = 50}: {timeoutMs?: number; pollMs?: number} = {}
 ): Promise<TxReceipt | undefined> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -225,7 +228,7 @@ async function waitForReceipt(
     try {
       receipt = await client.call<TxReceipt | null>(
         'eth_getTransactionReceipt',
-        [txHash],
+        [txHash]
       );
     } catch {
       // Receipt method unsupported — don't block; let the caller proceed.
@@ -260,8 +263,8 @@ function summarizeRpcParams(method: string, params: unknown[]): string {
     return ` (${target}${data})`;
   }
   const scalars = params
-    .filter((p) => typeof p === 'string' || typeof p === 'number')
-    .map((p) => short(String(p)));
+    .filter(p => typeof p === 'string' || typeof p === 'number')
+    .map(p => short(String(p)));
   return scalars.length > 0 ? ` (${scalars.join(', ')})` : '';
 }
 
@@ -269,7 +272,7 @@ function summarizeRpcParams(method: string, params: unknown[]): string {
 async function rawJsonRpc(
   url: string,
   method: string,
-  params: unknown[],
+  params: unknown[]
 ): Promise<string> {
   let res: Response;
   try {
@@ -281,7 +284,7 @@ async function rawJsonRpc(
   } catch (err) {
     throw new Error(
       `JSON-RPC ${method}: cannot reach ${url} — ${describeCause(err)}`,
-      {cause: err},
+      {cause: err}
     );
   }
   if (!res.ok) {
@@ -299,7 +302,7 @@ async function rawJsonRpc(
  */
 function deriveSourceRoot(
   file: string | undefined,
-  sourcePath: string,
+  sourcePath: string
 ): string | undefined {
   if (file === undefined) return undefined;
   let abs: string;
@@ -333,7 +336,7 @@ async function buildContractsByAddress(
   dialect: 'kontrol' | 'geth',
   buildInfos: unknown[],
   txContext: {to: string; from: string; input: string},
-  preState: StateDump | undefined,
+  preState: StateDump | undefined
 ): Promise<{
   contractsByAddress: Record<
     string,
@@ -347,7 +350,7 @@ async function buildContractsByAddress(
   > = {};
   let steps: {codeAddress: bigint}[];
   try {
-    const envelope = (parseTraceEnvelope(traceJson));
+    const envelope = parseTraceEnvelope(traceJson);
     steps =
       dialect === 'geth'
         ? normalizeGethTrace(envelope, txContext)
@@ -360,10 +363,10 @@ async function buildContractsByAddress(
   for (const step of steps) addresses.add(addressHex(step.codeAddress));
 
   // Parse each build-info once for CBOR matching.
-  const cus = buildInfos.map((bi) => ({bi, cu: loadBuildInfo(bi)}));
+  const cus = buildInfos.map(bi => ({bi, cu: loadBuildInfo(bi)}));
 
   await Promise.all(
-    [...addresses].map(async (addr) => {
+    [...addresses].map(async addr => {
       // Runtime code: prefer the pre-state dump (no extra request); a contract
       // CREATEd during the traced call won't be in the pre-call dump, so fall
       // back to eth_getCode there.
@@ -377,7 +380,10 @@ async function buildContractsByAddress(
       }
       if (typeof code !== 'string' || code.length <= 2) return; // EOA / empty.
       for (const {bi, cu} of cus) {
-        const contract = identifyContractByRuntimeCode(cu, code as `0x${string}`);
+        const contract = identifyContractByRuntimeCode(
+          cu,
+          code as `0x${string}`
+        );
         if (contract !== undefined) {
           result[addr] = {
             buildInfoJson: bi,
@@ -387,7 +393,7 @@ async function buildContractsByAddress(
           return;
         }
       }
-    }),
+    })
   );
   return {contractsByAddress: result, addresses: [...addresses]};
 }
@@ -438,7 +444,7 @@ function staticStorageSlots(contract: Contract): bigint[] {
 async function readInitialStorage(
   client: JsonRpcClient,
   targets: Array<{address: string; contract: Contract}>,
-  blockTag: string,
+  blockTag: string
 ): Promise<Record<string, Record<string, `0x${string}`>>> {
   const out: Record<string, Record<string, `0x${string}`>> = {};
   for (const {address, contract} of targets) {
@@ -481,7 +487,7 @@ async function readInitialStorage(
  * the traced call), since `anvil_dumpState` snapshots the CURRENT state.
  */
 async function fetchStateDump(
-  client: JsonRpcClient,
+  client: JsonRpcClient
 ): Promise<StateDump | undefined> {
   try {
     const raw = await client.call<unknown>('anvil_dumpState', []);
@@ -500,7 +506,7 @@ async function fetchStateDump(
  */
 function seedFromDump(
   dump: StateDump,
-  traceAddresses: Iterable<string>,
+  traceAddresses: Iterable<string>
 ): Record<string, Record<string, `0x${string}`>> {
   const out: Record<string, Record<string, `0x${string}`>> = {};
   for (const addr of traceAddresses) {
@@ -536,7 +542,9 @@ function toChainId(raw: unknown): number {
   if (typeof raw === 'bigint') return Number(raw);
   if (typeof raw === 'number') return raw;
   if (typeof raw === 'string' && raw.length > 0) return Number(BigInt(raw));
-  throw new Error(`attach: unexpected eth_chainId result: ${JSON.stringify(raw)}`);
+  throw new Error(
+    `attach: unexpected eth_chainId result: ${JSON.stringify(raw)}`
+  );
 }
 
 /**
@@ -550,7 +558,7 @@ function methodNameFromInput(
   raw: RawBuildInfo,
   sourcePath: string,
   contractName: string,
-  input: string | undefined,
+  input: string | undefined
 ): string {
   const inputHex = (input ?? '').replace(/^0x/, '');
   if (inputHex.length < 8) return 'fallback';
@@ -583,7 +591,7 @@ function methodNameFromInput(
  */
 async function attachResolver(
   args: LaunchArgs,
-  ctx?: ResolveContext,
+  ctx?: ResolveContext
 ): Promise<SolidityDebugSession> {
   const {jsonRpcUrl, txHash} = args;
   if (!jsonRpcUrl) throw new Error('attach: missing jsonRpcUrl');
@@ -597,7 +605,10 @@ async function attachResolver(
   });
 
   // 1. Fetch the tx context + trace envelope and classify the dialect.
-  const {dialect, envelope, txContext} = await fetchAttachContext(client, txHash);
+  const {dialect, envelope, txContext} = await fetchAttachContext(
+    client,
+    txHash
+  );
 
   // 2. The RAW trace response STRING (precision-safe) is what LaunchInputs wants:
   //    re-fetch it unparsed rather than re-stringifying the parsed envelope, so
@@ -625,14 +636,14 @@ async function attachResolver(
   //    build-info. Concurrent, with a per-address try/catch so an unverified /
   //    failing address is skipped (that frame just won't map to source).
   const repo = new SourcifyRepository(
-    args.sourcifyUrl !== undefined ? {baseUrl: args.sourcifyUrl} : {},
+    args.sourcifyUrl !== undefined ? {baseUrl: args.sourcifyUrl} : {}
   );
   const contractsByAddress: Record<
     string,
     {buildInfoJson: unknown; contractName?: string; sourcePath?: string}
   > = {};
   await Promise.all(
-    [...addresses].map(async (addr) => {
+    [...addresses].map(async addr => {
       try {
         const resolved = await repo.resolve(chainId, addr);
         if (resolved === undefined) return; // unverified — skip, non-fatal.
@@ -641,7 +652,7 @@ async function attachResolver(
       } catch {
         // A per-address Sourcify/recompile failure is non-fatal: skip it.
       }
-    }),
+    })
   );
 
   // 6. Entry contract = the tx's `to` (lowercased). It MUST be verified — the
@@ -650,20 +661,20 @@ async function attachResolver(
   const entry = contractsByAddress[entryAddr];
   if (entry === undefined) {
     throw new Error(
-      `attach: entry contract ${entryAddr} is not verified on Sourcify`,
+      `attach: entry contract ${entryAddr} is not verified on Sourcify`
     );
   }
   const entryCu = loadBuildInfo(entry.buildInfoJson);
   // Prefer the resolved name; else the sole deployable contract; else the first.
   const entryContract =
     (entry.contractName !== undefined
-      ? entryCu.contracts().find((c) => c.name === entry.contractName)
+      ? entryCu.contracts().find(c => c.name === entry.contractName)
       : undefined) ??
-    entryCu.contracts().find((c) => c.runtimeBytecode().length > 2) ??
+    entryCu.contracts().find(c => c.runtimeBytecode().length > 2) ??
     entryCu.contracts()[0];
   if (entryContract === undefined) {
     throw new Error(
-      `attach: entry build-info for ${entryAddr} declares no contracts`,
+      `attach: entry build-info for ${entryAddr} declares no contracts`
     );
   }
   const contractName = entryContract.name;
@@ -672,12 +683,12 @@ async function attachResolver(
     entry.buildInfoJson as RawBuildInfo,
     sourcePath,
     contractName,
-    txContext.input,
+    txContext.input
   );
 
   // 7. Assemble LaunchInputs and launch the session.
   const inputs: LaunchInputs = {
-    buildInfos: Object.values(contractsByAddress).map((c) => c.buildInfoJson),
+    buildInfos: Object.values(contractsByAddress).map(c => c.buildInfoJson),
     traceJson,
     sourcePath,
     contractName,
@@ -690,7 +701,7 @@ async function attachResolver(
   };
 
   ctx?.log(
-    `Resolved ${Object.keys(contractsByAddress).length} contract(s) via Sourcify.`,
+    `Resolved ${Object.keys(contractsByAddress).length} contract(s) via Sourcify.`
   );
   const session = new SolidityDebugSession();
   await session.launch(inputs);
@@ -716,12 +727,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   }
 
   // ── validate + normalize inputs ──────────────────────────────────────────
-  const {
-    contractName,
-    methodSignature,
-    jsonRpcUrl,
-    rpcNodeType,
-  } = args;
+  const {contractName, methodSignature, jsonRpcUrl, rpcNodeType} = args;
   if (!contractName) throw new Error('launch: missing contractName');
   if (!methodSignature) throw new Error('launch: missing methodSignature');
   if (!jsonRpcUrl) throw new Error('launch: missing jsonRpcUrl');
@@ -731,8 +737,8 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   }
 
   // ── read + parse the build-info(s) ───────────────────────────────────────
-  const rawJsons = paths.map((p) => fs.readFileSync(p, 'utf8'));
-  const buildInfos = rawJsons.map((s) => JSON.parse(s) as unknown);
+  const rawJsons = paths.map(p => fs.readFileSync(p, 'utf8'));
+  const buildInfos = rawJsons.map(s => JSON.parse(s) as unknown);
 
   // Find the CU + contract that declares `contractName`, and remember which raw
   // build-info it came from (for the selector lookup). Contract names are NOT
@@ -751,7 +757,8 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
     for (const found of cu.contracts()) {
       if (found.name !== contractName) continue;
       const inFile =
-        launchedFile !== undefined && launchedFile.endsWith('/' + found.sourcePath);
+        launchedFile !== undefined &&
+        launchedFile.endsWith('/' + found.sourcePath);
       if (contract === undefined || inFile) {
         contract = found;
         rawForContract = buildInfos[i] as RawBuildInfo;
@@ -761,7 +768,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   }
   if (contract === undefined || rawForContract === undefined) {
     throw new Error(
-      `launch: contract "${contractName}" not found in the provided build-info(s)`,
+      `launch: contract "${contractName}" not found in the provided build-info(s)`
     );
   }
   const sourcePath = contract.sourcePath;
@@ -769,7 +776,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   const creationBytecode = contract.initBytecode();
   if (creationBytecode.length <= 2) {
     throw new Error(
-      `launch: contract "${contractName}" has no creation bytecode (abstract/interface?)`,
+      `launch: contract "${contractName}" has no creation bytecode (abstract/interface?)`
     );
   }
 
@@ -778,11 +785,11 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
     rawForContract,
     sourcePath,
     contractName,
-    methodSignature,
+    methodSignature
   );
   if (selector === undefined) {
     throw new Error(
-      `launch: method "${methodSignature}" not found in ${contractName}'s methodIdentifiers`,
+      `launch: method "${methodSignature}" not found in ${contractName}'s methodIdentifiers`
     );
   }
   const payloadHex = (args.payload ?? '0x').replace(/^0x/, '');
@@ -792,7 +799,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   const dialect: 'kontrol' | 'geth' =
     rpcNodeType === 'kontrol-node' ? 'kontrol' : 'geth';
   ctx?.log(
-    `Backend: ${rpcNodeType} (${dialect} trace dialect) at ${jsonRpcUrl}`,
+    `Backend: ${rpcNodeType} (${dialect} trace dialect) at ${jsonRpcUrl}`
   );
 
   // ── deploy + call + trace ────────────────────────────────────────────────
@@ -830,7 +837,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
         `Its runtime bytecode is ${runtimeBytes} bytes (init ${initBytes} bytes); ` +
         'depositing that much code can exceed the transaction gas limit. If you ' +
         'are on a node that enforces the 24576-byte contract-size limit, raise ' +
-        'or disable it (anvil: --disable-code-size-limit).',
+        'or disable it (anvil: --disable-code-size-limit).'
     );
   }
 
@@ -861,7 +868,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
     rawForContract,
     sourcePath,
     contractName,
-    'setUp()',
+    'setUp()'
   );
   if (setUpSelector !== undefined && methodSignature !== 'setUp()') {
     ctx?.log('Running setUp() …');
@@ -884,7 +891,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
         '⚠ setUp() reverted (status 0x0): the test fixture is only partially ' +
           'initialized, so the debugged method may revert early or read zeroed ' +
           'state. This often means the node does not support a cheatcode or ' +
-          'deployment the setUp relies on.',
+          'deployment the setUp relies on.'
       );
     }
   }
@@ -933,7 +940,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
       dialect,
       buildInfos,
       {to: contractAddress, from: DEFAULT_ACCOUNT, input: calldata},
-      preState,
+      preState
     );
 
   // Seed pre-trace storage: a delta-encoded trace omits slots that an earlier tx
@@ -959,20 +966,20 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
       const seedTargets = new Map<string, Contract>();
       seedTargets.set(contractAddress.toLowerCase(), contract);
       for (const [addr, {buildInfoJson, contractName: cn}] of Object.entries(
-        contractsByAddress,
+        contractsByAddress
       )) {
         const key = addr.toLowerCase();
         if (cn === undefined || seedTargets.has(key)) continue;
         const found = loadBuildInfo(buildInfoJson)
           .contracts()
-          .find((c) => c.name === cn);
+          .find(c => c.name === cn);
         if (found !== undefined) seedTargets.set(key, found);
       }
       const blockTag = `0x${(block - 1n).toString(16)}`;
       const seed = await readInitialStorage(
         client,
         [...seedTargets].map(([address, c]) => ({address, contract: c})),
-        blockTag,
+        blockTag
       );
       if (Object.keys(seed).length > 0) initialStorage = seed;
     }
@@ -991,7 +998,13 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
     ...(initialStorage !== undefined ? {initialStorage} : {}),
     // geth traces carry no per-step tx context — supply it explicitly.
     ...(dialect === 'geth'
-      ? {txContext: {to: contractAddress, from: DEFAULT_ACCOUNT, input: calldata}}
+      ? {
+          txContext: {
+            to: contractAddress,
+            from: DEFAULT_ACCOUNT,
+            input: calldata,
+          },
+        }
       : {}),
   };
 
@@ -1011,7 +1024,7 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
  *   live deploy → call → trace flow); inject a different resolver for tests.
  */
 export function createDispatcher(
-  resolve: SessionResolver = productionResolver,
+  resolve: SessionResolver = productionResolver
 ): DapDispatcher {
   return new DapDispatcher(resolve);
 }
@@ -1055,6 +1068,9 @@ async function main(): Promise<void> {
   // A parent (the extension in tcp mode) reads this line to learn the port.
   console.log(`simbolik-debug-server listening port=${handle.port}`);
   const shutdown = () => {
+    // A signal-driven CLI shutdown must end the process even if some handle
+    // (a pending socket, a timer) would keep the event loop alive.
+    // eslint-disable-next-line n/no-process-exit
     void handle.close().finally(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);
@@ -1069,8 +1085,8 @@ const isMainModule =
   import.meta.url === new URL(`file://${process.argv[1]}`).href;
 
 if (isMainModule) {
-  main().catch((err) => {
+  main().catch(err => {
     console.error(err);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }
