@@ -2461,8 +2461,8 @@ export class SolidityDebugSession {
    * frame's own level ends the invocation; a DEEPER one is a sub-call, skipped) and
    * the frame's address — for the most recent step where `variablesAt` gives `name`
    * a concrete SCALAR pointer (value type or memory string/bytes), then decodes it
-   * against THAT step's reconstructed machine state. The value is marked stale
-   * (`… (last known)` + read-only). Returns `undefined` if the variable is never
+   * against THAT step's reconstructed machine state, rendered like a live value.
+   * Returns `undefined` if the variable is never
    * located within the invocation, or is a COMPLEX reference type (struct/array —
    * shown only while live). NEVER reads the current step's (reused) slot, so a
    * value shown is always one the variable genuinely held.
@@ -2534,14 +2534,9 @@ export class SolidityDebugSession {
       const field = await readPointerValue(v.pointer, ms);
       if (this.#isAddressType(v.solcType)) {
         // Same rendering as a live address (contract label + expandable state),
-        // only marked stale — so a value does not change presentation merely
-        // because its slot was freed (viaIR) while the variable stayed in scope.
-        const live = this.#renderContractAddress(v.name, field, v.typeLabel);
-        return {
-          ...live,
-          value: `${live.value} (last known)`,
-          presentationHint: {attributes: ['readOnly']},
-        };
+        // so a value does not change presentation merely because its slot was
+        // freed (viaIR) while the variable stayed in scope.
+        return this.#renderContractAddress(v.name, field, v.typeLabel);
       }
       const {value, type} = this.#decodeField(
         cu,
@@ -2634,19 +2629,13 @@ export class SolidityDebugSession {
     return this.#compoundWrites.get(stmtId)?.has(declId) ? 'compound' : 'plain';
   }
 
-  /** A read-only DAP variable whose value is flagged as a stale last-known value. */
+  /** A last-known scalar value, rendered exactly like a live one. */
   #staleVariable(
     name: string,
     value: string,
     type: string | undefined,
   ): DebugProtocol.Variable {
-    return {
-      name,
-      value: `${value} (last known)`,
-      type,
-      variablesReference: 0,
-      presentationHint: {attributes: ['readOnly']},
-    };
+    return {name, value, type, variablesReference: 0};
   }
 
   /**

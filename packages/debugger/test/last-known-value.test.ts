@@ -1,16 +1,14 @@
 /**
  * Last-known-value retention: a value-type local that is still in lexical scope
  * but has no live location (its stack slot was freed/reused after its last use —
- * common under viaIR) is shown with its LAST KNOWN value, marked stale, rather
- * than disappearing.
+ * common under viaIR) is shown with its LAST KNOWN value rather than
+ * disappearing.
  *
  * Soundness contract (what this pins):
  *   - the stale value is the one the variable GENUINELY held — decoded at the most
  *     recent earlier step of the SAME frame invocation where it was located, never
  *     read from the current (reused) slot; so it equals the value seen while live;
- *   - it is clearly marked (`… (last known)`, read-only) so it is not mistaken for
- *     a live value;
- *   - while the variable IS live, no marker is shown.
+ *   - it is rendered exactly like a live value (no marker, not read-only).
  *
  * Uses the `InheritedUdvt.run()` viaIR trace: `TokenBase.setupTokens` has
  *   line 42  Token _a = mint(0x11);
@@ -48,16 +46,15 @@ function toLiveUse(s: SolidityDebugSession): void {
 }
 
 describe('last-known value for a freed-but-in-scope local (viaIR)', () => {
-  it('shows `_a`/`_b` live (no stale marker) at their use', async () => {
+  it('shows `_a`/`_b` live at their use', async () => {
     const s = await launched();
     toLiveUse(s);
     const live = await locals(s);
     expect(BigInt(live.get('_a')!.value)).toBe(0x12n);
     expect(BigInt(live.get('_b')!.value)).toBe(0x23n);
-    expect(live.get('_a')!.value).not.toMatch(/last known/);
   });
 
-  it('shows them as `(last known)` after their last use, with the same values', async () => {
+  it('shows them after their last use, with the same values, unmarked', async () => {
     const s = await launched();
     toLiveUse(s);
     s.stepIn(); // into order(...)
@@ -69,11 +66,11 @@ describe('last-known value for a freed-but-in-scope local (viaIR)', () => {
     const b = after.get('_b');
     expect(a).toBeDefined();
     expect(b).toBeDefined();
-    // Marked stale + read-only.
-    expect(a!.value).toContain('(last known)');
-    expect(a!.presentationHint?.attributes).toContain('readOnly');
+    // Rendered like any live value: no marker, no read-only hint.
+    expect(a!.value).not.toMatch(/last known/);
+    expect(a!.presentationHint).toBeUndefined();
     // SOUND: the stale value is the very value held while live (not a reused slot).
-    expect(BigInt(a!.value.replace(/\s*\(last known\)$/, ''))).toBe(0x12n);
-    expect(BigInt(b!.value.replace(/\s*\(last known\)$/, ''))).toBe(0x23n);
+    expect(BigInt(a!.value)).toBe(0x12n);
+    expect(BigInt(b!.value)).toBe(0x23n);
   });
 });
