@@ -1,28 +1,27 @@
 # Debugger test coverage matrix (viaIR × legacy)
 
-This suite must give **excellent UX on both compilation pipelines** — solc's classic
-("legacy") codegen and the Yul `--via-ir` pipeline. The two produce very different
-stack layouts and statement orderings, and the debugger's variable-location and
-stepping logic has to handle both. This file is the living map of which scenario is
-proven on which pipeline, so a coverage gap is visible rather than implicit.
+The debugger has to work on both of solc's compilation pipelines: the classic
+("legacy") codegen and the Yul `--via-ir` pipeline. They produce very different stack
+layouts and statement orderings, so variable location and stepping must handle both.
+This file maps each scenario to the pipelines it is tested on, so coverage gaps are
+visible.
 
 ## How the suite is built
 
 - **Shared harness:** [`support/harness.ts`](./support/harness.ts) provides fixture
   readers, `launch(spec)` / `breakAt(spec, line)`, `stepToLine`, and scope/variable
   inspection (`locals`, `children`, …). A `Spec` names the build-info, trace and meta
-  fixtures explicitly. Tests contain assertions, not plumbing.
+  fixtures.
 - **Dual-mode:** `eachMode({viair, legacy}, (mode, spec) => …)` runs one shared test
   body against both pipeline fixtures. Used where the code path differs by pipeline.
-- **Fixtures:** recorded live on kontrol-node (see the `kontrol-node-live` memory and
-  `scratchpad/record-dualmode.mjs`). Build-infos live in `packages/solc/test/fixtures`;
-  traces + metas in `./fixtures`. The new dual-mode legacy fixtures share one
-  whole-project build-info, `newfixtures-legacy-build-info.json`.
+- **Fixtures:** traces recorded on kontrol-node. Build-infos live in
+  `packages/solc/test/fixtures`; traces and metas in `./fixtures`. The dual-mode legacy
+  fixtures share one whole-project build-info, `newfixtures-legacy-build-info.json`.
 
 ## Why some scenarios are intentionally single-mode
 
-Not every scenario needs both pipelines. Three code paths are **codegen-agnostic**, so a
-second mode would test the same code twice:
+Some code paths don't depend on the codegen, so a second mode would test the same code
+twice:
 
 - **Storage** references, mappings, fixed storage arrays — slot math from the storage
   layout, independent of how the function body was compiled.
@@ -31,9 +30,9 @@ second mode would test the same code twice:
 
 And two scenarios are pipeline-*specific* by nature:
 
-- **Out-of-order straight-line setup artifacts** are a `--via-ir` phenomenon. The viaIR
-  fixture pins the fix; the legacy fixture (`stepstress`) pins that the heuristic does
-  **not misfire** on classic codegen (the heuristic is gated to viaIR in `stepping.ts`).
+- **Out-of-order straight-line setup artifacts** only occur with `--via-ir`. The viaIR
+  fixture covers their suppression; the legacy fixture (`stepstress`) checks that the
+  heuristic does not fire on classic codegen (it is gated to viaIR in `stepping.ts`).
 - **Last-known-value** retention is exercised under viaIR (where late slot reuse makes
   the freed-but-in-scope case natural); the feature code itself is codegen-agnostic.
 
@@ -76,7 +75,7 @@ Legend: ✅ covered · ➖ intentionally not covered (reason in the notes above)
 ¹ The artifact is viaIR-only; `stepstress-local.test.ts` (legacy) asserts the
 suppression heuristic does not fire on classic codegen (`stepstress` fixture).
 
-## Dual-mode tests (added for symmetry)
+## Dual-mode tests
 
 - `memrefs-local.test.ts` — memory `uint256[]` / `string` / `uint256[3]`, both modes.
 - `bytesarray-local.test.ts` — `bytes[]`, both modes.
@@ -84,12 +83,11 @@ suppression heuristic does not fire on classic codegen (`stepstress` fixture).
   a legacy value-at-line-45 block.
 - `stepstress-local.test.ts` — legacy stepping is undisturbed by the viaIR heuristics.
 
-## Known limitation (see `simbolik-ts-rewrite` memory)
+## Known limitation
 
 Reference-type locals fall back to the frame-relative slot model when the per-pc
-stack-provenance analyzer has no evidence. This fallback is **load-bearing under viaIR**
-(late-materialised memory structs, fixed-size memory arrays have no DUP/SWAP-anchored
-read) and is intentionally *not* gated off there. Its theoretical unsoundness under
-viaIR — a reused slot could hold an unrelated word, yielding a garbage memory offset —
-is a best-effort limitation; the sound fix is extending stack-provenance to reference
-handles, tracked as a follow-up.
+stack-provenance analysis has no evidence. Under viaIR this fallback is needed for
+late-materialized memory structs and fixed-size memory arrays, which have no DUP/SWAP
+read to anchor on, so it is deliberately not disabled there. It is best-effort: a
+reused slot could hold an unrelated word and yield a garbage memory offset. The sound
+fix is to extend stack provenance to reference handles.

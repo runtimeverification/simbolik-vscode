@@ -12,7 +12,7 @@
  *  - `FrameReader` buffers arbitrary incoming chunks, splits on the header
  *    terminator `\r\n\r\n`, reads `Content-Length`, waits until the whole body
  *    has arrived, and yields one parsed JSON message at a time — so it is robust
- *    to BOTH several frames arriving in one packet and one frame split across
+ *    to both several frames arriving in one packet and one frame split across
  *    packets, which are exactly the two server-side behaviours tests 7a/7b probe.
  */
 import * as net from 'node:net';
@@ -31,9 +31,7 @@ import {
 
 import {toLaunchInputs, type Spec} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures + fake SessionResolver (mirrors dispatcher.test.ts)
-// ---------------------------------------------------------------------------
+// ## Fixtures + fake SessionResolver
 
 /** The Counter fixture bundle + entry coordinates the resolver launches. */
 const counterSpec: Spec = {
@@ -56,9 +54,7 @@ const fakeResolver: SessionResolver = async () => {
   return session;
 };
 
-// ---------------------------------------------------------------------------
-// Client-side DAP framer (independent of the server's implementation)
-// ---------------------------------------------------------------------------
+// ## Client-side DAP framer (independent of the server's implementation)
 
 type Msg = Record<string, unknown>;
 
@@ -118,9 +114,7 @@ class FrameReader {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Server + socket lifecycle (no leaked ports/sockets between tests)
-// ---------------------------------------------------------------------------
+// ## Server + socket lifecycle (no leaked ports/sockets between tests)
 
 let handle: DapServerHandle;
 const openSockets: net.Socket[] = [];
@@ -154,18 +148,14 @@ function req(seq: number, command: string, args?: unknown): Msg {
 const isResponse = (m: Msg): boolean => m['type'] === 'response';
 const isEvent = (m: Msg): boolean => m['type'] === 'event';
 
-// ---------------------------------------------------------------------------
-// 1. Port assignment
-// ---------------------------------------------------------------------------
+// ## 1. Port assignment
 
 describe('startDapServer — lifecycle', () => {
   it('assigns a real OS port when passed port 0', () => {
     expect(handle.port).toBeGreaterThan(0);
   });
 
-  // -------------------------------------------------------------------------
-  // 6. close() resolves and the server stops accepting connections
-  // -------------------------------------------------------------------------
+  // ## 6. close() resolves and the server stops accepting connections
   it('close() resolves and the server then refuses new connections', async () => {
     const {port} = handle;
     await expect(handle.close()).resolves.toBeUndefined();
@@ -184,15 +174,13 @@ describe('startDapServer — lifecycle', () => {
   }, 10000);
 });
 
-// ---------------------------------------------------------------------------
-// 3–5. Framed handshake over TCP: initialize → launch → disconnect
-// ---------------------------------------------------------------------------
+// ## 3–5. Framed handshake over TCP: initialize → launch → disconnect
 
 describe('startDapServer — framed DAP handshake', () => {
   it('answers initialize, launch and disconnect with framed responses + events', async () => {
     const {socket, reader} = await connect();
 
-    // --- 3. initialize (seq 1) → response(caps) then event 'initialized' ----
+    // ## 3. initialize (seq 1) → response(caps) then event 'initialized'
     socket.write(encodeFrame(req(1, 'initialize', {adapterID: 'simbolik'})));
     const [initResp, initEvt] = await reader.take(2);
     expect(isResponse(initResp!)).toBe(true);
@@ -206,7 +194,7 @@ describe('startDapServer — framed DAP handshake', () => {
     expect(isEvent(initEvt!)).toBe(true);
     expect(initEvt!['event']).toBe('initialized');
 
-    // --- 4. launch (seq 2) → response(success) then event 'stopped' entry ---
+    // ## 4. launch (seq 2) → response(success) then event 'stopped' entry
     socket.write(encodeFrame(req(2, 'launch', {})));
     const [launchResp, stoppedEvt] = await reader.take(2);
     expect(isResponse(launchResp!)).toBe(true);
@@ -219,7 +207,7 @@ describe('startDapServer — framed DAP handshake', () => {
       'entry',
     );
 
-    // --- 5. disconnect (seq 3) → response then event 'terminated' -----------
+    // ## 5. disconnect (seq 3) → response then event 'terminated'
     socket.write(encodeFrame(req(3, 'disconnect', {})));
     const [discResp, termEvt] = await reader.take(2);
     expect(isResponse(discResp!)).toBe(true);
@@ -231,12 +219,10 @@ describe('startDapServer — framed DAP handshake', () => {
   }, 10000);
 });
 
-// ---------------------------------------------------------------------------
-// 7. Frame parser robustness (buffer boundaries)
-// ---------------------------------------------------------------------------
+// ## 7. Frame parser robustness (buffer boundaries)
 
 describe('startDapServer — frame parser robustness', () => {
-  // 7a. MULTIPLE FRAMES IN ONE PACKET: two requests concatenated into a single
+  // 7a. Multiple frames in one packet: two requests concatenated into a single
   // socket.write must both be parsed and answered — proving the server's parser
   // loops over the buffer rather than assuming one frame per chunk.
   it('parses two concatenated frames delivered in a single write', async () => {
@@ -246,7 +232,7 @@ describe('startDapServer — frame parser robustness', () => {
       encodeFrame(req(1, 'initialize', {adapterID: 'simbolik'})),
       encodeFrame(req(2, 'launch', {})),
     ]);
-    socket.write(packet); // both frames in ONE TCP write
+    socket.write(packet); // both frames in one TCP write
 
     // initialize → response + 'initialized'; launch → response + 'stopped'.
     const out = await reader.take(4);
@@ -264,7 +250,7 @@ describe('startDapServer — frame parser robustness', () => {
     ).toBe(true);
   }, 10000);
 
-  // 7b. ONE FRAME SPLIT ACROSS WRITES: header bytes in one write, body bytes in
+  // 7b. One frame split across writes: header bytes in one write, body bytes in
   // a later write. The server must buffer the partial frame and only dispatch
   // once the whole body has arrived — proving it never parses a half-read frame.
   it('parses a single frame split across two writes (header, then body)', async () => {
@@ -275,7 +261,7 @@ describe('startDapServer — frame parser robustness', () => {
     const headerPart = frame.subarray(0, sep);
     const bodyPart = frame.subarray(sep);
 
-    socket.write(headerPart); // header only — server must NOT answer yet
+    socket.write(headerPart); // header only — server must not answer yet
     // Give the header its own event-loop turn so it lands in a separate packet.
     await new Promise((r) => setImmediate(r));
     socket.write(bodyPart); // now the body completes the frame

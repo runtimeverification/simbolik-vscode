@@ -1,14 +1,14 @@
 /**
- * `parseStateDump` — normalize a state-dump result from BOTH wire formats
+ * `parseStateDump` — normalize a state-dump result from both wire formats
  * (kontrol-node `kontrol_dumpState` raw JSON; anvil `anvil_dumpState` gzip-hex)
  * into one snapshot.
  *
- * The two formats were captured empirically (2026-09-03) from live nodes:
- *   - kontrol-node: raw JSON object; `nonce` a NUMBER; storage VALUES minimal hex;
- *     storage KEYS full 32-byte hex (mapping slots included).
+ * The two formats, as emitted by live nodes:
+ *   - kontrol-node: raw JSON object; `nonce` a number; storage values minimal
+ *     hex; storage keys full 32-byte hex (mapping slots included).
  *   - anvil 1.7.1: a `0x`-prefixed gzip-compressed hex string of the same JSON;
- *     `nonce` a STRING; storage VALUES 32-byte PADDED hex; KEYS full 32-byte hex.
- * Both must flatten to identical output: lowercase address, MINIMAL-hex storage
+ *     `nonce` a string; storage values 32-byte padded hex; keys full 32-byte hex.
+ * Both must flatten to identical output: lowercase address, minimal-hex storage
  * keys+values, zero slots dropped.
  */
 import {gzipSync} from 'node:zlib';
@@ -53,7 +53,7 @@ function kontrolDump(): unknown {
   };
 }
 
-/** The anvil shape: gzip-hex string, STRING nonce, 32-byte PADDED storage values. */
+/** The anvil shape: gzip-hex string, string nonce, 32-byte padded storage values. */
 function anvilDump(): string {
   const pad = (h: string): string =>
     `0x${BigInt(h).toString(16).padStart(64, '0')}`;
@@ -89,7 +89,7 @@ describe('parseStateDump — kontrol-node raw-JSON format', () => {
     expect(acct).toBeDefined();
     expect(acct!.code).toBe('0x6080604052');
     expect(acct!.nonce).toBe(1);
-    // Storage keys AND values normalized to minimal hex; zero slot omitted.
+    // Storage keys and values normalized to minimal hex; zero slot omitted.
     expect(acct!.storage).toEqual({
       '0x0': '0x2a',
       [`0x${BigInt(SLOT_MAP).toString(16)}`]: '0xc9f2c9c9a10ab402461600000',
@@ -102,7 +102,7 @@ describe('parseStateDump — kontrol-node raw-JSON format', () => {
 });
 
 describe('parseStateDump — anvil gzip-hex format', () => {
-  it('gunzips, then normalizes to the SAME output as the kontrol format', () => {
+  it('gunzips, then normalizes to the same output as the kontrol format', () => {
     const fromAnvil = parseStateDump(anvilDump());
     const fromKontrol = parseStateDump(kontrolDump());
     expect(fromAnvil).toEqual(fromKontrol);

@@ -103,9 +103,9 @@ export function disassembleView(
 }
 
 /**
- * The RAW bytecode a FOREIGN address executed, disassembled (cached by
+ * The raw bytecode a foreign address executed, disassembled (cached by
  * address). A foreign frame has no compilation unit, so there is no contract
- * image — we take the code the node executed there. Empty when the address
+ * image — use the code the node executed there. Empty when the address
  * never appears in the trace.
  */
 function foreignDisassembly(

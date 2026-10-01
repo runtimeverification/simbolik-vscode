@@ -1,5 +1,5 @@
 /**
- * Find and sanity-check an execution node's binary BEFORE spawning it, so a
+ * Find and sanity-check an execution node's binary before spawning it, so a
  * missing or broken install is reported with what was tried and how to fix it,
  * instead of surfacing later as an opaque spawn error or readiness timeout.
  */
@@ -22,7 +22,7 @@ export interface LocateOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   /**
-   * Directories searched AFTER `PATH` for a bare command name. An editor
+   * Directories searched after `PATH` for a bare command name. An editor
    * launched from a desktop environment (e.g. the macOS Dock) often does not
    * inherit the login shell's `PATH`, so a binary the user can run from a
    * terminal may be missing from the extension host's `PATH`.

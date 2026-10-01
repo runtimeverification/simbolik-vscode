@@ -1,7 +1,7 @@
 /**
  * DAP TCP server hosting a per-connection {@link DapDispatcher}.
  *
- * Speaks the real `Content-Length: <n>\r\n\r\n<json>` wire format (LSP/DAP over a
+ * Speaks the `Content-Length: <n>\r\n\r\n<json>` wire format (LSP/DAP over a
  * socket). Each connection gets its own {@link DapDispatcher} (so session state
  * is per-client) and its own incremental frame parser that is robust to both
  * several frames arriving in one chunk and one frame split across chunks. Frames

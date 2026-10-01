@@ -26,9 +26,9 @@ export interface ResolveContext {
 }
 
 /**
- * Resolves DAP launch/attach args into a READY (already-launched) session
+ * Resolves DAP launch/attach args into a ready (already-launched) session
  * (production: run the engine; tests: build from a recorded fixture). The
- * dispatcher does NOT call `launch()` itself — the resolver returns a session
+ * dispatcher does not call `launch()` itself — the resolver returns a session
  * that has already queued its entry `stopped` event. The optional {@link
  * ResolveContext} lets the resolver stream diagnostics to the debug console.
  */
@@ -71,8 +71,8 @@ export class DapDispatcher {
   /** Cursor into the current session's append-only `events` array. */
   #cursor = 0;
   /**
-   * Optional sink for messages emitted OUTSIDE a `handle()` return value — used
-   * to STREAM `output` events while a long-running `launch` is still resolving
+   * Optional sink for messages emitted outside a `handle()` return value — used
+   * to stream `output` events while a long-running `launch` is still resolving
    * (deploy → call → trace), so diagnostics appear live instead of arriving in
    * one batch when the session finally stops. Wired by each transport (the
    * inline adapter's event emitter / the TCP socket). When unset, launch
@@ -150,10 +150,10 @@ export class DapDispatcher {
       case 'launch':
       case 'attach': {
         // Diagnostics the resolver logs (chosen backend, RPC traffic) become
-        // `output` events. With a streaming sink wired they are emitted LIVE as
-        // they happen — so the console fills DURING the deploy → call → trace,
-        // not all at once when the session stops. Without a sink (e.g. unit
-        // tests) they fall back to being batched ahead of the response.
+        // `output` events. With a streaming sink wired they are emitted as they
+        // happen, so the console fills during the deploy → call → trace rather
+        // than all at once when the session stops. Without a sink (e.g. unit
+        // tests) they are batched ahead of the response.
         const outputs: DebugProtocol.Event[] = [];
         const ctx: ResolveContext = {
           log: (output, category = 'console') => {
@@ -263,7 +263,7 @@ export class DapDispatcher {
     }
   }
 
-  // ─── outgoing message builders ─────────────────────────────────────────────
+  // ## outgoing message builders
 
   /** Build a success response for `request` carrying `body`. */
   #response(

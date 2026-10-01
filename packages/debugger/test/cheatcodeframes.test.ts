@@ -1,29 +1,22 @@
 /**
- * Sub-feature 4a — Cheatcode LABELED FRAME (behavioral).
+ * A cheatcode call gets a labelled synthetic frame.
  *
- * When the CURRENT step is a cheatcode CALL (a CALL to the cheatcode address
- * 0x7109709E…), `session.stackTrace()` should PREPEND a synthetic TOP frame with
- * a decoded name (e.g. `vm.startPrank(0xdead…beef)`) positioned at the cheatcode
- * call site's source line. The frame is ADDITIVE — the underlying contract frame
- * (`run`) is preserved beneath it — and non-descendable (no Solidity locals of
- * its own; not asserted here).
+ * When the current step is a cheatcode CALL (a CALL to the cheatcode address
+ * 0x7109709E…), `session.stackTrace()` prepends a synthetic top frame with a
+ * decoded name (e.g. `vm.startPrank(0xdead…beef)`) positioned at the cheatcode
+ * call site's source line. The frame is additive (the underlying contract frame
+ * `run` is preserved beneath it) and non-descendable (no Solidity locals of its
+ * own; not asserted here).
  *
- * ── CONFIRMED GROUND TRUTH (observed by running the real session; the trace is a
- *    frozen recording so every index/step-count below is deterministic) ───────
- *   Fixture: prank-run-trace.raw.json (kontrol, 933 steps), Prank.run(deadbeef…).
- *   - launch() opens PAUSED at step 128, source line 33 (`Target target = new
+ * Ground truth (prank-run-trace.raw.json, kontrol, 933 steps,
+ * Prank.run(deadbeef…); every index/step-count below is deterministic):
+ *   - launch() opens paused at step 128, source line 33 (`Target target = new
  *     Target();`), single frame `run`.
  *   - startPrank cheatcode CALL is step 574 (op=CALL, depth 1), mapped to
- *     Prank.sol line 37 (`vm.startPrank(who);`). REACHED deterministically:
- *     breakpoint on line 37 + continue() → step 479, then stepInstruction() until
+ *     Prank.sol line 37 (`vm.startPrank(who);`), reached by a breakpoint on
+ *     line 37 + continue() → step 479, then stepInstruction() until
  *     currentStepIndex === 574 (95 instruction steps).
  *   - stopPrank cheatcode CALL is step 917 (line 39) — not exercised here.
- *
- * These tests MUST FAIL today: at step 574 the current stackTrace() is a SINGLE
- * frame `[run@37]` (no cheatcode frame is synthesized yet), so the "top frame
- * contains startPrank" and "length ≥ 2" assertions fail for the RIGHT reason.
- * The negative/regression test (no cheatcode frame at a non-cheatcode step)
- * already passes today and must NOT regress.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -71,23 +64,23 @@ describe('cheatcode frame — synthetic top frame at the cheatcode CALL', () => 
 
     const {stackFrames} = session.stackTrace();
 
-    // The synthetic cheatcode frame is ADDITIVE: run is preserved beneath it.
+    // The synthetic cheatcode frame is additive: run is preserved beneath it.
     expect(stackFrames.length).toBeGreaterThanOrEqual(2);
 
-    // [0] = the cheatcode frame. Display format is the implementer's to finalize
-    // (e.g. `vm.startPrank(0xdead…beef)`) — assert on robust substrings only.
+    // [0] = the cheatcode frame (e.g. `vm.startPrank(0xdead…beef)`); assert on
+    // robust substrings only.
     const top = stackFrames[0]!;
     expect(top.name).toContain('startPrank');
     expect(top.name).toContain('0xdead'); // the pranked address prefix
     expect(top.line).toBe(START_PRANK_LINE);
     expect(top.source?.name).toBe('Prank.sol');
 
-    // The frame BELOW the cheatcode frame is the real `run` frame.
+    // The frame below the cheatcode frame is the real `run` frame.
     const below = stackFrames[1]!;
     expect(below.name).toContain('run');
   });
 
-  it('NEGATIVE: no cheatcode frame at a non-cheatcode step (right after launch)', async () => {
+  it('adds no cheatcode frame at a non-cheatcode step (right after launch)', async () => {
     const session = await launch(spec);
     // Launch pauses at step 128 (line 33) — an ordinary statement, not a
     // cheatcode CALL. The top frame must be the real `run` frame.

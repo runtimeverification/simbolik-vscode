@@ -1,7 +1,7 @@
 /**
  * geth/anvil trace factory — lift a generic Ethereum node's
  * `debug_traceTransaction` output (the "geth" struct-logger dialect) into the
- * SAME positional `Step[]` model that `normalizeKontrolTrace` produces, so the
+ * same positional `Step[]` model that `normalizeKontrolTrace` produces, so the
  * whole downstream pipeline (StateCursor → ethdebug → variables/stepping) works
  * on either dialect unchanged.
  *
@@ -73,7 +73,7 @@ interface Frame {
 }
 
 /**
- * Classify a trace envelope's dialect by inspecting its FIRST structLog: the
+ * Classify a trace envelope's dialect by inspecting its first structLog: the
  * rich kontrol dialect carries `isInitCode`/`codeAddress` fields, the geth
  * dialect does not. Guards an empty/absent `structLogs` (a degenerate trace has
  * no first log to inspect) → 'geth', never throwing.
@@ -95,7 +95,7 @@ export function detectTraceDialect(envelope: unknown): 'kontrol' | 'geth' {
 }
 
 /**
- * Map each step index where a CREATE/CREATE2 frame BEGINS to the address that
+ * Map each step index where a CREATE/CREATE2 frame begins to the address that
  * frame ultimately deploys. The EVM pushes the new address onto the creator's
  * stack when the frame returns, so we read the creator's stack top on the step
  * where depth drops back to the creator. Mirrors the frame stack's push/pop by
@@ -114,9 +114,9 @@ function createdAddressByBeginStep(logs: GethStructLog[]): Map<number, bigint> {
     } else if (dCur < dPrev) {
       for (let p = 0; p < dPrev - dCur && open.length > 0; p++) {
         const begin = open.pop()!;
-        // Only the outermost-unwound frame lands back on THIS step; deeper pops
-        // in the same transition returned earlier — but geth drops depth by one
-        // per step, so `dPrev - dCur` is 1 in practice and `begin` is that frame.
+        // Only the outermost unwound frame lands back on this step; deeper pops
+        // in the same transition returned earlier. geth drops depth by one per
+        // step, so in practice `dPrev - dCur` is 1 and `begin` is that frame.
         if (begin >= 0) {
           const st = logs[i]!.stack ?? [];
           const topHex = st.length > 0 ? st[st.length - 1] : undefined;
@@ -141,7 +141,7 @@ function enteredFrame(
   caller: Frame,
   created: bigint | undefined,
 ): Frame {
-  // Callee is `stack[len-2]` (top-of-stack LAST). Guard a malformed stack (a
+  // Callee is `stack[len-2]` (top of stack last). Guard a malformed stack (a
   // call op with <2 items): fall back to best-effort.
   const prevStack = prev.stack ?? [];
   const calleeHex =
@@ -150,19 +150,18 @@ function enteredFrame(
 
   switch (prev.op) {
     case 'CALLCODE':
-      // Runs callee code on the CALLER's storage; msg.sender = caller code.
+      // Runs callee code on the caller's storage; msg.sender = caller code.
       return {code: callee, storage: caller.storage, sender: caller.code, initCode: false};
     case 'DELEGATECALL':
       // Runs callee code on caller storage, preserving the caller's sender.
       return {code: callee, storage: caller.storage, sender: caller.sender, initCode: false};
     case 'CREATE':
     case 'CREATE2':
-      // The running code is the constructor's INIT bytecode. Its address is
-      // NOT on the stack pre-execution, but the pre-pass recovered it from
-      // the frame's return. With the real created address, the debugger can
-      // identify the contract and resolve these steps against its INIT source
-      // map (step INTO constructors); `initCode` selects that init map. Fall
-      // back to the creator's address only if the return address is unknown.
+      // The running code is the constructor's init bytecode. Its address is
+      // not on the stack before execution; the pre-pass recovers it from the
+      // frame's return, so the debugger can identify the contract and resolve
+      // these steps against its init source map (`initCode` selects that map).
+      // Fall back to the creator's address only if the address is unknown.
       return {
         code: created ?? caller.code,
         storage: created ?? caller.storage,
@@ -180,7 +179,7 @@ function enteredFrame(
 }
 
 /**
- * Normalize a geth/anvil trace into a positional `Step[]`, in the SAME shape
+ * Normalize a geth/anvil trace into a positional `Step[]`, in the same shape
  * `normalizeKontrolTrace` yields. One Step per structLog; the tx context fills
  * in the fields geth omits per-step.
  */
@@ -195,19 +194,17 @@ export function normalizeGethTrace(
 
   const logs = (envelope as GethTrace).structLogs;
 
-  // ── Multi-frame reconstruction ──────────────────────────────────────────────
+  // ## Multi-frame reconstruction
   // The geth dialect has no per-step codeAddress. Rebuild the executing context
   // by driving a frame stack off actual `depth` transitions (a call to an
-  // EOA/precompile does NOT increase depth, so we key on depth, not the op alone).
-  // Seed frame 0 = the top-level tx frame; txOrigin is the seed `from` throughout.
-  // A depth-only-1 trace never pushes/pops → the top frame stays {to,to,from},
-  // making the single-frame output BYTE-IDENTICAL to the multi-frame-agnostic case.
+  // EOA/precompile does not increase depth, so we key on depth, not the op).
+  // Frame 0 is the top-level tx frame; txOrigin is the tx's `from` throughout.
+  // A depth-1-only trace never pushes or pops, so every step runs {to,to,from}.
 
   // Pre-pass: the address a CREATE/CREATE2 deploys is not known until the frame
-  // RETURNS (the EVM pushes it onto the creator's stack). Record, per step where
-  // a create frame BEGINS, that created address (read from the creator's stack
-  // top on the step where depth drops back). This lets us give constructor frames
-  // their real code address so their INIT code resolves to the created contract.
+  // returns (the EVM pushes it onto the creator's stack). Recording it per
+  // create-frame begin step gives constructor frames their real code address,
+  // so their init code resolves to the created contract.
   const createdAt = createdAddressByBeginStep(logs);
 
   const stack: Frame[] = [{code: to, storage: to, sender: from, initCode: false}];
@@ -217,9 +214,9 @@ export function normalizeGethTrace(
     const dPrev = index === 0 ? 1 : logs[index - 1]!.depth;
 
     if (dCur > dPrev) {
-      // Entered a call: the PREVIOUS log was the CALL-family op. The pushed frame
-      // applies STARTING AT this step; the CALL op itself (i-1) stayed in the
-      // caller frame.
+      // Entered a call: the previous log was the CALL-family op. The pushed frame
+      // applies from this step on; the CALL op itself (i-1) stays in the caller
+      // frame.
       stack.push(
         enteredFrame(logs[index - 1]!, stack[stack.length - 1]!, createdAt.get(index)),
       );
@@ -231,10 +228,10 @@ export function normalizeGethTrace(
 
     const top = stack[stack.length - 1]!;
 
-    // Storage: geth emits cumulative touched slots for the CURRENTLY-EXECUTING
+    // Storage: geth emits cumulative touched slots for the currently executing
     // contract as 32-byte-padded keys/values; minimalize both so `machineStateFor`'s
     // `'0x'+slot.asUint().toString(16)` lookup matches, and key the account under
-    // the TOP FRAME's storage address (NOT always ctx.to) so callee-frame storage
+    // the top frame's storage address (not always ctx.to) so callee-frame storage
     // is attributed to the callee.
     let storageChanges: Record<string, Record<string, Hex>> = {};
     if (log.storage !== undefined) {

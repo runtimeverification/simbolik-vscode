@@ -9,7 +9,7 @@ interface RawAstNode {
 /** Node types treated as "statements" by {@link closestStatement}. */
 function isStatement(nodeType: string): boolean {
   // Yul nodes are never statements of their own: they carry no AST id (every
-  // one reads as -1, shared across ALL assembly blocks) and viaIR maps assembly
+  // one reads as -1, shared across all assembly blocks) and viaIR maps assembly
   // only to the whole block, so the enclosing `InlineAssembly` is the statement.
   if (nodeType.startsWith('Yul')) return false;
   return (
@@ -202,8 +202,6 @@ export class AstNode {
    * The raw `referencedDeclaration` field of an `Identifier` (or `MemberAccess`)
    * node: the AST id of the declaration this reference resolves to (a
    * `VariableDeclaration`, `FunctionDefinition`, …), or `undefined` when absent.
-   * Used to recognise a stack-variable READ (an `Identifier` whose referent is a
-   * known param/local) during static stack-provenance analysis.
    */
   get referencedDeclaration(): number | undefined {
     const value = this.#raw.referencedDeclaration;
@@ -252,9 +250,9 @@ export class AstNode {
    * an AST node (has a `nodeType`), and every element of arrays of such nodes.
    */
   children(): readonly AstNode[] {
-    // Memoized: the raw AST is immutable, so the wrappers are too. Callers (e.g.
-    // findInnermostNode, run once per source-map entry by the frame-base anchor)
-    // otherwise re-allocate the whole path from the root on every lookup.
+    // Memoized: the raw AST is immutable, so the wrappers are too. Without
+    // this, hot callers such as findInnermostNode (run once per source-map
+    // entry) would re-allocate the whole path from the root on every lookup.
     if (this.#children !== undefined) return this.#children;
     const out: AstNode[] = [];
     for (const key of Object.keys(this.#raw)) {
@@ -356,10 +354,9 @@ export function closestFunction(node: AstNode): AstNode | undefined {
 }
 
 /**
- * Climb from `node` to the nearest enclosing `FunctionDefinition` OR
- * `ModifierDefinition` (inclusive). Mirrors {@link closestFunction} but also
- * matches a modifier body — used ONLY for modifier-frame detection + name
- * resolution; the function-only {@link closestFunction} contract is unchanged.
+ * Climb from `node` to the nearest enclosing `FunctionDefinition` or
+ * `ModifierDefinition` (inclusive). Like {@link closestFunction}, but also
+ * matches a modifier body; used for modifier-frame detection and naming.
  */
 export function closestFunctionOrModifier(
   node: AstNode,

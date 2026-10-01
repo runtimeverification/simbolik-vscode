@@ -1,17 +1,16 @@
 /**
- * Regression: a MEMORY STRUCT local must show its field values under viaIR.
+ * A memory struct local shows its field values under viaIR.
  *
- * Real trace of `MemStruct.run()` (viaIR), mirroring uniswap-v4-core
+ * Real trace of `MemStruct.run()` (viaIR), modelled on uniswap-v4-core
  * `Deployers.seedMoreLiquidity`'s `ModifyLiquidityParams memory params`:
  *   line 30  LiqParams memory params = LiqParams({ ... });
  *   line 37  return consume(params, 1);   // params read (last use)
  *
  * A memory struct local holds its memory offset in a stack slot; the debugger
  * reads the fields from memory through that slot. Under viaIR the slot is
- * scheduled per-instruction, so the legacy frame-relative slot model could not
- * find it and `params` showed NO value even while live and in scope. The per-pc
- * stack-provenance analyzer (already used for value types) now locates the
- * reference's stack slot too, so the struct's members decode.
+ * scheduled per-instruction, so the legacy frame-relative slot model cannot find
+ * it; the per-pc stack-provenance analyzer (also used for value types) locates
+ * the reference's stack slot, so the struct's members decode.
  *
  * Ground truth: params = {tickLower:-120, tickUpper:120, liquidityDelta:1000,
  * salt:0x…07}. Stepping into `run` and over the constructor lands on line 37 with

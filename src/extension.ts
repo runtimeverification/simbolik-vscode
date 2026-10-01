@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory)
   );
 
-  // Check the execution node's install BEFORE a launch session exists: on a
+  // Check the execution node's install before a launch session exists: on a
   // problem, `checkSetup` shows it with fix-it buttons, and returning
   // `undefined` cancels the launch without a second, generic error.
   context.subscriptions.push(

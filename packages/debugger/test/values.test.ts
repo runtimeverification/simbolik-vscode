@@ -1,8 +1,8 @@
 /**
- * Decoder unit tests for the cases the single recorded trace CANNOT
+ * Decoder unit tests for the cases the single recorded trace cannot
  * express. The `Vars.setAll` fixture pins only full-width value types
  * (`int256`, `bytes32`) and an all-value-type signature, so these tests cover
- * the NARROW widths and the calldata-word normalization directly:
+ * the narrow widths and the calldata-word normalization directly:
  *   - two's complement across int8/int16/int128/int256 incl. boundaries;
  *   - reducing a 32-byte ABI word to the type's own bytes (fieldFromAbiWord),
  *     which is where a narrow signed / bytesN calldata param would otherwise

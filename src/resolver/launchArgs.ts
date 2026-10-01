@@ -31,9 +31,9 @@ export interface LaunchArgs {
 /**
  * Normalize a `buildInfoFiles` entry to a filesystem path. Handles a plain
  * string path, a `file://` URL string, a `vscode.Uri` instance (`.fsPath`), and
- * the URI's serialized JSON form (`{fsPath}` / `{path}` / `{external}`). We must
- * NOT import `vscode` here (this module is bundled ESM and also spawned as a
- * standalone node process), so the URI is read purely by duck-typing.
+ * the URI's serialized JSON form (`{fsPath}` / `{path}` / `{external}`). This
+ * module also runs in the standalone server process, so it cannot import
+ * `vscode` and reads the URI by duck-typing.
  */
 export function toFsPath(entry: unknown): string {
   if (typeof entry === 'string') {
@@ -65,7 +65,7 @@ export function toPosixFsPath(entry: unknown): string {
  * against: the prefix of the debugged source file for which
  * `root/sourcePath === file`. Returns `undefined` when `file` is absent or does
  * not end with `sourcePath` (then frames fall back to served content). Used so a
- * LOCAL launch opens the user's real, editable files.
+ * local launch opens the user's real, editable files.
  */
 export function deriveSourceRoot(
   file: string | undefined,

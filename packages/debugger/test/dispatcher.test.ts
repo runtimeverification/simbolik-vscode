@@ -2,7 +2,7 @@
  * DAP protocol dispatcher.
  *
  * Drives the ground-truth Counter.setNumber(42) handshake transcript through the
- * `DapDispatcher`, asserting the ordered OUTGOING message
+ * `DapDispatcher`, asserting the ordered outgoing message
  * stream (responses + events) produced by each `handle()` call, plus the global
  * invariants: strictly-increasing positive `seq`, `request_seq`/`command`
  * correlation, and single-emission of each session event across launch/continue.
@@ -19,9 +19,7 @@ import {
 
 import {toLaunchInputs, type Spec} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures + LaunchInputs (mirrors session.test.ts exactly)
-// ---------------------------------------------------------------------------
+// ## Fixtures + LaunchInputs
 
 /** The Counter fixture bundle + entry coordinates the resolver launches. */
 const counterSpec: Spec = {
@@ -37,14 +35,12 @@ function counterLaunchInputs(): LaunchInputs {
   return toLaunchInputs(counterSpec);
 }
 
-// ---------------------------------------------------------------------------
-// Fake SessionResolver
-// ---------------------------------------------------------------------------
+// ## Fake SessionResolver
 
 /**
  * Build a fake resolver per the contract: it constructs a `SolidityDebugSession`,
- * `await`s `launch()` with the Counter inputs, and returns the ALREADY-LAUNCHED
- * session (so the dispatcher must NOT re-launch — it drains the queued `stopped`
+ * `await`s `launch()` with the Counter inputs, and returns the already-launched
+ * session (so the dispatcher must not re-launch — it drains the queued `stopped`
  * entry event instead). Tracks its call count so the pre-launch guard test can
  * assert it was never invoked.
  */
@@ -68,9 +64,7 @@ function makeFakeResolver(): {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Request builder + narrowing helpers
-// ---------------------------------------------------------------------------
+// ## Request builder + narrowing helpers
 
 /** Monotonic client-side request seq (independent of the dispatcher's seq). */
 let clientSeq = 0;
@@ -90,9 +84,7 @@ function stoppedEvents(
   return out.filter((m) => isEvent(m) && m.event === 'stopped');
 }
 
-// ---------------------------------------------------------------------------
-// 1–11. The full handshake transcript
-// ---------------------------------------------------------------------------
+// ## 1–11. The full handshake transcript
 
 describe('DapDispatcher — Counter.setNumber transcript', () => {
   it('produces the correct ordered outgoing stream + global seq/request_seq invariants', async () => {
@@ -111,7 +103,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       return out;
     }
 
-    // --- 1. initialize → [response(caps), event 'initialized'] --------------
+    // ## 1. initialize → [response(caps), event 'initialized']
     const out1 = await send(request('initialize', {adapterID: 'simbolik'}));
     expect(out1).toHaveLength(2);
     const [initResp, initEvt] = out1;
@@ -131,7 +123,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
     expect(isEvent(initEvt!)).toBe(true);
     expect((initEvt as DebugProtocol.Event).event).toBe('initialized');
 
-    // --- 2. launch → [response(success), event 'stopped' entry] -------------
+    // ## 2. launch → [response(success), event 'stopped' entry]
     const out2 = await send(request('launch', {program: 'Counter'}));
     expect(calls()).toBe(1); // resolver invoked exactly once by launch
     expect(out2).toHaveLength(2);
@@ -144,14 +136,14 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
     // The queued entry `stopped` is drained exactly once (not duplicated).
     expect(stoppedEvents(out2)).toHaveLength(1);
 
-    // --- 3. threads → one thread id 1 ---------------------------------------
+    // ## 3. threads → one thread id 1
     const out3 = await send(request('threads'));
     expect(out3).toHaveLength(1);
     const threadsBody = (out3[0] as DebugProtocol.ThreadsResponse).body;
     expect(threadsBody.threads).toHaveLength(1);
     expect(threadsBody.threads[0]!.id).toBe(1);
 
-    // --- 4. stackTrace → 1 frame, line 8, src/Counter.sol, setNumber --------
+    // ## 4. stackTrace → 1 frame, line 8, src/Counter.sol, setNumber
     const out4 = await send(request('stackTrace', {threadId: 1}));
     const stBody = (out4[0] as DebugProtocol.StackTraceResponse).body;
     expect(stBody.stackFrames).toHaveLength(1);
@@ -162,7 +154,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
     expect(frame.name).toBe('setNumber');
     const frameId = frame.id;
 
-    // --- 5. scopes → ['Locals','State','Globals','Events','EVM'] ------------
+    // ## 5. scopes → ['Locals','State','Globals','Events','EVM']
     const out5 = await send(request('scopes', {frameId}));
     const scopes = (out5[0] as DebugProtocol.ScopesResponse).body.scopes;
     expect(scopes.map((s) => s.name)).toEqual([
@@ -172,12 +164,12 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       'Events',
       'EVM',
     ]);
-    // Capture the State scope ref; the session binds handles to frame IDENTITY,
-    // so this same ref re-resolves against the CURRENT step after `continue` —
+    // Capture the State scope ref; the session binds handles to frame identity,
+    // so this same ref re-resolves against the current step after `continue` —
     // it is reused verbatim at step 6 (entry) and step 8 (terminal).
     const stateRef = scopes.find((s) => s.name === 'State')!.variablesReference;
 
-    // --- 6. variables(State) → number = '0' at entry ------------------------
+    // ## 6. variables(State) → number = '0' at entry
     const out6 = await send(
       request('variables', {variablesReference: stateRef}),
     );
@@ -186,7 +178,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       expect.objectContaining({name: 'number', value: '0'}),
     );
 
-    // --- 7. continue → [response(allThreadsContinued), event 'stopped'] -----
+    // ## 7. continue → [response(allThreadsContinued), event 'stopped']
     const out7 = await send(request('continue', {threadId: 1}));
     expect(out7).toHaveLength(2);
     const [contResp, contStopped] = out7;
@@ -195,11 +187,11 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       true,
     );
     expect((contStopped as DebugProtocol.Event).event).toBe('stopped');
-    // Only the NEW stopped event is drained here — the entry event is not
+    // Only the new stopped event is drained here — the entry event is not
     // re-emitted (drain cursor advances past already-sent events).
     expect(stoppedEvents(out7)).toHaveLength(1);
 
-    // --- 8. variables(State) again → number = '42' post-continue ------------
+    // ## 8. variables(State) again → number = '42' post-continue
     const out8 = await send(
       request('variables', {variablesReference: stateRef}),
     );
@@ -208,14 +200,14 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       expect.objectContaining({name: 'number', value: '42'}),
     );
 
-    // --- 9. disconnect → [response, event 'terminated'] ---------------------
+    // ## 9. disconnect → [response, event 'terminated']
     const out9 = await send(request('disconnect'));
     expect(out9).toHaveLength(2);
     const [discResp, termEvt] = out9;
     expect((discResp as DebugProtocol.Response).success).toBe(true);
     expect((termEvt as DebugProtocol.Event).event).toBe('terminated');
 
-    // --- 10. unknown command → single error response, NO throw --------------
+    // ## 10. unknown command → single error response, no throw
     const frob = request('frobnicate');
     sent.push(frob);
     const frobPromise = dispatcher.handle(frob);
@@ -226,7 +218,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
     expect(isResponse(out10[0]!)).toBe(true);
     expect((out10[0] as DebugProtocol.Response).success).toBe(false);
 
-    // --- 11a. seq strictly increasing positive integers across the run ------
+    // ## 11a. seq strictly increasing positive integers across the run
     let prevSeq = 0;
     for (const m of allOut) {
       expect(typeof m.seq).toBe('number');
@@ -235,7 +227,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       prevSeq = m.seq;
     }
 
-    // --- 11b. every response correlates to its originating request ----------
+    // ## 11b. every response correlates to its originating request
     for (const m of allOut) {
       if (!isResponse(m)) continue;
       const origin = sent.find((q) => q.seq === m.request_seq);
@@ -243,7 +235,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
       expect(m.command).toBe(origin!.command);
     }
 
-    // --- 11c. each event is emitted EXACTLY ONCE across the WHOLE stream -----
+    // ## 11c. each event is emitted exactly once across the whole stream
     // Guards the drain cursor globally: the entry `stopped` queued at launch
     // must not reappear on any intervening handler (threads/stackTrace/scopes/
     // variables) — the per-call length checks above only cover out2/out3/out7,
@@ -263,9 +255,7 @@ describe('DapDispatcher — Counter.setNumber transcript', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 11d. source request → serves frame source content
-// ---------------------------------------------------------------------------
+// ## Source request → serves frame source content
 
 describe('DapDispatcher — source request', () => {
   it('returns the content for a frame sourceReference', async () => {
@@ -299,9 +289,7 @@ describe('DapDispatcher — source request', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 11b. setInstructionBreakpoints routing
-// ---------------------------------------------------------------------------
+// ## Exception / instruction breakpoint routing
 
 describe('DapDispatcher — setExceptionBreakpoints', () => {
   it('routes to the session and acknowledges the active filters', async () => {
@@ -352,9 +340,7 @@ describe('DapDispatcher — setInstructionBreakpoints', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 12. Pre-launch guard
-// ---------------------------------------------------------------------------
+// ## Pre-launch guard
 
 describe('DapDispatcher — pre-launch guard', () => {
   it('answers stackTrace before launch with an error response (no session, no throw)', async () => {
@@ -374,10 +360,8 @@ describe('DapDispatcher — pre-launch guard', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 13. handle() never throws — a session method that throws (e.g. sparse args)
-//     becomes an error response, upholding the documented invariant.
-// ---------------------------------------------------------------------------
+// ## handle() never throws — a session method that throws (e.g. sparse args)
+// becomes an error response.
 
 describe('DapDispatcher — handle() never throws out', () => {
   it('turns a throwing session call (setBreakpoints w/ missing arguments) into an error response', async () => {
@@ -385,7 +369,7 @@ describe('DapDispatcher — handle() never throws out', () => {
     const dispatcher = new DapDispatcher(resolver);
     await dispatcher.handle(request('launch', {program: 'Counter'}));
 
-    // A DAP client sending setBreakpoints WITHOUT `arguments` would make
+    // A DAP client sending setBreakpoints without `arguments` would make
     // session.setBreakpoints deref `undefined.breakpoints` and throw. handle()
     // must catch and answer with an error response, not reject.
     const p = dispatcher.handle({
@@ -418,9 +402,7 @@ describe('DapDispatcher — handle() never throws out', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Resolver diagnostics → `output` events in the debug console
-// ---------------------------------------------------------------------------
+// ## Resolver diagnostics → `output` events in the debug console
 
 function outputEvents(
   out: DebugProtocol.ProtocolMessage[],
@@ -431,7 +413,7 @@ function outputEvents(
 }
 
 describe('DapDispatcher — resolver ctx.log surfaces as output events', () => {
-  it('emits one output event per logged line, BEFORE the launch response, in order', async () => {
+  it('emits one output event per logged line, before the launch response, in order', async () => {
     const dispatcher = new DapDispatcher(async (_args, ctx) => {
       ctx?.log('Compiling …');
       ctx?.log('  → eth_sendTransaction (deploy)');
@@ -468,7 +450,7 @@ describe('DapDispatcher — resolver ctx.log surfaces as output events', () => {
     expect(seqs[0]).toBeGreaterThan(0);
   });
 
-  it('STREAMS logged lines via the emitter sink (not in the return array) when one is wired', async () => {
+  it('streams logged lines via the emitter sink (not in the return array) when one is wired', async () => {
     const dispatcher = new DapDispatcher(async (_args, ctx) => {
       ctx?.log('Compiling …');
       ctx?.log('  → eth_sendTransaction (deploy)');
@@ -477,7 +459,7 @@ describe('DapDispatcher — resolver ctx.log surfaces as output events', () => {
       return session;
     });
 
-    // Wire a streaming sink BEFORE handling launch.
+    // Wire a streaming sink before handling launch.
     const streamed: DebugProtocol.ProtocolMessage[] = [];
     dispatcher.setEmitter(m => streamed.push(m));
     // Host-side diagnostics flushed via emitConsole share the same stream + seq.
@@ -485,8 +467,8 @@ describe('DapDispatcher — resolver ctx.log surfaces as output events', () => {
 
     const out = await dispatcher.handle(request('launch', {program: 'Counter'}));
 
-    // The output events were STREAMED (fired via the sink), in order, and are
-    // therefore NOT duplicated in the launch return array.
+    // The output events were streamed (fired via the sink), in order, and are
+    // therefore not duplicated in the launch return array.
     expect(streamed.map(m => (m as DebugProtocol.OutputEvent).body.output)).toEqual([
       'Execution node: kontrol-node\n',
       'Compiling …\n',

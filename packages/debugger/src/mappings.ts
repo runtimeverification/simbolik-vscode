@@ -1,14 +1,11 @@
 /**
- * Recover the OBSERVED keys of a storage mapping from an execution
+ * Recover the observed keys of a storage mapping from an execution
  * trace, and compute each entry's value slot.
  *
- * Mapping keys are NOT enumerable from the storage layout (only the base slot is
+ * Mapping keys are not enumerable from the storage layout (only the base slot is
  * static). Solidity computes a mapping entry slot as `keccak256(key32 ‖ slot32)`,
  * so every touched entry leaves a `KECCAK256`/`SHA3` op whose 64-byte memory
  * preimage is `key(32) ‖ baseSlot(32)`. Scanning those ops recovers the keys.
- *
- * This is inherently a TRACE-AWARE step (unlike the static storage pointers): the
- * enumeration + keccak arithmetic live here, so the session render stays thin.
  */
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {bytesToHex, hexToBytes} from 'ethereum-cryptography/utils';
@@ -30,7 +27,7 @@ function pad32(n: bigint): string {
 
 /**
  * The storage slot of `mapping[key]` at `baseSlot`:
- * `keccak256(pad32(key) ‖ pad32(baseSlot))` (key-THEN-slot, 64 bytes).
+ * `keccak256(pad32(key) ‖ pad32(baseSlot))` (key then slot, 64 bytes).
  */
 export function mappingValueSlot(key: bigint, baseSlot: bigint): bigint {
   const preimage = hexToBytes(pad32(key) + pad32(baseSlot));
@@ -38,17 +35,16 @@ export function mappingValueSlot(key: bigint, baseSlot: bigint): bigint {
 }
 
 /**
- * Enumerate the OBSERVED keys of the mapping at `baseSlot`, scanning every
+ * Enumerate the observed keys of the mapping at `baseSlot`, scanning every
  * `KECCAK256`/`SHA3` op at trace `index <= uptoStepIndex` whose 64-byte memory
- * preimage folds to `key ‖ baseSlot`. De-duplicated, in first-seen order.
+ * preimage is `key ‖ baseSlot`. De-duplicated, in first-seen order.
  *
- * The op's operands come from the stack (top-of-stack LAST): `offset = stack[len-1]`,
- * `size = stack[len-2]`; only size `0x40` hashes are mapping-entry preimages. The
- * preimage's two 32-byte words are read from the FOLDED memory at that step
- * (`cursor.at(index).memory`, an array of 32-byte WORD hex strings): the byte
- * `offset` is converted to a word index (`offset / 32`), so a non-zero offset is
- * handled — `word0` is the key, `word1` the slot. Bounded by `uptoStepIndex` so a
- * key first touched later never appears at an earlier step.
+ * The op's operands come from the stack (top-of-stack last): `offset =
+ * stack[len-1]`, `size = stack[len-2]`; only size `0x40` hashes are
+ * mapping-entry preimages. The preimage's two words are read from the folded
+ * memory at that step (`cursor.at(index).memory`, an array of 32-byte word hex
+ * strings) — `word0` is the key, `word1` the slot. Bounded by `uptoStepIndex`
+ * so a key first touched later never appears at an earlier step.
  */
 export function enumerateMappingKeys(
   steps: Step[],
@@ -68,8 +64,8 @@ export function enumerateMappingKeys(
     const size = BigInt(step.stack[len - 2]!);
     if (size !== PREIMAGE_SIZE) continue;
     const offset = Number(BigInt(step.stack[len - 1]!));
-    // Memory is an array of 32-byte WORDS: convert the byte offset to a word
-    // index. (Non-32-aligned offsets are not a mapping-entry preimage layout.)
+    // Memory is an array of 32-byte words. A non-32-aligned offset is not a
+    // mapping-entry preimage layout.
     if (offset % 32 !== 0) continue;
     const memory = cursor.at(index).memory;
     const wordIndex = offset / 32;

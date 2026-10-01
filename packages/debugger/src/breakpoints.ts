@@ -20,7 +20,7 @@ import type {SteppingModel, Stop} from './stepping.js';
  * Breakpoints panel. The two exception filters stop where an exception
  * originates (see `exceptions.ts`) — `exceptions: 'all'` on every one,
  * `'uncaught'` only on the one that fails the transaction — during `continue`
- * AND statement steps, so stepping over a failing call stops at the failure
+ * and statement steps, so stepping over a failing call stops at the failure
  * instead of running off the end. The others make `continue` stop on any opcode
  * in a category (e.g. "stop on external calls"); `ops` is the set of EVM
  * opcodes that trip them.
@@ -37,7 +37,7 @@ export interface ExceptionFilterDef {
 
 /**
  * The offered exception-breakpoint filters (single source of truth for both the
- * `initialize` capability and continue-time matching). Mirrors the Python server.
+ * `initialize` capability and continue-time matching).
  */
 export const EXCEPTION_BREAKPOINT_FILTERS: readonly ExceptionFilterDef[] = [
   {
@@ -108,7 +108,7 @@ const EXCEPTION_FILTER_IDS: ReadonlySet<string> = new Set(
 );
 
 /**
- * Armed-instruction-breakpoint map key: an address PLUS which code image (init
+ * Armed-instruction-breakpoint map key: an address plus which code image (init
  * vs runtime), so a constructor pc and a runtime pc of the same number in the
  * same contract are distinct breakpoints.
  */
@@ -223,8 +223,9 @@ export class Breakpoints {
   /**
    * The nearest stop from `from` in direction `dir`, folding the three stop
    * kinds (source-line, instruction, exception filter) into one target and a
-   * `stopped` reason. An exception (in either direction) reports `'exception'`; every other stop
-   * reports `'breakpoint'`; running to the end/start reports `'step'`.
+   * `stopped` reason. An exception (in either direction) reports `'exception'`;
+   * every other stop reports `'breakpoint'`; running to the end/start reports
+   * `'step'`.
    */
   runToStop(from: Stop, dir: 1 | -1): RunTarget {
     const candidates = [
@@ -288,7 +289,7 @@ export class Breakpoints {
     return this.#instructions.get(key)?.has(step.pc) ?? false;
   }
 
-  /** The ENABLED filter id tripped by `stepIndex`'s opcode, or `undefined`. */
+  /** The enabled filter id tripped by `stepIndex`'s opcode, or `undefined`. */
   #exceptionFilterAt(stepIndex: number): string | undefined {
     const step = this.#steps[stepIndex];
     if (step === undefined) return undefined;

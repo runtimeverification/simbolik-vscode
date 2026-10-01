@@ -33,7 +33,7 @@ describe('parseJsonLossless', () => {
     const naiveValue = naive[1].result.structLogs[0].codeAddress;
 
     expect(typeof naiveValue).toBe('number');
-    // Round-tripping the corrupted float back to bigint does NOT match.
+    // Round-tripping the corrupted float back to bigint does not match.
     expect(BigInt(naiveValue)).not.toBe(EXPECTED_CODE_ADDRESS);
   });
 

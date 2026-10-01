@@ -3,9 +3,9 @@
  * `initialStorage` seed derived from it (or, on nodes without the dump, from
  * per-slot `eth_getStorageAt` reads).
  *
- * WHY: a delta-encoded trace omits slots that an earlier tx (e.g. `setUp()`)
- * wrote and this one only READS — SLOAD emits no delta — so fixture state would
- * otherwise read as zero at the entry step.
+ * A delta-encoded trace omits slots that an earlier tx (e.g. `setUp()`) wrote
+ * and this one only reads, since SLOAD emits no delta. Without a seed, such
+ * state would read as zero at the entry step.
  */
 import type {LaunchInputs} from '@simbolik/debugger';
 import {
@@ -20,12 +20,12 @@ import type {ContractsByAddress} from './contracts';
 type StorageSeed = NonNullable<LaunchInputs['initialStorage']>;
 
 /**
- * Fetch the whole-chain pre-state in ONE `dumpStateMethod` call
+ * Fetch the whole-chain pre-state in one `dumpStateMethod` call
  * (`anvil_dumpState` / `kontrol_dumpState`, with different wire formats — see
  * {@link parseStateDump}). Returns `undefined` on any failure (unsupported node,
  * malformed blob) so the caller falls back to the per-slot `eth_getStorageAt`
- * path. MUST be called at the desired pre-state point (after `setUp()`, before
- * the traced call), since the dump snapshots the CURRENT state.
+ * path. Must be called at the desired pre-state point (after `setUp()`, before
+ * the traced call), since the dump snapshots the current state.
  */
 export async function fetchStateDump(
   client: JsonRpcClient,
@@ -45,7 +45,7 @@ export async function fetchStateDump(
  * incl. mapping / dynamic-array slots the static-layout reader cannot
  * enumerate), restricted to the entry contract + every address the trace
  * executed. Fallback (unsupported node): read each known contract's static
- * layout slots via `eth_getStorageAt` at the block BEFORE the traced tx
+ * layout slots via `eth_getStorageAt` at the block before the traced tx
  * (= post-`setUp()`).
  */
 export async function initialStorageFor(opts: {
@@ -127,10 +127,10 @@ function storageTargets(
 const MAX_SLOTS_PER_VAR = 64;
 
 /**
- * The STATIC top-level storage slots a contract occupies, from its solc storage
+ * The static top-level storage slots a contract occupies, from its solc storage
  * layout: each variable's base slot, plus the extra slots an inplace value type /
  * struct / fixed array spans (from `numberOfBytes`), capped. Mapping / dynamic-
- * array ELEMENTS live at computed (keccak) slots we cannot enumerate blindly, so
+ * array elements live at computed (keccak) slots we cannot enumerate blindly, so
  * only their base slot is included — those stay lazily populated by the trace.
  */
 function staticStorageSlots(contract: Contract): bigint[] {
@@ -158,7 +158,7 @@ function staticStorageSlots(contract: Contract): bigint[] {
 }
 
 /**
- * Read the PRE-TRACE storage of each target via `eth_getStorageAt` at
+ * Read the pre-trace storage of each target via `eth_getStorageAt` at
  * `blockTag`. Keyed `address(lowercase) → slot(minimalHex) → word(minimalHex)`,
  * the exact form the node's own deltas and the storage lookup use, so a later
  * SSTORE to a seeded slot overwrites it cleanly. Best-effort: on the first RPC

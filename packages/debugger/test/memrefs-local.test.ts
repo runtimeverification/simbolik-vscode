@@ -1,5 +1,5 @@
 /**
- * DUAL-PIPELINE coverage for MEMORY reference-type locals.
+ * Memory reference-type locals on both pipelines.
  *
  * `MemRefs.run()` builds three memory reference locals and passes them to a
  * recursive (non-inlined) `consume`, so each is a genuine last-use stack read:
@@ -8,11 +8,10 @@
  *   line 33  uint256[3] memory fixed3 = [101, 202, 303]; → [101, 202, 303]
  *   line 34  return consume(nums, label, fixed3, 1);     // all read (last use)
  *
- * The SAME source is recorded both `--via-ir` and legacy. Under viaIR the stack
+ * The same source is recorded both `--via-ir` and legacy. Under viaIR the stack
  * slot holding each reference's memory offset is scheduled per-instruction (the
  * per-pc stack-provenance path must locate it); under legacy the frame-relative
- * slot model locates it. Both must render identical values — this is the
- * regression that the reference-type rendering is NOT overfit to viaIR.
+ * slot model locates it. Both must render identical values.
  */
 import {describe, expect, it} from 'vitest';
 

@@ -2,10 +2,8 @@
  * EVM opcode facts shared by the static stack analyzers ({@link stackHeights},
  * {@link stackProvenance}).
  *
- * Arities are keyed off the bytecode BYTES (not kontrol trace op-names, which
- * differ: PUSHZERO=PUSH0, EVMOR=OR — naming never changes stack DEPTH). The net
- * deltas derived here were validated against recorded traces with 0 mismatches
- * over 964 same-depth transitions.
+ * Arities are keyed off the bytecode bytes, not trace op-names (which can
+ * differ, e.g. kontrol's PUSHZERO for PUSH0).
  */
 
 export const JUMP = 0x56;
@@ -30,10 +28,10 @@ export function isSwap(op: number): boolean {
 }
 
 /**
- * Precise `{in, out}` stack arity of a straight-line opcode (NOT push/dup/swap,
- * which are handled specially). Unlike a net delta, the separate input count is
- * what lets a consumed slot be dropped and each result be freshly value-numbered
- * — e.g. `ISZERO`/`NOT` (in 1, out 1) must give the top a new origin even though
+ * Precise `{in, out}` stack arity of a straight-line opcode (not push/dup/swap,
+ * which are handled specially). Unlike a net delta, the separate input count
+ * lets a consumed slot be dropped and each result be freshly value-numbered:
+ * e.g. `ISZERO`/`NOT` (in 1, out 1) must give the top a new origin even though
  * their net delta is 0.
  */
 export function stackInOut(op: number): {nIn: number; nOut: number} {
@@ -146,13 +144,13 @@ export function stackInOut(op: number): {nIn: number; nOut: number} {
     case 0xff: // SELFDESTRUCT: pop 1.
       return {nIn: 1, nOut: 0};
     default:
-      // Unknown opcode: conservatively clear the top and push one fresh result so
-      // a value identity can never leak through an unmodelled op.
+      // Unknown opcode: conservatively replace the top with a fresh result so a
+      // value identity can never leak through an unmodelled op.
       return {nIn: 1, nOut: 1};
   }
 }
 
-/** Net stack effect (`pushed − popped`) of an opcode, consistent with {@link stackInOut}. */
+/** Net stack effect (`pushed − popped`) of an opcode. */
 export function stackDelta(op: number): number {
   if (op === PUSH0 || isPushN(op)) return 1;
   if (isDup(op)) return 1;

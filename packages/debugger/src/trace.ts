@@ -51,9 +51,9 @@ export function loadTrace(inputs: LaunchInputs): Trace {
   const steps = parseSteps(inputs);
   const cursor = new StateCursor(steps, inputs.initialStorage);
   const registry = CodeRegistry.build(inputs, cus, steps, cursor);
-  // Foreign code has no source map — leave its steps UNMAPPED so the stepping
-  // model keeps their raw EVM depth and contributes no jump fold (strictly
-  // safer than mis-mapping the foreign PCs onto the entry contract's map).
+  // Foreign code has no source map — leave its steps unmapped so the stepping
+  // model keeps their raw EVM depth and contributes no jump fold, rather than
+  // mis-mapping the foreign PCs onto the entry contract's map.
   const model = new SteppingModel(cursor, i =>
     registry.contractAt(addressHex(steps[i]!.codeAddress))
   );
@@ -81,13 +81,11 @@ function parseSteps(inputs: LaunchInputs): Step[] {
   } else {
     steps = normalizeKontrolTrace(parsed.result as never);
   }
-  // A trace with no steps means the traced transaction executed no EVM
-  // instructions — the target address has no code (a failed/oversized deploy,
-  // or a call to an EOA). Proceeding would build an empty stepping model whose
-  // entry points past its own metadata, so the first step command throws a
-  // cryptic error. Fail fast here with an explanation instead; the launch
-  // resolver's deploy-status check catches the common cause earlier, but this
-  // guards every other 0-step path.
+  // A trace with no steps means the target address has no code (a
+  // failed/oversized deploy, or a call to an EOA). An empty stepping model
+  // would make the first step command throw a cryptic error, so fail fast with
+  // an explanation. (The launch resolver's deploy-status check catches the
+  // common cause earlier; this guards every other 0-step path.)
   if (steps.length === 0) {
     const addr = inputs.codeAddress ?? 'the entry contract';
     throw new Error(

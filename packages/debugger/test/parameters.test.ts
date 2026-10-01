@@ -1,15 +1,15 @@
 /**
- * Reading function INPUT parameters (value types) through the debugger,
- * for BOTH externally-entered frames (params in calldata) and internally-entered
+ * Reading function input parameters (value types) through the debugger,
+ * for both externally-entered frames (params in calldata) and internally-entered
  * frames (params on the stack).
  *
  * The motivating case is `v` inside `Stepper.double`: `double` is called
  * internally from `run` via a Solidity JUMP (same EVM depth), so its parameter
- * `v` lives on the STACK, not in calldata. A naive debugger that reads every
+ * `v` lives on the stack, not in calldata. A naive debugger that reads every
  * parameter from calldata would mis-read `v` inside `double` as `run`'s
  * calldata word (x = 10) instead of the true stack value (v = 11).
  *
- * Ground-truth (verified against the real fixtures via a scratch script):
+ * Ground truth (from the fixtures):
  *   - Stepper.run(10): a=11, b=double(11)=22; the breakpoint on line 14 lands on
  *     step 182 inside `double`, where the stack holds v = 11.
  *   - Stepper.run entry: x = 10 (calldata).
@@ -17,8 +17,8 @@
  *   - Vars.setAll(7,1000,true,0x..aa,-5,0x1122..,Blue): all 7 params (calldata).
  *
  * The parameter scope: the session exposes params in a scope named `Locals` or
- * `Parameters`. These tests locate the scope by accepting EITHER name (see
- * {@link paramsScopeRef}) so they pin the READ behavior, not the scope label.
+ * `Parameters`. These tests locate the scope by accepting either name (see
+ * {@link paramsScopeRef}) so they pin the read behavior, not the scope label.
  *
  * The internal `v = 11` case is the key check: the `double` frame's param scope
  * reads `v = 11` from the stack, not `v = 10` from `run`'s calldata.
@@ -34,9 +34,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 const stepperSpec: Spec = {
   buildInfo: 'stepper-build-info.json',
@@ -66,7 +64,7 @@ const varsSpec: Spec = {
 };
 
 /**
- * The variablesReference of the CURRENT frame's parameter scope. Value-type
+ * The variablesReference of the current frame's parameter scope. Value-type
  * input params live in either a `Parameters` or a `Locals` scope; accept
  * whichever the session exposes so the test pins the read, not the
  * label. Uses the deepest (top) stack frame — the current frame.
@@ -95,9 +93,7 @@ async function readParams(
   return children(session, paramsScopeRef(session));
 }
 
-// ---------------------------------------------------------------------------
-// 1. Stepper — INTERNAL stack param `v` inside double (THE key case)
-// ---------------------------------------------------------------------------
+// ## 1. Stepper — internal stack param `v` inside double (the key case)
 
 describe('Stepper internal frame — stack param v inside double', () => {
   /** Launch, break on line 14 (inside double), continue → step 182. */
@@ -130,16 +126,16 @@ describe('Stepper internal frame — stack param v inside double', () => {
     expect(params.map((p) => p.name)).toEqual(['v']);
   });
 
-  it('reads v = 11 at a DEEPER step inside double (dynamic stack depth)', async () => {
-    // The stack pointer's depth-from-top MUST be recomputed per step from the
+  it('reads v = 11 at a deeper step inside double (dynamic stack depth)', async () => {
+    // The stack pointer's depth-from-top must be recomputed per step from the
     // live stack length — v's absolute stack offset is fixed at frame entry
     // (entryStackHeight 7 − paramCount 1 = 6), but the depth is
     // `currentStackLength − 1 − absOffset`, which grows as `double`'s body pushes.
     //   step 182: len  8 → depth 1
     //   step 185: len 11 → depth 4  (still v = 11)
-    // Verified against the raw trace: the value 11 stays at absolute stack index
-    // 6 at every opcode of double's body (steps 180–188). A wrong impl that
-    // hardcodes depth 1 (correct only at step 182) mis-reads v here.
+    // In the raw trace the value 11 stays at absolute stack index 6 at every
+    // opcode of double's body (steps 180–188). Hardcoding depth 1 (correct only
+    // at step 182) would mis-read v here.
     const session = await insideDouble();
     session.stepInstruction();
     session.stepInstruction();
@@ -156,9 +152,7 @@ describe('Stepper internal frame — stack param v inside double', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Stepper — EXTERNAL calldata param `x` at run entry
-// ---------------------------------------------------------------------------
+// ## 2. Stepper — external calldata param `x` at run entry
 
 describe('Stepper external frame — calldata param x at run entry', () => {
   it('parameter scope shows x = 10 (uint256)', async () => {
@@ -169,9 +163,7 @@ describe('Stepper external frame — calldata param x at run entry', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Counter — EXTERNAL calldata param newNumber (new path)
-// ---------------------------------------------------------------------------
+// ## 3. Counter — external calldata param newNumber
 
 describe('Counter external frame — calldata param newNumber', () => {
   it('parameter scope shows newNumber = 42 (uint256)', async () => {
@@ -182,9 +174,7 @@ describe('Counter external frame — calldata param newNumber', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Vars — EXTERNAL calldata params (all 7 value types)
-// ---------------------------------------------------------------------------
+// ## 4. Vars — external calldata params (all 7 value types)
 
 describe('Vars external frame — calldata params setAll (7 value types)', () => {
   async function setAllParams(): Promise<Map<string, DapVariable>> {

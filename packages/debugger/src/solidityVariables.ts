@@ -3,9 +3,9 @@
  * and Locals (params/returns/locals) — and their nested complex values
  * (structs, arrays, mappings, expandable contract addresses).
  *
- * All variable LAYOUT comes from `@simbolik/ethdebug-gen` (the ethdebug program
+ * All variable layout comes from `@simbolik/ethdebug-gen` (the ethdebug program
  * for storage, `variablesAt` for params/locals); this module dereferences each
- * pointer through the real ethdebug path (`machineStateFor` + the pointer
+ * pointer through `@ethdebug/pointers` (`machineStateFor` + the pointer
  * readers) and decodes by solc type.
  */
 import type {Machine} from '@ethdebug/pointers';
@@ -107,9 +107,9 @@ export class SolidityVariables {
   readonly #alloc: AllocHandle;
   readonly #history: LocalsHistory;
   /**
-   * Synthetic frames for EXPANDED contract addresses (an address-typed value
+   * Synthetic frames for expanded contract addresses (an address-typed value
    * that resolves to a known contract is drilled into to show that contract's
-   * storage at the current step). Keyed by a NEGATIVE frame id so it never
+   * storage at the current step). Keyed by a negative frame id so it never
    * collides with a real frame; resolving a handle's frame from here first lets
    * the whole storage-rendering path work on the foreign contract unchanged.
    */
@@ -132,7 +132,7 @@ export class SolidityVariables {
 
   /**
    * The frame contract's storage variables: value types extracted from their
-   * PACKED slot word, string/bytes decoded from their storage encoding, and
+   * packed slot word, string/bytes decoded from their storage encoding, and
    * arrays/structs/mappings rendered nested.
    */
   async state(frame: FrameInfo): Promise<DebugProtocol.Variable[]> {
@@ -179,10 +179,10 @@ export class SolidityVariables {
   }
 
   /**
-   * A dynamic string/bytes storage value. The producer supplies the LAYOUT (flag
+   * A dynamic string/bytes storage value. The producer supplies the layout (flag
    * word + static keccak base); the runtime encoding rules live here: an even
-   * low byte is SHORT (data inline in the HIGH `len` bytes, length = low/2),
-   * odd is LONG (length = (flag-1)/2, data in consecutive words from the base).
+   * low byte is short (data inline in the high `len` bytes, length = low/2),
+   * odd is long (length = (flag-1)/2, data in consecutive words from the base).
    */
   async #storageBytes(
     layout: NonNullable<EthdebugStorageVariable['bytesStorage']>,
@@ -284,7 +284,7 @@ export class SolidityVariables {
       const hex = await readPointerBytes(v.bytes.pointer, ms);
       return leaf(v.name, bytesDisplay(hex, v.bytes.isString), v.typeLabel);
     }
-    // Value numbering names a VALUE, so a leftover copy of a variable's OLD
+    // Value numbering names a value, so a leftover copy of a variable's old
     // value can still be named after the variable was reassigned (e.g. an
     // initializer `0` kept on the stack while `x -= …` ran in a loop). A stale
     // copy is not the variable — treat it as unlocated.
@@ -292,12 +292,12 @@ export class SolidityVariables {
       return this.#scalar(cu, v.name, await readPointerValue(v.pointer, ms), v);
     }
     // Unavailable at the live pc: its stack slot has been freed/reused (common
-    // under viaIR once a value local's LAST use has passed), yet it is still in
-    // lexical scope. Show its LAST KNOWN value, decoded at the most recent
-    // earlier step of THIS frame invocation where it was still locatable.
+    // under viaIR once a value local's last use has passed), yet it is still in
+    // lexical scope. Show its last known value, decoded at the most recent
+    // earlier step of this frame invocation where it was still locatable.
     const lastKnown = await this.#lastKnown(frame, cu, v.name, step, modelRef);
     if (lastKnown !== undefined) return lastKnown;
-    // A NAMED RETURN variable starts at its type's zero value (a Solidity
+    // A named return variable starts at its type's zero value (a Solidity
     // guarantee). viaIR keeps no stack slot for it until its first assignment,
     // so before that — when the trace shows no write to it since the frame was
     // entered — its value is known without a location: the default.
@@ -350,8 +350,8 @@ export class SolidityVariables {
   }
 
   /**
-   * Decode the children of a nested COMPLEX variable, re-resolving its static
-   * layout against the CURRENT step (like every handle): for a `'local'` handle
+   * Decode the children of a nested complex variable, re-resolving its static
+   * layout against the current step (like every handle): for a `'local'` handle
    * from `variablesAt` at the live body read step; for a `'state'` handle from
    * the ethdebug program's storage vars (storage persists, so the frame's own
    * step suffices).
@@ -402,7 +402,7 @@ export class SolidityVariables {
   }
 
   /**
-   * Render a reference-type COMPLEX variable as a NESTED DAP variable: a
+   * Render a reference-type complex variable as a nested DAP variable: a
    * `Complex` handle (children decoded on expansion via {@link children}) plus a
    * one-line preview decoded exactly like the children, so the two agree.
    */
@@ -436,9 +436,9 @@ export class SolidityVariables {
 
   /**
    * The decoded elements of an array. A `bytes[]` / `string[]` element region is
-   * the element's MEMORY OFFSET, dereferenced as a raw byte string; any other
+   * the element's memory offset, dereferenced as a raw byte string; any other
    * element region is a full 32-byte word, normalized to the element type's own
-   * bytes before decoding (essential for narrow `intN` and LEFT-aligned `bytesN`).
+   * bytes before decoding (essential for narrow `intN` and left-aligned `bytesN`).
    */
   async #arrayElements(
     cu: CompilationUnit,
@@ -474,10 +474,10 @@ export class SolidityVariables {
   }
 
   /**
-   * The OBSERVED entries of a storage mapping at the frame's step, each a decoded
+   * The observed entries of a storage mapping at the frame's step, each a decoded
    * `{name: key, value, type}` in first-seen order. Enumeration + keccak
    * arithmetic live in `./mappings.js`; this reads each value slot through the
-   * real storage path and decodes by value type.
+   * storage pointer path and decodes by value type.
    */
   async #mappingEntries(
     frame: FrameInfo,
@@ -524,10 +524,10 @@ export class SolidityVariables {
         valueType
       );
       // The key is the raw preimage word0. Normalize it to the key type's own
-      // bytes (exactly as the value) before decoding the child NAME: a no-op for
-      // right-aligned key types, but a LEFT-aligned `bytesN` key must be sliced
+      // bytes (exactly as the value) before decoding the child name: a no-op for
+      // right-aligned key types, but a left-aligned `bytesN` key must be sliced
       // to its high N bytes and a negative `intN` key masked to its width. (The
-      // value slot above still hashes the RAW word0, which reproduces the trace
+      // value slot above still hashes the raw word0, which reproduces the trace
       // preimage verbatim for every 32-byte-padded key type.)
       const {value: name} = this.#decode(
         cu,
@@ -541,7 +541,7 @@ export class SolidityVariables {
 
   /**
    * A scalar variable. An address/contract-typed value that resolves to a known
-   * contract renders as `<ContractName> (0x…)` and is EXPANDABLE into that
+   * contract renders as `<ContractName>(0x…)` and is expandable into that
    * contract's storage at the current step (via a synthetic frame); a plain,
    * unknown, foreign or zero address stays a scalar.
    */

@@ -27,7 +27,7 @@ export interface StorageType {
   encoding: string;
   /** Element type id of a dynamic/fixed array (`encoding: 'dynamic_array'`). */
   base?: string;
-  /** Struct members (`encoding: 'inplace'`), slot/offset RELATIVE to the base. */
+  /** Struct members (`encoding: 'inplace'`), slot/offset relative to the base. */
   members?: {label: string; slot: number; offset: number; type: string}[];
   /** Key type id of a mapping (`encoding: 'mapping'`). */
   key?: string;
@@ -245,7 +245,7 @@ export class Contract {
   }
 
   /**
-   * Byte ranges in the RUNTIME bytecode that hold immutable values (patched at
+   * Byte ranges in the runtime bytecode that hold immutable values (patched at
    * deploy time). The deployed code differs from {@link runtimeBytecode} only in
    * these ranges, so masking them lets identification match a deployed contract
    * to its build-info even when immutables (and library addresses) are filled in.
@@ -256,8 +256,8 @@ export class Contract {
     return Object.values(refs).flat();
   }
 
-  // Parsed once: the source maps are immutable and queried per instruction by
-  // the variable/frame analyses (a full parse per call dominated `variables`).
+  // Parsed once and cached: the variable/frame analyses query the source maps
+  // per instruction.
   initSourceMap(): SourceMapEntry[] {
     this.#initSourceMap ??= parseSourceMap(this.#raw.evm?.bytecode?.sourceMap ?? '');
     return this.#initSourceMap;
@@ -291,7 +291,7 @@ export class Contract {
   /**
    * The contract's declared events, each with its topic-0 selector and typed
    * parameters, sourced from the build-info ABI. The selector is `'0x'` +
-   * keccak256 of the canonical signature `Name(type1,type2,…)` built over ALL
+   * keccak256 of the canonical signature `Name(type1,type2,…)` built over all
    * inputs in declaration order (indexed + non-indexed) using ABI canonical type
    * names; anonymous events carry no topic-0 selector (`selector: ''`).
    */
@@ -360,9 +360,8 @@ function toStorageType(t: RawStorageType): StorageType {
     numberOfBytes: Number(t.numberOfBytes),
     encoding: t.encoding ?? '',
   };
-  // Additive reference-layout fields. Members are projected to
-  // EXACTLY {label, slot, offset, type} with slot/offset coerced to numbers
-  // (dropping solc's astId/contract).
+  // Members are projected to {label, slot, offset, type} with slot/offset
+  // coerced to numbers (dropping solc's astId/contract).
   if (t.base !== undefined) type.base = t.base;
   if (t.members !== undefined) {
     type.members = t.members.map((m) => ({
@@ -456,7 +455,7 @@ export class CompilationUnit {
     return this.#sources.find((s) => s.path === path);
   }
 
-  /** Lazy id → AST node index across ALL sources (built once, then reused). */
+  /** Lazy id → AST node index across all sources (built once, then reused). */
   #nodeIndex: Map<number, AstNode> | undefined;
 
   /**
@@ -483,13 +482,12 @@ export class CompilationUnit {
 
   /**
    * The members of a struct type — `{name, typeString}` in declaration order —
-   * resolved from a struct TYPE IDENTIFIER, or an empty array if unresolved.
+   * resolved from a struct type identifier, or an empty array if unresolved.
    *
    * Accepts either the AST structural id (`t_struct$_Point_$10_memory_ptr`, which
    * embeds the `StructDefinition` AST id between `$_…_$` and the next `_`) or the
    * storage-style id (`t_struct(Point)10_storage`). It resolves the definition by
-   * that embedded AST id (like an enum's trailing id), falling back to the
-   * struct's simple name — mirroring the enum accessor pattern in the debugger.
+   * that embedded AST id, falling back to the struct's simple name.
    */
   structMembers(typeId: string): {name: string; typeString: string}[] {
     // Embedded AST id: `…$_Point_$10_memory_ptr` or `t_struct(Point)10_storage`.

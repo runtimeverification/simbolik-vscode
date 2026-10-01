@@ -62,7 +62,7 @@ export async function startDebugging(
  *
  * 1. Compile the project if necessary
  * 2. Prompt for input parameters if needed
- * 3. Create and start the debug configuration
+ * 3. Assemble the full debug configuration
  *
  * @param config The partial configuration identifying the contract and method.
  * @returns The fully populated debug configuration.
@@ -200,12 +200,10 @@ async function getMethodSignature(
 }
 
 async function getUserInput(methodSignature: string): Promise<string> {
-  // Extract parameter types from method signature
   const abiParams = methodSignature.slice(methodSignature.indexOf('('));
   if (abiParams === '()') {
     return '0x';
   }
-  // Prompt user for input parameters
   let encoded: string | undefined;
   const userInput = await vscode.window.showInputBox({
     prompt: `Enter input parameters for ${methodSignature}.`,

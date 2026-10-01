@@ -84,7 +84,7 @@ export class JsonRpcClient {
   }
 
   /**
-   * Send a request and return the RAW response body, unparsed and unchecked for
+   * Send a request and return the raw response body, unparsed and unchecked for
    * a JSON-RPC `error` — for callers that re-parse it themselves (e.g. a trace
    * handed on verbatim so its big integers never pass through `number`).
    */

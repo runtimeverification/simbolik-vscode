@@ -2,16 +2,16 @@
  * geth/anvil trace factory + dialect detection.
  *
  * These tests cover `normalizeGethTrace` and `detectTraceDialect`. `StateCursor`
- * is used to prove the geth-normalized steps feed the SAME accumulation pipeline
- * as the kontrol steps.
+ * checks that the geth-normalized steps feed the same accumulation pipeline as
+ * the kontrol steps.
  *
- * Ground-truth (confirmed directly against the fixtures):
+ * Fixture facts:
  *  - anvil envelope has 118 structLogs of shape {pc,op,gas,gasCost,depth,stack,
- *    storage?,refund}; NO codeAddress/isInitCode/memoryChange fields (geth).
- *  - the kontrol envelope's first structLog DOES carry codeAddress/isInitCode.
+ *    storage?,refund}; no codeAddress/isInitCode/memoryChange fields (geth).
+ *  - the kontrol envelope's first structLog does carry codeAddress/isInitCode.
  *  - exactly one structLog (index 112, op SSTORE) carries `storage`, as a
  *    32-byte zero-padded slot key mapping to a 32-byte value (…002a).
- *  - the stack is hex words, top-of-stack LAST (same convention as kontrol).
+ *  - the stack is hex words, top of stack last (same convention as kontrol).
  */
 import {readFileSync} from 'node:fs';
 
@@ -20,9 +20,9 @@ import {describe, expect, it} from 'vitest';
 
 import {detectTraceDialect, normalizeGethTrace, StateCursor} from '../src/index.js';
 
-// ── Fixtures ────────────────────────────────────────────────────────────────
+// ## Fixtures
 
-/** REAL recorded anvil `debug_traceTransaction` (geth format), envelope at `.result`. */
+/** Recorded anvil `debug_traceTransaction` (geth format), envelope at `.result`. */
 const ANVIL_RAW = readFileSync(
   new URL(
     '../../debugger/test/fixtures/anvil-setNumber-trace.raw.json',
@@ -31,7 +31,7 @@ const ANVIL_RAW = readFileSync(
   'utf8',
 );
 
-/** REAL recorded kontrol-node trace (rich structLogs), envelope at `.result`. */
+/** Recorded kontrol-node trace (rich structLogs), envelope at `.result`. */
 const KONTROL_RAW = readFileSync(
   new URL(
     '../../debugger/test/fixtures/counter-setNumber-trace.raw.json',
@@ -75,7 +75,7 @@ const PADDED_SLOT0 =
   '0x0000000000000000000000000000000000000000000000000000000000000000';
 const MINIMAL_SLOT0 = '0x0';
 
-// ── 1. dialect detection ──────────────────────────────────────────────────────
+// ## 1. dialect detection
 
 describe('detectTraceDialect', () => {
   it('classifies the anvil envelope as geth (no rich structLog fields)', () => {
@@ -102,7 +102,7 @@ describe('detectTraceDialect', () => {
   });
 });
 
-// ── 2. normalizeGethTrace → Step[] ────────────────────────────────────────────
+// ## 2. normalizeGethTrace → Step[]
 
 describe('normalizeGethTrace', () => {
   it('produces one Step per structLog (118)', () => {
@@ -133,7 +133,7 @@ describe('normalizeGethTrace', () => {
     expect(steps[50]!.stack.length).toBeGreaterThan(0);
   });
 
-  it('normalizes SSTORE storage keys/values to MINIMAL hex under ctx.to', () => {
+  it('normalizes SSTORE storage keys/values to minimal hex under ctx.to', () => {
     const steps = normalizeGethTrace(anvilEnvelope, txContext);
 
     // Locate the single storage-bearing structLog directly in the raw envelope.
@@ -148,7 +148,7 @@ describe('normalizeGethTrace', () => {
       steps[storageIndex]!.storageChanges[META.txTo];
     expect(account).toBeDefined();
 
-    // The key is minimalized ('0x0'), NOT the 32-byte padded key anvil emitted.
+    // The key is minimalized ('0x0'), not the 32-byte padded key anvil emitted.
     expect(account![MINIMAL_SLOT0]).toBeDefined();
     expect(account![PADDED_SLOT0]).toBeUndefined();
 
@@ -157,13 +157,13 @@ describe('normalizeGethTrace', () => {
   });
 });
 
-// ── 2b. account-key normalization for leading-zero addresses ───────────────────
+// ## 2b. account-key normalization for leading-zero addresses
 
 describe('normalizeGethTrace account-key padding (leading-zero address)', () => {
-  // Synthetic single-SSTORE geth trace whose `to` has a leading ZERO byte, so
+  // Synthetic single-SSTORE geth trace whose `to` has a leading zero byte, so
   // minimal hex (`0xab…`, 38 nibbles) differs from the 20-byte padded form
   // (`0x00ab…`, 40 nibbles) the debugger looks accounts up by. The account key
-  // MUST be the padded form or the StateCursor lookup silently reads absent.
+  // must be the padded form or the StateCursor lookup silently reads absent.
   const LEADING_ZERO_TO = '0x00abcdef0000000000000000000000000000cdef';
   const PADDED_KEY = LEADING_ZERO_TO; // already 40 nibbles, lowercase
   const syntheticEnvelope = {
@@ -183,7 +183,7 @@ describe('normalizeGethTrace account-key padding (leading-zero address)', () => 
     ],
   };
 
-  it('keys storageChanges by the ZERO-PADDED address, not minimal hex', () => {
+  it('keys storageChanges by the zero-padded address, not minimal hex', () => {
     const steps = normalizeGethTrace(syntheticEnvelope, {
       to: LEADING_ZERO_TO,
       from: '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266',
@@ -212,7 +212,7 @@ describe('normalizeGethTrace account-key padding (leading-zero address)', () => 
   });
 });
 
-// ── 3. geth steps feed StateCursor identically to kontrol steps ────────────────
+// ## 3. geth steps feed StateCursor identically to kontrol steps
 
 describe('normalizeGethTrace → StateCursor', () => {
   it('accumulates storage so slot 0 reads back as 42 at the terminal step', () => {
@@ -229,24 +229,19 @@ describe('normalizeGethTrace → StateCursor', () => {
   });
 });
 
-// ── 4. Multi-frame CALL reconstruction ────────────────────────────────────────
+// ## 4. Multi-frame CALL reconstruction
 //
-// The geth dialect carries NO per-step codeAddress. In the single-frame case
-// `normalizeGethTrace` sets codeAddress = targetAddress = ctx.to for EVERY step.
-// For a tx that CALLs another contract, that is WRONG for the callee's steps:
-// they must run the CALLEE's code/storage, with the caller as msg.sender.
+// The geth dialect carries no per-step codeAddress. For a tx that CALLs another
+// contract, the callee's steps must run the callee's code/storage, with the
+// caller as msg.sender.
 //
 // `normalizeGethTrace` reconstructs per-step frames from the CALL-family
 // opcodes + `depth` transitions: a plain CALL pushes a
 // frame {code: callee, storage: callee, sender: callerCode}; the callee address
-// is `stack[len-2]` of the CALL op (top-of-stack LAST). Storage is then keyed
-// under the TOP FRAME's storage account, not always ctx.to.
-//
-// These assertions FAIL today because every step's codeAddress is ctx.to (the
-// caller) and all storage is keyed under the caller — the depth-2 (callee)
-// expectations below currently resolve to the caller address instead.
+// is `stack[len-2]` of the CALL op (top of stack last). Storage is keyed under
+// the top frame's storage account, not always ctx.to.
 
-/** REAL recorded anvil multi-frame trace: Caller.go(callee,7) → Callee.compute(7). */
+/** Recorded anvil multi-frame trace: Caller.go(callee,7) → Callee.compute(7). */
 const CALLER_GO_RAW = readFileSync(
   new URL(
     '../../debugger/test/fixtures/caller-go-anvil-trace.raw.json',
@@ -280,7 +275,7 @@ const callerGoEnvelope = (parseJsonLossless(CALLER_GO_RAW) as {result: unknown})
 // anvil account #0 — the tx origin / msg.sender of the top-level Caller frame.
 const ACCT0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
-/** The tx context: this tx is Caller.go(...), so ctx.to = the CALLER contract. */
+/** The tx context: this tx is Caller.go(...), so ctx.to = the caller contract. */
 const callTxContext = {
   to: CALL_META.callerAddress,
   from: ACCT0,
@@ -320,17 +315,17 @@ describe('normalizeGethTrace multi-frame CALL reconstruction', () => {
     expect(steps[248]!.depth).toBe(1);
     expect(steps[249]!.depth).toBe(2);
 
-    // A depth-1 step BEFORE the CALL runs the Caller's code.
+    // A depth-1 step before the CALL runs the Caller's code.
     expect(steps[247]!.codeAddress).toBe(CALLER);
     // The CALL op itself is still in the Caller frame.
     expect(steps[248]!.codeAddress).toBe(CALLER);
 
-    // Every depth-2 step runs the CALLEE's code — the first, a mid step, the last.
+    // Every depth-2 step runs the callee's code — the first, a mid step, the last.
     expect(steps[249]!.codeAddress).toBe(CALLEE);
     expect(steps[300]!.codeAddress).toBe(CALLEE);
     expect(steps[562]!.codeAddress).toBe(CALLEE);
 
-    // After the callee RETURNs, control is back in the Caller frame.
+    // After the callee returns, control is back in the Caller frame.
     expect(steps[563]!.codeAddress).toBe(CALLER);
     expect(steps[600]!.codeAddress).toBe(CALLER);
 
@@ -361,8 +356,8 @@ describe('normalizeGethTrace multi-frame CALL reconstruction', () => {
     const calleeKey = accountKey(CALL_META.calleeAddress);
     const callerKey = accountKey(CALL_META.callerAddress);
 
-    // Callee's SSTORE (stored = x*2 = 14 = 0xe) lands under the CALLEE account,
-    // at slot 0 — NOT under the caller account (the single-frame behavior).
+    // Callee's SSTORE (stored = x*2 = 14 = 0xe) lands under the callee account,
+    // at slot 0, not under the caller account.
     const calleeStore = steps[439]!.storageChanges;
     expect(steps[439]!.depth).toBe(2);
     expect(steps[439]!.op).toBe('SSTORE');
@@ -370,7 +365,7 @@ describe('normalizeGethTrace multi-frame CALL reconstruction', () => {
     expect(calleeStore[callerKey]).toBeUndefined();
     expect(BigInt(calleeStore[calleeKey]!['0x0']!)).toBe(14n);
 
-    // Caller's SSTORE (result = x*2+1 = 15 = 0xf) lands under the CALLER account.
+    // Caller's SSTORE (result = x*2+1 = 15 = 0xf) lands under the caller account.
     const callerStore = steps[669]!.storageChanges;
     expect(steps[669]!.depth).toBe(1);
     expect(steps[669]!.op).toBe('SSTORE');
@@ -394,9 +389,9 @@ describe('normalizeGethTrace multi-frame CALL reconstruction', () => {
   });
 });
 
-// ── 5. Regression: single-frame geth path is unchanged ────────────────────────
+// ## 5. Single-frame geth traces
 
-describe('normalizeGethTrace single-frame regression (anvil setNumber)', () => {
+describe('normalizeGethTrace single-frame trace (anvil setNumber)', () => {
   it('keeps every step at depth 1 with codeAddress = ctx.to (the counter)', () => {
     const steps = normalizeGethTrace(anvilEnvelope, txContext);
     expect(steps).toHaveLength(118);
@@ -409,7 +404,7 @@ describe('normalizeGethTrace single-frame regression (anvil setNumber)', () => {
     }
   });
 
-  it('still lifts slot 0 = 42 through StateCursor (unchanged)', () => {
+  it('lifts slot 0 = 42 through StateCursor', () => {
     const steps = normalizeGethTrace(anvilEnvelope, txContext);
     const cursor = new StateCursor(steps);
     const account = cursor.at(117).accounts.get(META.txTo);
@@ -417,9 +412,9 @@ describe('normalizeGethTrace single-frame regression (anvil setNumber)', () => {
     expect(BigInt(account!.storage[MINIMAL_SLOT0]!)).toBe(42n);
   });
 
-  // A geth trace has NO block context / tx.gasprice: the optional Globals-scope
-  // fields the kontrol path populates MUST stay undefined here (the "unavailable"
-  // signal the debugger's availability rule reads to omit `block` / `tx.gasprice`).
+  // A geth trace has no block context / tx.gasprice: the optional Globals-scope
+  // fields the kontrol path populates stay undefined here, which the debugger
+  // reads as "unavailable" and omits `block` / `tx.gasprice`.
   it('leaves the block/tx context fields undefined (unavailable in geth)', () => {
     for (const s of normalizeGethTrace(anvilEnvelope, txContext)) {
       expect(s.gasPrice).toBeUndefined();
@@ -435,14 +430,14 @@ describe('normalizeGethTrace CREATE frames (init code)', () => {
   // The address the CREATE deploys — pushed onto the creator's stack on return.
   const CREATED = '0x00000000000000000000000000000000000000ab';
   // A minimal trace: creator runs, executes CREATE (stack = value,offset,size),
-  // the constructor's INIT code runs at depth 2, RETURNs, back to the creator.
+  // the constructor's init code runs at depth 2 and returns to the creator.
   const CREATE_ENVELOPE = {
     failed: false,
     gas: 100000,
     returnValue: '',
     structLogs: [
       {pc: 0, op: 'PUSH1', gas: 100000, gasCost: 3, depth: 1, stack: []},
-      // CREATE op at depth 1; its stack is (value, offset, size) — NOT an address.
+      // CREATE op at depth 1; its stack is (value, offset, size), not an address.
       {
         pc: 2,
         op: 'CREATE',
@@ -473,8 +468,8 @@ describe('normalizeGethTrace CREATE frames (init code)', () => {
       true, //  init code RETURN (depth 2)
       false, // back in creator (STOP)
     ]);
-    // The constructor frame's codeAddress is the CREATED address (recovered from
-    // the frame's return), so its INIT code resolves to the created contract.
+    // The constructor frame's codeAddress is the created address (recovered from
+    // the frame's return), so its init code resolves to the created contract.
     expect(steps[2]!.codeAddress).toBe(BigInt(CREATED));
     expect(steps[3]!.codeAddress).toBe(BigInt(CREATED));
     // The creator frame is unchanged.

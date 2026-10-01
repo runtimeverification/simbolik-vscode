@@ -1,25 +1,25 @@
 /**
  * The client-side stepping model.
  *
- * kontrol-node is an EAGER whole-trace tracer, so every stepping operation is a
+ * The trace is recorded in full up front, so every stepping operation is a
  * pure walk over the known `Step[]` using source-map-derived per-step metadata.
  * This module precomputes that metadata once per launch and exposes the
  * target-finding functions the DAP session consumes.
  *
- * The precompute is PER-STEP-CONTRACT-AWARE: a single trace can span
+ * The precompute is contract-aware per step: a single trace can span
  * multiple compilation units (an external CALL runs the callee's code), so each
  * step is resolved to its own `{contract, cu}` via a caller-supplied resolver and
- * its source position is read against THAT contract's runtime source map and CU
+ * its source position is read against that contract's source map and CU
  * (fileIds are per-CU, not globally 0). Optimized frames additionally fall back
- * to LINE-based stepping (statement identity is unreliable under optimization).
+ * to line-based stepping (statement identity is unreliable under optimization).
  *
  * The load-bearing subtleties:
  * - `combinedDepth(i) = step.depth + jumpDepthBefore(i)`, where the source-map
  *   jump flag of step i (`'i'`→+1, `'o'`→-1) is applied *after* step i, so the
  *   JUMPDEST landing carries the incremented depth. This captures Solidity
- *   INTERNAL calls, which are plain JUMPs at constant EVM depth.
- * - `isStmtStart(i)` compares against the most recent EARLIER step (in trace
- *   order, skipping unmapped steps) that had a defined `stmtId` — NOT the
+ *   internal calls, which are plain JUMPs at constant EVM depth.
+ * - `isStmtStart(i)` compares against the most recent earlier step (in trace
+ *   order, skipping unmapped steps) that had a defined `stmtId` — not the
  *   bytecode-adjacent instruction — so re-entering a statement after a nested
  *   one counts as a fresh start.
  */
@@ -58,9 +58,9 @@ export interface StepMeta {
   /** EVM depth + folded Solidity jump depth. */
   combinedDepth: number;
   /**
-   * The source-map jump flag of THIS step's executing instruction (`'i'` into a
-   * function/modifier, `'o'` out of one, `'-'` neither). Read-only metadata used
-   * by internal-frame reconstruction; the fold above is unchanged.
+   * The source-map jump flag of this step's executing instruction (`'i'` into a
+   * function/modifier, `'o'` out of one, `'-'` neither). Used by internal-frame
+   * reconstruction.
    */
   jump: Jump;
   /** Raw EVM call depth (no folded internal jumps) — for instruction stepping. */
@@ -73,7 +73,7 @@ export interface StepMeta {
   optimized: boolean;
   /**
    * Whether the resolved CU was compiled with `--via-ir`. The out-of-order
-   * straight-line SETUP artifact ({@link #isBackwardSetupArtifact}) is a viaIR
+   * straight-line setup artifact ({@link #isBackwardSetupArtifact}) is a viaIR
    * codegen phenomenon, so that heuristic is gated on this flag and never runs on
    * classic (legacy) codegen.
    */
@@ -91,9 +91,9 @@ export interface StepMeta {
   stmtRange: {path: string; start: number; end: number} | undefined;
   /** The statement's AST node type (e.g. `IfStatement`), or undefined. */
   stmtType: string | undefined;
-  /** A `jump:'o'` out of a USER function (not the dispatcher / a contract-level routine). */
+  /** A `jump:'o'` out of a user function (not the dispatcher / a contract-level routine). */
   returnsFromUser: boolean;
-  /** viaIR: mapped to a function/modifier HEADER (its parameter/return lists). */
+  /** viaIR: mapped to a function/modifier header (its parameter/return lists). */
   inHeader: boolean;
   /** viaIR: the landing step of a `jump:'i'` that maps to the callee's definition. */
   fnEntry: boolean;
@@ -123,7 +123,7 @@ function inParameterList(node: AstNode): boolean {
 
 /**
  * A stop position: a trace step, or — when `beforeModifier` — the moment just
- * BEFORE that step, where it begins a modifier's execution. The latter shows the
+ * before that step, where it begins a modifier's execution. The latter shows the
  * modified function's frame positioned on the modifier's invocation in its
  * header, so stepping into a modified function enters one frame at a time: the
  * function (at its first modifier), then each modifier, then the body.
@@ -149,7 +149,7 @@ export interface ModifierEntry {
  * Modifier-entry detection, per combinedDepth level (a function and its
  * modifiers share one level): the level's current function and the index of
  * the last of its modifier invocations that began. A step entering a modifier
- * whose invocation comes LATER than that is an entry; entering an earlier one is
+ * whose invocation comes later than that is an entry; entering an earlier one is
  * a modifier resuming after its `_;`.
  */
 class ModifierEntryDetector {
@@ -240,27 +240,26 @@ export class SteppingModel {
       step: number;
       pos: {path: string; line: number; col: number};
     }[] = [];
-    // Internal-function nesting is folded PER RAW-EVM-FRAME, not globally.
+    // Internal-function nesting is folded per raw EVM frame, not globally.
     // `frameJumps[d-1]` is the internal-call ('jump:i' minus 'jump:o') depth
-    // accrued WITHIN the frame at raw EVM depth `d`; `internalSum` is their total.
+    // accrued within the frame at raw EVM depth `d`; `internalSum` is their total.
     // combinedDepth = rawDepth + internalSum (the full logical call-stack depth).
-    // When an external CALL/CREATE returns, its frame is POPPED and its internal
-    // jumps are discarded from `internalSum` — so a callee's unbalanced fold
-    // cannot leak into the caller. A single global accumulator (the previous
-    // design) drifted upward whenever a mapped 'jump:i' had no matching mapped
-    // 'jump:o' — which happens constantly on real traces, where unmapped steps
-    // (foreign code, unidentified constructor/init code) carry 'jump:-'. That
-    // drift inflated later combinedDepths so `next`/`stepOut` (which stop at the
-    // first statement with `combinedDepth <= origin`) skipped their target and
-    // ran to the terminal step.
+    // When an external CALL/CREATE returns, its frame is popped and its internal
+    // jumps are discarded from `internalSum`, so a callee's unbalanced fold
+    // cannot leak into the caller. Unbalanced folds are common: unmapped
+    // steps (foreign code, unidentified constructor/init code) carry 'jump:-',
+    // so a mapped 'jump:i' often has no matching mapped 'jump:o'. A leaked fold
+    // would inflate later combinedDepths so `next`/`stepOut` (which stop at the
+    // first statement with `combinedDepth <= origin`) skip their target and
+    // run to the terminal step.
     //
-    // Each frame keeps a STACK of the weights of its open internal calls, so a
+    // Each frame keeps a stack of the weights of its open internal calls, so a
     // 'jump:o' removes exactly what its 'jump:i' added. Under viaIR a modifier is
     // its own Yul function and its `_;` is a 'jump:i' into the function body;
     // those jumps weigh 0 so a modified function's body (and its modifiers) sit
     // at the function's own level — as on legacy, which inlines modifiers.
     // Otherwise `next` from a modifier line would step over the whole body.
-    // A 'jump:i' is weighed when its LANDING step is known (it decides whether
+    // A 'jump:i' is weighed when its landing step is known (it decides whether
     // the jump enters a modifier), hence `pendingCall`.
     const frameJumps: number[][] = [];
     let internalSum = 0;
@@ -284,12 +283,11 @@ export class SteppingModel {
       const optimized = resolution?.optimized ?? false;
       const viaIR = resolution?.cu.viaIR() ?? false;
 
-      // A CREATE/CREATE2 frame runs the constructor's INIT code, indexed by the
+      // A CREATE/CREATE2 frame runs the constructor's init code, indexed by the
       // init source map (`isInitCode`), not the runtime map. If the frame's
-      // contract wasn't identified (the pc won't be a valid init instruction),
-      // the pc does not map and the step stays unmapped — so statement stepping
-      // steps OVER an unresolved constructor rather than mis-mapping it (which
-      // previously corrupted `combinedDepth`).
+      // contract wasn't identified, the step stays unmapped — so statement
+      // stepping steps over an unresolved constructor rather than mis-mapping
+      // it (which would corrupt `combinedDepth`).
       const mapped =
         resolution !== undefined
           ? mapPc(resolution.contract, resolution.cu, st.pc, st.isInitCode)
@@ -392,7 +390,7 @@ export class SteppingModel {
         lastPath = path;
         lastLine = line;
       }
-      // Fold this step's jump into the CURRENT frame AFTER recording its depth,
+      // Fold this step's jump into the current frame after recording its depth,
       // so the landing step (not the JUMP itself) carries the changed depth. A
       // 'jump:o' is clamped at 0 so a frame that returns more than it entered
       // (e.g. a 'jump:o' whose matching 'jump:i' was unmapped) cannot go negative.
@@ -422,7 +420,7 @@ export class SteppingModel {
 
   /**
    * viaIR hoists single `PUSHn <return label>` instructions ahead of a call and
-   * attributes each to a LATER statement. Such a one-step PUSH whose next step is
+   * attributes each to a later statement. Such a one-step PUSH whose next step is
    * a different statement is not that statement's start (it would bounce the
    * walk between lines / show them out of order), and must not count as the
    * statement having begun. Recomputes `isStmtStart` accordingly.
@@ -453,10 +451,10 @@ export class SteppingModel {
    * viaIR function prologue: on entry the first body statement often gets a
    * one-step mark, then the header code runs (parameter/return declarations, a
    * zero-init helper), and only then the statement really starts. The mark is
-   * discarded as a blip, but it already made the real start "not new", so the
-   * function's first statement — or a one-statement helper entirely — got no
-   * stop. After each entry, clear starts up to the last header step and force a
-   * start on the first statement step after it.
+   * discarded as a blip, but it would make the real start "not new", leaving
+   * the function's first statement — or a one-statement helper entirely —
+   * without a stop. So after each entry, clear starts up to the last header
+   * step and force a start on the first statement step after it.
    */
   #restorePrologueStarts(): void {
     const meta = this.#meta;
@@ -490,10 +488,10 @@ export class SteppingModel {
   }
 
   /**
-   * After a branch/loop body, the join code is mapped to the WHOLE enclosing
-   * `if`/`for`/`while`, which made the walk climb back up an if/else-if chain
-   * and stop on a `for` header several times per iteration. A compound
-   * statement's step is a stop only when entered from OUTSIDE it — not when the
+   * After a branch/loop body, the join code is mapped to the whole enclosing
+   * `if`/`for`/`while`, which would make the walk climb back up an if/else-if
+   * chain and stop on a `for` header several times per iteration. A compound
+   * statement's step is a stop only when entered from outside it — not when the
    * frame's previous statement lies inside it.
    */
   #dropCompoundJoins(): void {
@@ -536,11 +534,11 @@ export class SteppingModel {
 
   /**
    * viaIR maps a function's (or modifier's) code up to its first call to the
-   * definition's HEADER, so when the body starts with a call — `f(); …`,
+   * definition's header, so when the body starts with a call — `f(); …`,
    * `modifier m() { check(); _; }` — no statement starts before the callee's, and
-   * the first stop after entering lies INSIDE the callee: step-into (and the
-   * launch stop) entered two frames at once. Such an entry step becomes a stop
-   * itself, shown at the body's first statement.
+   * the first stop after entering lies inside the callee: step-into (and the
+   * launch stop) would enter two frames at once. Such an entry step becomes a
+   * stop itself, shown at the body's first statement.
    */
   #markCallFirstEntries(
     candidates: {step: number; pos: {path: string; line: number; col: number}}[],
@@ -588,7 +586,7 @@ export class SteppingModel {
   }
 
   /**
-   * Whether the statement at `index` reappears at the SAME combinedDepth before
+   * Whether the statement at `index` reappears at the same combinedDepth before
    * that depth changes — i.e. it briefly yielded to another line (viaIR call-arg
    * setup) but resumes and keeps executing, rather than being a one-shot prologue
    * blip. Used to keep `#persists` from discarding a real statement.
@@ -608,7 +606,7 @@ export class SteppingModel {
   readonly #lastInFrame = new Map<number, boolean>();
 
   /**
-   * Whether no OTHER statement starts in the frame of `index` (same
+   * Whether no other statement starts in the frame of `index` (same
    * combinedDepth) before that frame returns. Memoized.
    */
   #isLastInFrame(index: number): boolean {
@@ -629,17 +627,17 @@ export class SteppingModel {
   }
 
   /**
-   * Whether the statement starting at `index` is REAL execution rather than a
+   * Whether the statement starting at `index` is real execution rather than a
    * compiler entry-prologue artifact. On entering a function, solc emits local-
    * variable initialization code whose source maps point at the declaration/use
-   * statements OUT OF SOURCE ORDER — each visited for a single step before control
+   * statements out of source order — each visited for a single step before control
    * returns to the function-definition line. Those transient visits are marked
    * `isStmtStart` too, so a naive "first statement start" lands on the wrong
-   * (often the LAST) source line of the function.
+   * (often the last) source line of the function.
    *
-   * A genuine statement's execution STAYS in it (the next step carries the same
-   * `stmtId`) or DESCENDS into it (the next step is at a greater combinedDepth);
-   * a prologue init is abandoned immediately — the next step is a DIFFERENT
+   * A genuine statement's execution stays in it (the next step carries the same
+   * `stmtId`) or descends into it (the next step is at a greater combinedDepth);
+   * a prologue init is abandoned immediately — the next step is a different
    * statement (or the unmapped function-definition line) at the same-or-shallower
    * combinedDepth. The terminal step is treated as persistent.
    */
@@ -648,10 +646,11 @@ export class SteppingModel {
     const cur = this.#meta[index]!;
     const nxt = this.#meta[index + 1]!;
     // viaIR: after returning from a user function, the caller statement may get
-    // only a single JUMPDEST step. When that call was the caller's LAST statement,
-    // that step is the caller's only remaining stop — discarding it made step-out
-    // skip up TWO levels. (If another caller statement follows, the normal guard
-    // applies and step-out lands there, as on legacy.) Not for a `_;` landing
+    // only a single JUMPDEST step. When that call was the caller's last
+    // statement, that step is the caller's only remaining stop — discarding it
+    // would make step-out skip up two levels. (If another caller statement
+    // follows, the normal guard applies and step-out lands there, as on
+    // legacy.) Not for a `_;` landing
     // (the modifier resuming after the function body).
     if (
       cur.viaIR &&
@@ -664,8 +663,8 @@ export class SteppingModel {
       return true;
     }
     // One-step guard: a single-step out-of-order artifact (the next step is a
-    // DIFFERENT statement at the same-or-shallower depth) is abandoned at once —
-    // UNLESS the statement RESUMES at the same depth (it does real work after
+    // different statement at the same-or-shallower depth) is abandoned at once —
+    // unless the statement resumes at the same depth (it does real work after
     // briefly yielding, e.g. a viaIR call statement whose argument setup is
     // attributed to the function-declaration line before the call descends). A
     // genuine prologue blip never resumes; a real statement does.
@@ -676,30 +675,30 @@ export class SteppingModel {
     ) {
       return false;
     }
-    // Multi-step guard: a viaIR straight-line SETUP artifact (see below).
+    // Multi-step guard: a viaIR straight-line setup artifact (see below).
     return !this.#isBackwardSetupArtifact(index);
   }
 
   /**
-   * Whether the statement-start at `index` is a viaIR straight-line SETUP
+   * Whether the statement-start at `index` is a viaIR straight-line setup
    * artifact rather than the statement's real execution.
    *
    * Under `--via-ir`, solc lays out a function's argument/return-slot setup as one
    * contiguous straight-line block and attributes each little stack-shuffling
    * group (typically bare `PUSH`es) to whichever statement's variables it touches
-   * — OUT OF SOURCE ORDER and possibly SEVERAL steps long, so the one-step
+   * — out of source order and possibly several steps long, so the one-step
    * {@link #persists} guard does not catch it. Concretely, a multi-arg statement's
    * source position is emitted for setup instructions that physically precede an
-   * EARLIER statement's real call, then control falls straight through to that
+   * earlier statement's real call, then control falls straight through to that
    * earlier statement. Stopping there strands step-into/step-over on a later
    * source line before the real next statement has run.
    *
    * The run of steps that stay in this statement (same `stmtId`) at its own depth
-   * is examined: if it ever DESCENDS into a sub-call (a deeper combinedDepth) or
-   * the frame RETURNS (a shallower one), the statement does real work and is kept.
+   * is examined: if it ever descends into a sub-call (a deeper combinedDepth) or
+   * the frame returns (a shallower one), the statement does real work and is kept.
    * Otherwise the run is flat; the step that leaves it is the exit. A genuine
    * backward flow (loop back-edge, `continue`) reaches its target via a taken
-   * JUMP, so only a FALL-THROUGH (the last run step is not a jump) to an EARLIER
+   * JUMP, so only a fall-through (the last run step is not a jump) to an earlier
    * statement (a smaller AST id, i.e. earlier in the frame's execution) is the
    * artifact. Forward fall-through (ordinary sequential statements, a loop's
    * final exit test) is real.
@@ -722,12 +721,12 @@ export class SteppingModel {
       const prev = this.#meta[j - 1]!;
       if (prev.isJump) return false;
       if (prev.isJumpdest && j >= 2 && this.#meta[j - 2]!.isJump) return false;
-      // Fall-through to a DIFFERENT statement at the same depth. Under viaIR the
-      // argument setup of a CALL statement is attributed alternately to the
+      // Fall-through to a different statement at the same depth. Under viaIR the
+      // argument setup of a call statement is attributed alternately to the
       // statement and to its function-declaration line (a smaller AST id) before
       // the call actually descends — so `s` briefly yields to an earlier line and
-      // then RESUMES and does its real work (e.g. a 1-line forwarder
-      // `x() { y(...); }`). Only a GENUINE blip — one that never resumes in this
+      // then resumes and does its real work (e.g. a 1-line forwarder
+      // `x() { y(...); }`). Only a genuine blip — one that never resumes in this
       // same-depth run — is a setup artifact. If `s` resumes, keep scanning so the
       // descend/return checks above decide (they will see the real sub-call).
       let resumes = false;
@@ -740,7 +739,7 @@ export class SteppingModel {
         }
       }
       if (resumes) continue;
-      // Fall-through to an EARLIER statement, by SOURCE position — AST ids are no
+      // Fall-through to an earlier statement, by source position — AST ids are no
       // order (a nested else-if is a child of the outer if, with a smaller id).
       const r = cur.stmtRange;
       const mr = m.stmtRange;
@@ -764,7 +763,7 @@ export class SteppingModel {
    * the smallest j>O at or below the origin depth whose (path, line) differs.
    * Transient entry-prologue artifacts (see {@link #persists}) are skipped: solc
    * can emit a later statement's source position for a single step at the
-   * caller's own depth BEFORE the real next statement, which would otherwise make
+   * caller's own depth before the real next statement, which would otherwise make
    * step-over jump forward past several statements to that out-of-order line.
    */
   next(origin: number): number {
@@ -797,7 +796,7 @@ export class SteppingModel {
 
   /**
    * Instruction `next` (step-over at instruction granularity): the very next
-   * step, EXCEPT that an external subcall (CALL/CREATE — a RAW EVM depth
+   * step, except that an external subcall (CALL/CREATE — a raw EVM depth
    * increase) is run to completion. Target = smallest j>O whose raw EVM depth is
    * ≤ the origin's; for a non-call opcode that is simply O+1. Internal Solidity
    * calls are plain JUMPs at constant EVM depth, so — correctly for a disassembly
@@ -811,7 +810,7 @@ export class SteppingModel {
     return this.last;
   }
 
-  /** Instruction `stepOut`: smallest j>O at a shallower RAW EVM depth. */
+  /** Instruction `stepOut`: smallest j>O at a shallower raw EVM depth. */
   stepOutInstruction(origin: number): number {
     const d = this.#meta[origin]!.depth;
     for (let j = origin + 1; j <= this.last; j++) {
@@ -821,7 +820,7 @@ export class SteppingModel {
   }
 
   /**
-   * `stepIn`: smallest j>O that starts a different, REAL statement (any depth).
+   * `stepIn`: smallest j>O that starts a different, real statement (any depth).
    * Entry-prologue statement-starts (see {@link #persists}) are skipped, so
    * stepping into a function lands on its first executed statement rather than a
    * variable-init artifact mapped to a later source line.
@@ -836,7 +835,7 @@ export class SteppingModel {
   }
 
   /**
-   * `stepOut`: smallest j>O that starts a REAL statement strictly shallower.
+   * `stepOut`: smallest j>O that starts a real statement strictly shallower.
    * Transient entry-prologue artifacts (see {@link #persists}) are skipped.
    */
   stepOut(origin: number): number {
@@ -849,7 +848,7 @@ export class SteppingModel {
   }
 
   /**
-   * `stepBack`: largest j<O that starts a REAL statement — one forward stepping
+   * `stepBack`: largest j<O that starts a real statement — one forward stepping
    * could stop at (transient artifacts, see {@link #persists}, are skipped); stay
    * at 0 if none.
    */
@@ -860,7 +859,7 @@ export class SteppingModel {
     return 0;
   }
 
-  // ─── stops (steps + before-modifier positions) ────────────────────────────
+  // ## stops (steps + before-modifier positions)
 
   /** The modifier entry at `step`, if that step begins a modifier. */
   modifierEntry(step: number): ModifierEntry | undefined {
@@ -971,7 +970,7 @@ export class SteppingModel {
 
   /**
    * `continue`: smallest j>O that is an armed breakpoint stop; terminal if none.
-   * Breakpoints are path-keyed: a step matches only when its RESOLVED source
+   * Breakpoints are path-keyed: a step matches only when its resolved source
    * path + line is armed (so a Callee-source line does not match a Caller line).
    */
   continue(origin: number, breakpoints: ReadonlyMap<string, ReadonlySet<number>>): number {
@@ -997,7 +996,7 @@ export class SteppingModel {
 
   /**
    * Whether step `index` is a valid breakpoint stop for `breakpoints`: its
-   * resolved (path, line) must be armed AND it must be a genuine stop candidate
+   * resolved (path, line) must be armed and it must be a genuine stop candidate
    * — a statement start for unoptimized frames, or a line start for optimized
    * frames (statement identity is unreliable under optimization).
    */

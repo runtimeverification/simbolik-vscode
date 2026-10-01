@@ -82,9 +82,8 @@ function shellQuote(s: string): string {
  *     --gas-limit 10000000000 --disable-code-size-limit
  *
  * `--steps-tracing` is required or `debug_traceTransaction` returns empty
- * `structLogs`. `--gas-limit` (matching the server's `TX_GAS`) and
- * `--disable-code-size-limit` let anvil deploy the large test contracts Foundry
- * projects routinely produce (a `Test`/`Deployers` heir can have a >180 KB
+ * `structLogs`. `--gas-limit` and `--disable-code-size-limit` let anvil deploy
+ * the large test contracts Foundry projects routinely produce (a `Test`/`Deployers` heir can have a >180 KB
  * runtime, over the 24576-byte EIP-170 limit, whose code-deposit gas exceeds the
  * default 30M block limit) — without them, the deploy silently fails and the
  * traced call has no code to execute. `anvilPath` defaults to the bare command

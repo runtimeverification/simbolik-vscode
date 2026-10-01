@@ -23,10 +23,8 @@ const trace = batch[1].result;
 const DEPLOY_ADDR = '0x5fbdb2315678afecb367f032d93f642f64180aa3';
 const SENDER_ADDR = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
 
-// ---------------------------------------------------------------------------
-// StateCursor over the REAL fixture: length, carry-forward blobs, account
+// ## StateCursor over the recorded fixture: length, carry-forward blobs, account
 // seeding, terminality, and range checking.
-// ---------------------------------------------------------------------------
 describe('StateCursor (real fixture)', () => {
   const steps = normalizeKontrolTrace(trace);
 
@@ -97,8 +95,8 @@ describe('StateCursor (real fixture)', () => {
   it('never accumulates storage or deployed code for this fixture', () => {
     const cursor = new StateCursor(steps);
     const last = cursor.at(cursor.length - 1);
-    // Ground truth: the trace writes zero slots, so the accumulated storage map
-    // is empty (⊇ every slot the trace wrote == ∅) and no runtime code is set.
+    // The trace writes no slots, so the accumulated storage map is empty and no
+    // runtime code is set.
     for (const account of last.accounts.values()) {
       expect(account.storage).toEqual({});
       expect(account.code).toBeUndefined();
@@ -120,11 +118,9 @@ describe('StateCursor (real fixture)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Synthetic Step[] to pin the fine-grained accumulation semantics that the real
-// fixture never exercises: per-slot storage merge, balance/nonce/code/initCode
-// REPLACEMENT, blob carry-forward, and default blob values.
-// ---------------------------------------------------------------------------
+// ## Synthetic Step[] to pin the fine-grained accumulation semantics that the
+// recorded fixture never exercises: per-slot storage merge, balance/nonce/code/
+// initCode replacement, blob carry-forward, and default blob values.
 function makeStep(index: number, over: Partial<Step> = {}): Step {
   return {
     index,
@@ -170,7 +166,7 @@ describe('StateCursor accumulation semantics (synthetic)', () => {
     }),
     // step 1: everything null/empty -> must carry the whole world forward.
     makeStep(1),
-    // step 2: add slot 1, REPLACE balance, set deployed runtime code.
+    // step 2: add slot 1, replace balance, set deployed runtime code.
     makeStep(2, {
       balanceChanges: {[ACC]: '0x2'},
       deployedCodeChanges: {[ACC]: '0xrun'},
@@ -194,7 +190,7 @@ describe('StateCursor accumulation semantics (synthetic)', () => {
     expect(s1.returnData).toBe('0xre');
   });
 
-  it('accumulates storage PER SLOT (new slots add, do not replace the map)', () => {
+  it('accumulates storage per slot (new slots add, do not replace the map)', () => {
     const cursor = new StateCursor(steps);
     const acc = cursor.at(2).accounts.get(ACC);
     expect(acc?.storage).toEqual({'0x0': '0x11', '0x1': '0x22'});
@@ -206,7 +202,7 @@ describe('StateCursor accumulation semantics (synthetic)', () => {
     expect(acc?.storage).toEqual({'0x0': '0x99', '0x1': '0x22'});
   });
 
-  it('REPLACES balance/nonce/code/initCode and keeps unchanged fields', () => {
+  it('replaces balance/nonce/code/initCode and keeps unchanged fields', () => {
     const cursor = new StateCursor(steps);
     const acc = cursor.at(2).accounts.get(ACC);
     expect(acc?.balance).toBe('0x2'); // replaced at step 2
@@ -246,10 +242,10 @@ describe('StateCursor accumulation semantics (synthetic)', () => {
     expect(() => cursor.at(-1)).toThrow(RangeError);
   });
 
-  // The contract requires at(i) to support RANDOM access (reverse-stepping).
-  // A checkpoint/replay or shared-mutable-accumulator implementation could pass
-  // every ascending test above yet corrupt state when jumped around. Pin that
-  // at(i) depends ONLY on i, never on prior call order.
+  // at(i) must support random access (reverse-stepping). A checkpoint/replay or
+  // shared-mutable-accumulator implementation could pass every ascending test
+  // above yet corrupt state when jumped around. Pin that at(i) depends only on
+  // i, never on prior call order.
   it('returns call-order-independent results under random access', () => {
     const ascending = [0, 1, 2, 3, 4].map((i) => new StateCursor(steps).at(i));
     const shared = new StateCursor(steps);
@@ -259,13 +255,11 @@ describe('StateCursor accumulation semantics (synthetic)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// initialStorage seeding: pre-trace state a prior tx wrote (e.g. Foundry
-// `setUp()`) and this trace only READS. A delta trace emits no SLOAD delta, so
+// ## initialStorage seeding: pre-trace state a prior tx wrote (e.g. Foundry
+// `setUp()`) and this trace only reads. A delta trace emits no SLOAD delta, so
 // without seeding those slots read as absent/zero. Seeded state must be visible
 // from step 0, be overwritten per-slot by a later SSTORE, and never leak into
 // accounts the trace never touches beyond what was seeded.
-// ---------------------------------------------------------------------------
 describe('StateCursor initialStorage seeding', () => {
   const OTHER = '0xother';
 

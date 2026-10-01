@@ -1,21 +1,21 @@
 /**
- * A dynamic STORAGE array (`arr`) and a value-member STORAGE struct
- * (`pt`) rendered as NESTED DAP variables, dereferenced through the real
+ * A dynamic storage array (`arr`) and a value-member storage struct (`pt`)
+ * rendered as nested DAP variables, dereferenced through the real
  * `@ethdebug/pointers` storage path.
  *
- * The storage analog of the memory struct / array work.
+ * The storage counterpart of arrays.test.ts / structs.test.ts.
  * `StorageRefs.populate()` sets, among others:
  *   `uint256[] public arr = [11, 22, 33];`  (slot 0 = length; elements at
  *                                            keccak256(slot0 word) + i)
  *   `Point public pt = {x: 5, y: 6};`        (slots 5, 6)
- * The producer (`generateEthdebugProgram`) emits their reference LAYOUT as storage
+ * The producer (`generateEthdebugProgram`) emits their reference layout as storage
  * pointers ($keccak256/$sum for the array base, consecutive slots for the struct);
  * the session dereferences + renders them nested, reusing the memory path.
  *
- * ── Trace ground-truth (storagerefs-populate-trace.raw.json) ───────────────────
- * Re-derived from the recorded trace (folded account storage). The chosen clean
- * body pc is 1064 — the FIRST own-contract step of line 35 (`emit Updated(7,100)`),
- * the last body statement, AFTER every storage write (arr lines 25-27, pt.x line
+ * ## Trace ground truth (storagerefs-populate-trace.raw.json)
+ * From the recorded trace (folded account storage). The chosen clean body pc is
+ * 1064 — the first own-contract step of line 35 (`emit Updated(7,100)`), the
+ * last body statement, after every storage write (arr lines 25-27, pt.x line
  * 33, pt.y line 34) has folded into the account. At that step:
  *   slot 0                                                             = 3 (arr len)
  *   keccak256(0x00..00)=0x290decd9…e563       +0 = 0xb (11)
@@ -24,14 +24,13 @@
  *   slot 5 = 5 (pt.x), slot 6 = 6 (pt.y)
  * `arr = [11, 22, 33]`, `pt = {x: 5, y: 6}` — pinned below as the oracle.
  *
- * ── KEY RISKS this exercises (contract §KEY RISKS) ─────────────────────────────
+ * ## What this exercises
  *   1. `$keccak256` on a storage slot — the array `List` base slot is
  *      `{$sum:[{$keccak256:<slot0 word>}, i]}`; the real deref must hash slot0's
  *      32-byte word to 0x290decd9…e563 and add i.
- *   2. `machineStateFor` reading a BIG keccak-derived storage slot — the element
+ *   2. `machineStateFor` reading a big keccak-derived storage slot — the element
  *      slots (0x290decd9…563/564/565) must resolve against the account storage
  *      keyed by their full 32-byte hex.
- * The expected values are pinned so the deref test is an oracle, not a tautology.
  */
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {bytesToHex, hexToBytes} from 'ethereum-cryptography/utils';
@@ -59,9 +58,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 const CU = 'storagerefs-build-info.json';
 const TRACE = 'storagerefs-populate-trace.raw.json';
@@ -88,7 +85,7 @@ const CLEAN_PC = 1064;
 const ARR_BASE_SLOT =
   '0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563';
 
-// ── Loose accessors for the storage producer fields ───────────────────────────
+// ## Loose accessors for the storage producer fields
 
 interface StorageArrayShape {
   pointer?: Pointer;
@@ -121,9 +118,7 @@ function byName(
   return new Map(list.map((v) => [v.name, v]));
 }
 
-// ---------------------------------------------------------------------------
-// 0. Fixture ground truth — read the folded storage directly (self-anchor)
-// ---------------------------------------------------------------------------
+// ## 0. Fixture ground truth — read the folded storage directly
 
 describe('fixture ground truth (folded account storage)', () => {
   it('slot0=3, keccak(0)+i = 11/22/33, slot5=5, slot6=6 at the clean body pc', () => {
@@ -157,9 +152,7 @@ describe('fixture ground truth (folded account storage)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 1. The storage array pointer dereferences to [11, 22, 33]
-// ---------------------------------------------------------------------------
+// ## 1. The storage array pointer dereferences to [11, 22, 33]
 
 describe('arr storage pointer dereferences through @ethdebug/pointers', () => {
   it('arr resolves to elements [11n, 22n, 33n] via the real storage $keccak256 deref', async () => {
@@ -176,9 +169,7 @@ describe('arr storage pointer dereferences through @ethdebug/pointers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. The struct member pointers dereference to x=5, y=6
-// ---------------------------------------------------------------------------
+// ## 2. The struct member pointers dereference to x=5, y=6
 
 describe('pt storage member pointers dereference through @ethdebug/pointers', () => {
   it('pt.x reads 5 and pt.y reads 6 at consecutive slots (real deref path)', async () => {
@@ -197,9 +188,7 @@ describe('pt storage member pointers dereference through @ethdebug/pointers', ()
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. The session renders arr + pt as nested DAP variables (State scope)
-// ---------------------------------------------------------------------------
+// ## 3. The session renders arr + pt as nested DAP variables (State scope)
 
 describe('session renders arr as a nested storage DAP variable', () => {
   it('arr has a non-zero variablesReference; children 0=11, 1=22, 2=33 (uint256)', async () => {
@@ -254,30 +243,26 @@ describe('session renders pt as a nested storage DAP variable', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3b. The session parity-selects + renders the three dynamic
-//     string/bytes STORAGE vars as SCALAR DAP variables.
+// 3b. The session renders the three dynamic string/bytes storage vars as
+//     scalar DAP variables, choosing the short/long encoding by the low bit.
 //
-// Ground truth re-derived from the folded account storage in
-// storagerefs-populate-trace.raw.json (contract 0x5fbdb231…80aa3) and verified
-// against ethereum-cryptography/keccak:
-//   slot 1 = 0x68656c6c6f…0a   → low byte 0x0a EVEN (short); len 5; high 5 bytes
+// Ground truth (folded account storage in storagerefs-populate-trace.raw.json,
+// contract 0x5fbdb231…80aa3; hashes via ethereum-cryptography/keccak):
+//   slot 1 = 0x68656c6c6f…0a   → low byte 0x0a even (short); len 5; high 5 bytes
 //                                 0x68656c6c6f = "hello".
-//   slot 2 = 0x49              → low byte 0x49 ODD (long); len (0x49−1)/2 = 36;
+//   slot 2 = 0x49              → low byte 0x49 odd (long); len (0x49−1)/2 = 36;
 //            data at keccak256(pad32(2)) = 0x405787fa…5ace and slot+1, first 36
 //            bytes = "abcdefghijklmnopqrstuvwxyz0123456789".
-//   slot 3 = 0xdeadbeef…08     → low byte 0x08 EVEN (short bytes); len 4; high 4
+//   slot 3 = 0xdeadbeef…08     → low byte 0x08 even (short bytes); len 4; high 4
 //                                 bytes 0xdeadbeef.
 //
-// Rendered SCALAR (variablesReference 0). Strings are QUOTED ('"hello"') matching
-// the memory `label` convention pinned in arrays.test.ts (`label!.value === '"hi"'`,
-// type contains 'string'); bytes render as a bare `0x…` hex string, type 'bytes'.
+// Rendered scalar (variablesReference 0). Strings are quoted ('"hello"'), like
+// the memory `label` in arrays.test.ts (`label!.value === '"hi"'`, type contains
+// 'string'); bytes render as a bare `0x…` hex string, type 'bytes'.
 //
-// IMPLEMENTER NOTE (edge, not in this fixture — do NOT add a fixture for it):
-// the zero-length case is `b = 0` (EVEN → short, len 0) → empty bytes → `""` for a
-// string / `0x` for bytes. Guard the decode so len-0 does not read a high-byte slice
-// past the word or a 0-word long read; there is no populate() var exercising it here.
-// ---------------------------------------------------------------------------
+// Not covered by this fixture: the zero-length case `b = 0` (even → short,
+// len 0) → empty bytes → `""` for a string / `0x` for bytes. The decode must
+// not read a high-byte slice past the word or do a 0-word long read for it.
 
 describe('session renders string/bytes storage as scalar DAP variables', () => {
   it('shortStr → the quoted UTF-8 string "hello" (short/inline), scalar, type string', async () => {
@@ -308,13 +293,11 @@ describe('session renders string/bytes storage as scalar DAP variables', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3c. Regression — the array/struct reference structures still hold; the
-//     mapping is decoded in its own describe below.
-// ---------------------------------------------------------------------------
+// ## 3c. arr/pt keep their nested structure; the mapping is decoded in its own
+//     describe below.
 
-describe('regression: arr/pt still nested', () => {
-  it('arr → [11,22,33] nested and pt → {x:5,y:6} nested still hold', async () => {
+describe('arr/pt stay nested', () => {
+  it('arr → [11,22,33] and pt → {x:5,y:6} are nested', async () => {
     const session = await breakAt(35);
     const m = await stateMap(session);
 
@@ -341,20 +324,18 @@ describe('regression: arr/pt still nested', () => {
       {name: 'y', value: '6'},
     ]);
 
-    // The mapping is decoded in its own describe below; this regression
-    // only pins that arr/pt keep their nested structure.
+    // The mapping is decoded in its own describe below; this test only pins
+    // that arr/pt keep their nested structure.
     const balances = m.get('balances');
     expect(balances, 'balances still listed').toBeDefined();
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Regression: value-type storage still decodes (Counter.number) & the
-//    out-of-scope reference storage vars stay scalar (string/bytes/mapping)
-// ---------------------------------------------------------------------------
+// ## 4. Value-type storage decodes (Counter.number); string/bytes storage vars
+//    stay scalar
 
-describe('regression: value-type storage decode unaffected', () => {
-  it('Counter.setNumber: storage `number` still decodes to 42 (scalar, ref 0)', async () => {
+describe('value-type storage decode', () => {
+  it('Counter.setNumber: storage `number` decodes to 42 (scalar, ref 0)', async () => {
     const session = await launch({
       buildInfo: 'counter-build-info.json',
       trace: 'counter-setNumber-trace.raw.json',
@@ -370,8 +351,8 @@ describe('regression: value-type storage decode unaffected', () => {
   });
 
   it('the string/bytes reference storage vars stay scalar', async () => {
-    // shortStr / longStr / blob are decoded SCALARS — they must NOT gain
-    // a nested handle (stay listed, variablesReference 0). `balances` is NOT
+    // shortStr / longStr / blob are decoded scalars — they must not gain
+    // a nested handle (stay listed, variablesReference 0). `balances` is not
     // in this list: the mapping is a nested var (asserted below).
     const session = await breakAt(35);
     const m = await stateMap(session);
@@ -383,27 +364,25 @@ describe('regression: value-type storage decode unaffected', () => {
   });
 });
 
-// ===========================================================================
-// The storage MAPPING `balances` (mapping(uint256=>uint256)) rendered
-// as a NESTED DAP variable listing the OBSERVED entries {7: 100, 9: 250}, via
+// The storage mapping `balances` (mapping(uint256=>uint256)) rendered
+// as a nested DAP variable listing the observed entries {7: 100, 9: 250}, via
 // keccak-preimage enumeration of the trace + keccak256(key‖slot) value slots.
 //
-// ── Trace ground-truth (re-derived from storagerefs-populate-trace.raw.json) ───
-// Mapping keys are NOT enumerable from the storage layout — only the base slot
+// ## Trace ground truth (storagerefs-populate-trace.raw.json)
+// Mapping keys are not enumerable from the storage layout — only the base slot
 // (4) is static. Solidity computes a mapping entry slot as keccak256(key32‖slot32),
 // so every touched entry leaves a SHA3/KECCAK256 op whose 64-byte memory preimage
 // is key(32)‖baseSlot(32). Scanning size-0x40 hashes recovers the observed keys.
-// Re-confirmed against ethereum-cryptography/keccak (974 steps):
+// 974 steps; hashes via ethereum-cryptography/keccak:
 //   • idx 834: SHA3 size 0x40, offset 0 → folded mem word0=7 (key), word1=4 (slot)
 //   • idx 853: SHA3 size 0x40, offset 0 → folded mem word0=9 (key), word1=4 (slot)
 //   • keccak256(pad32(7)‖pad32(4)) = 0xbeb3bad7…e551 → storage 0x64 = 100
 //   • keccak256(pad32(9)‖pad32(4)) = 0x4ad5a04d…b933 → storage 0xfa = 250
-// The clean body pc 1064 (line 35) is own-contract step idx 874 — AFTER both
+// The clean body pc 1064 (line 35) is own-contract step idx 874 — after both
 // mapping SHA3s (834/853) — so both keys are observable there.
 //
-// The dereference-oracle (independent keccak recompute + storage read) is a
-// genuine anchor, not a tautology.
-// ===========================================================================
+// The dereference oracle recomputes the keccak and reads storage independently
+// of the decoder under test.
 
 /** Left-pad a bigint to a 32-byte (64-hex) big-endian word (no `0x`). */
 function pad32(n: bigint): string {
@@ -428,9 +407,7 @@ function ownStepIndexAtPc(pc: number): number {
   return -1;
 }
 
-// ---------------------------------------------------------------------------
-// 5. Dereference oracle — independently recompute the value slots + read storage.
-// ---------------------------------------------------------------------------
+// ## 5. Dereference oracle — independently recompute the value slots + read storage.
 
 describe('dereference oracle: mapping value slots read 100/250', () => {
   it('keccak256(key‖slot4) reproduces the entry slots and reads 100 (key7) / 250 (key9)', () => {
@@ -460,15 +437,13 @@ describe('dereference oracle: mapping value slots read 100/250', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6. Enumeration helper — recover the observed keys {7, 9} from the trace SHA3s.
+// ## 6. Enumeration helper — recover the observed keys {7, 9} from the trace SHA3s.
 //
-// The helper's HOME is flexible (a debugger util, or a lifting util). To stay
-// type-clean, we load it via a RUNTIME (non-literal) dynamic import across the
-// plausible module homes and fall back to `undefined`; the "must be defined"
-// assertion guards that the export is present. The signature is
+// The helper is loaded via a runtime (non-literal) dynamic import over candidate
+// modules (debugger or lifting), falling back to `undefined`, so the test stays
+// type-clean wherever it is exported; the "must be defined" assertion guards
+// that the export exists. The signature is
 // `enumerateMappingKeys(steps, cursor, baseSlot, uptoStepIndex): bigint[]`.
-// ---------------------------------------------------------------------------
 
 type EnumerateFn = (
   steps: Step[],
@@ -477,7 +452,7 @@ type EnumerateFn = (
   uptoStepIndex: number,
 ) => bigint[];
 
-/** Discover `enumerateMappingKeys` wherever the implementer exports it. */
+/** Find `enumerateMappingKeys` among the candidate modules. */
 async function loadEnumerateMappingKeys(): Promise<EnumerateFn | undefined> {
   const candidates = [
     '../src/mappings.js',
@@ -513,18 +488,18 @@ describe('enumerateMappingKeys recovers observed keys from the trace', () => {
     // in first-seen order.
     expect(enumerate!(steps, cursor, 4, endIndex)).toEqual([7n, 9n]);
 
-    // Bounded by the current step: BEFORE the first mapping SHA3 (idx 834) no key
+    // Bounded by the current step: before the first mapping SHA3 (idx 834) no key
     // is observable yet.
     expect(enumerate!(steps, cursor, 4, 833)).toEqual([]);
 
-    // AFTER the first SHA3 (idx 834) but BEFORE the second (idx 853): only key 7.
+    // After the first SHA3 (idx 834) but before the second (idx 853): only key 7.
     expect(enumerate!(steps, cursor, 4, 840)).toEqual([7n]);
   });
 
-  it('recovers an ADDRESS key whose preimage word contains a-f (no-0x kontrol memory)', async () => {
-    // Regression: kontrol memory words carry NO `0x` prefix, so `BigInt(word)`
-    // parsed them as decimal — fine for tiny all-digit keys (7, 9) but THROWING
-    // on a key with hex letters (an address). Synthesize the mapping SHA3 for
+  it('recovers an address key whose preimage word contains a-f (no-0x kontrol memory)', async () => {
+    // Kontrol memory words carry no `0x` prefix, so `BigInt(word)` would parse
+    // them as decimal — passing for all-digit keys (7, 9) but throwing on a key
+    // with hex letters (an address). Synthesize the mapping SHA3 for
     // `balanceOf[alice]` (base slot 1) directly, with unprefixed memory words.
     const enumerate = await loadEnumerateMappingKeys();
     const alice = 0x10c6e9530f1c1af873a391030a1d9e8ed0630d26n;
@@ -558,9 +533,7 @@ describe('enumerateMappingKeys recovers observed keys from the trace', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 7. Session render — `balances` is a nested mapping DAP variable {7:100, 9:250}.
-// ---------------------------------------------------------------------------
+// ## 7. Session render — `balances` is a nested mapping DAP variable {7:100, 9:250}.
 
 describe('session renders balances as a nested mapping DAP variable', () => {
   it('balances has a non-zero variablesReference; children 7=100, 9=250 (uint256)', async () => {

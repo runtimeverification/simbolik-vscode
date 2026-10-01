@@ -1,8 +1,8 @@
 /**
- * @simbolik/ethdebug-gen — generate ethdebug-format debug info from an
- * UNOPTIMIZED solc standard-json compilation. Scope: program
- * instruction→source mapping + storage (state) variable pointers, and the
- * static per-pc variable context (params/locals with stack pointers).
+ * @simbolik/ethdebug-gen: generate ethdebug-format debug info from a solc
+ * standard-json compilation. Covers the program's instruction→source mapping,
+ * storage (state) variable pointers, and the static per-pc variable context
+ * (params/locals with stack pointers).
  */
 
 export {

@@ -1,9 +1,9 @@
 /**
- * Static analysis of constructor (INIT) code, on `Ctor` from
+ * Static analysis of constructor (init) code, on `Ctor` from
  * test/fixtures/counter/src/Ctor.sol: `constructor(a, b) CtorBase(b)`, where
  * `CtorBase`'s constructor has its own param `b` and local `doubled`.
  *
- * Legacy codegen INLINES the base constructor into the derived one: its body is
+ * Legacy codegen inlines the base constructor into the derived one: its body is
  * entered by falling through from the derived prologue, so it shares the derived
  * constructor's stack frame. viaIR calls it as a separate function instead.
  */

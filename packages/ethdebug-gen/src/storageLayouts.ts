@@ -1,10 +1,9 @@
 /**
- * Reference-type LAYOUTS of STORAGE (state) variables, derived from the solc
- * storage layout. All emitters are FAIL-CLOSED: they only attach layout for the
- * cases the shared render path decodes CORRECTLY (a value element/member
- * occupying its own full slot). Sub-word-PACKED elements/members and
- * reference-type elements/members are left as a scalar-slot gap rather than
- * silently mis-decoded — see the guards below.
+ * Reference-type layouts of storage (state) variables, derived from the solc
+ * storage layout. All emitters fail closed: they only attach a layout where the
+ * consumer decodes it correctly (a value element/member occupying its own full
+ * slot). Sub-word-packed and reference-type elements/members get no layout
+ * rather than being mis-decoded; see the guards below.
  */
 import type {Pointer} from '@ethdebug/pointers';
 import type {Contract, StorageType} from '@simbolik/solc';
@@ -43,8 +42,8 @@ export function storageReferenceLayout(
     return array !== undefined ? {array} : {};
   }
   if (type.encoding === 'inplace' && type.base !== undefined) {
-    // A FIXED-size storage array `T[N]`: inline at consecutive slots from the
-    // declared slot (NO keccak, NO length word). Checked before the struct
+    // A fixed-size storage array `T[N]`: inline at consecutive slots from the
+    // declared slot (no keccak, no length word). Checked before the struct
     // branch (`members`), which shares the `inplace` encoding.
     const array = fixedStorageArrayLayout(
       contract,
@@ -60,12 +59,11 @@ export function storageReferenceLayout(
       : {};
   }
   if (type.encoding === 'bytes') {
-    // A dynamic string/bytes storage var. Its runtime encoding (short
-    // inline vs long keccak-based) is chosen by LENGTH — a fact ethdebug
-    // expressions cannot branch on — so the producer supplies only the LAYOUT
-    // facts (the flag word + the STATIC keccak base) and the session parity-
-    // selects the decode. The keccak base is static (the slot is known at gen
-    // time), so it is computed CONCRETELY here.
+    // A string/bytes storage variable. Its encoding (short inline vs long
+    // keccak-based) depends on the runtime length, which ethdebug expressions
+    // cannot branch on, so only the layout facts are supplied (the flag word
+    // and the keccak base, computed here since the slot is static) and the
+    // consumer selects the decode by parity.
     return {bytesStorage: storageBytesLayout(slot, typeId)};
   }
   if (
@@ -73,10 +71,9 @@ export function storageReferenceLayout(
     type.key !== undefined &&
     type.value !== undefined
   ) {
-    // A mapping storage var. Keys are not statically enumerable, so
-    // the producer records only the STATIC facts (base slot + key/value type
-    // ids); the debugger recovers observed keys from the trace and computes
-    // each entry slot as keccak256(key ‖ baseSlot).
+    // Keys are not statically enumerable, so only the static facts are
+    // recorded (base slot and key/value type ids); a consumer discovers keys at
+    // runtime and computes each entry slot as keccak256(key ‖ baseSlot).
     return {
       mapping: {baseSlot: slot, keyType: type.key, valueType: type.value},
     };
@@ -85,13 +82,14 @@ export function storageReferenceLayout(
 }
 
 /**
- * The element facts of a storage array of `baseTypeId` elements, or `undefined`
- * unless each element is a VALUE type occupying its OWN full slot — the only
- * case the `slot + i`-style layouts below hold for. That excludes:
- *   - a sub-word-PACKED element (`numberOfBytes <= 16`, e.g. `uint8[]`/`uint128[]`/
- *     `bool[]`): solc packs several per slot, so `+i` would read the WRONG slot;
- *   - a REFERENCE-type element (`uint256[][]`, `struct[]`): the element slot would
- *     be decoded as a scalar. Both are deferred (scalar-slot gap, not mis-decoded).
+ * The element facts of a storage array of `baseTypeId` elements, or
+ * `undefined` unless each element is a value type occupying its own full slot,
+ * the only case the `slot + i`-style layouts below hold for. That excludes:
+ *   - a sub-word-packed element (`numberOfBytes <= 16`, e.g. `uint8[]`,
+ *     `uint128[]`, `bool[]`): solc packs several per slot, so `+i` would read
+ *     the wrong slot;
+ *   - a reference-type element (`uint256[][]`, `struct[]`): the element slot
+ *     would be decoded as a scalar.
  */
 function fullSlotValueElement(
   contract: Contract,
@@ -109,7 +107,7 @@ function fullSlotValueElement(
   };
 }
 
-/** A `List` of `count` full-slot storage regions NAMED `'element'` at `slot`. */
+/** A `List` of `count` full-slot storage regions named `'element'` at `slot`. */
 function storageElements(
   count: Pointer.Expression,
   slot: Pointer.Expression
@@ -124,16 +122,17 @@ function storageElements(
 }
 
 /**
- * The `List` layout of a DYNAMIC STORAGE array of VALUE-TYPE elements.
- * The length lives in the base slot `p`; element `i` lives at `keccak256(p) + i`
- * (storage is WORD-indexed → `+i`, NOT `+i*32`), each occupying one full slot.
- * The pointer is a `Group`:
- *   - `len` — the base slot word (the element count);
- *   - a `List` of `count:{$read:'len'}` regions NAMED `'element'`, each a full
+ * The `List` layout of a dynamic storage array of value-type elements. The
+ * length lives in the base slot `p`; element `i` lives at `keccak256(p) + i`
+ * (storage is word-indexed, so `+i`, not `+i*32`), each occupying one full
+ * slot. The pointer is a `Group`:
+ *   - `len`: the base slot word (the element count);
+ *   - a `List` of `count:{$read:'len'}` regions named `'element'`, each a full
  *     slot at `{$sum:[{$keccak256:[<p as a padded 32-byte hex word>]}, 'i']}`.
- * CRITICAL: the `$keccak256` operand MUST be the padded 32-byte-word hex string
- * (`"0x"+p.toString(16).padStart(64,"0")`) — a bare number / minimal hex hashes
- * to the wrong (zero) slot. See {@link fullSlotValueElement} for the scope guard.
+ * The `$keccak256` operand must be the padded 32-byte-word hex string
+ * (`"0x"+p.toString(16).padStart(64,"0")`); a bare number or minimal hex
+ * hashes to the wrong slot. See {@link fullSlotValueElement} for the scope
+ * guard.
  */
 function storageArrayLayout(
   contract: Contract,
@@ -156,13 +155,13 @@ function storageArrayLayout(
 }
 
 /**
- * The `List` layout of a FIXED-size STORAGE array of VALUE-TYPE elements
- * (`T[N]`, `encoding: 'inplace'`). Unlike a dynamic array, a fixed array is stored
- * INLINE at consecutive slots from the declared slot — NO length word, NO keccak.
- * Element `i` lives at `slot + i` (storage is WORD-indexed), each occupying one
- * full slot, and the count `N` is STATIC (`numberOfBytes / 32`). The pointer is a
- * `Group` with a single `List` of `count: N` regions NAMED `'element'`. Same scope
- * guard as the dynamic path ({@link fullSlotValueElement}).
+ * The `List` layout of a fixed-size storage array of value-type elements
+ * (`T[N]`, `encoding: 'inplace'`). A fixed array is stored inline at
+ * consecutive slots from the declared slot, with no length word and no keccak.
+ * Element `i` lives at `slot + i`, each occupying one full slot, and the count
+ * `N` is static (`numberOfBytes / 32`). The pointer is a `Group` with a single
+ * `List` of `count: N` regions named `'element'`. Same scope guard as the
+ * dynamic path ({@link fullSlotValueElement}).
  */
 function fixedStorageArrayLayout(
   contract: Contract,
@@ -180,16 +179,16 @@ function fixedStorageArrayLayout(
 }
 
 /**
- * The layout of a dynamic-`bytes`-encoded (`string`/`bytes`) STORAGE var.
- * Solidity stores such a var in a length/parity-flagged base slot:
- *   - SHORT (data < 32 bytes): the data is stored INLINE in the base slot's HIGH
- *     bytes, with `length*2` in the LOW byte (even low byte);
- *   - LONG (data >= 32 bytes): the base slot holds `length*2+1` (odd low byte) and
- *     the data lives in consecutive words starting at `keccak256(pad32(slot))`.
- * The producer emits both the flag-word pointer AND the CONCRETE long-data base
- * slot (the slot is static, so its keccak is computed here — no runtime `$keccak256`
- * needed); the session parity-selects at read time. `isString` selects UTF-8 vs
- * `0x…` hex rendering.
+ * The layout of a `string`/`bytes` storage variable. Solidity stores it in a
+ * length/parity-flagged base slot:
+ *   - short (data < 32 bytes): the data is stored inline in the base slot's
+ *     high bytes, with `length*2` in the low byte (even low byte);
+ *   - long (data >= 32 bytes): the base slot holds `length*2+1` (odd low byte)
+ *     and the data lives in consecutive words starting at
+ *     `keccak256(pad32(slot))`.
+ * Both the flag-word pointer and the long-data base slot (computed here, since
+ * the slot is static) are emitted; the consumer selects by parity at read
+ * time. `isString` selects UTF-8 vs `0x…` hex rendering.
  */
 function storageBytesLayout(
   slot: number,
@@ -205,10 +204,10 @@ function storageBytesLayout(
 }
 
 /**
- * True for the solc storage-style type ids that are VALUE types (decoded as a flat
- * slot fragment). Close to `isValueSolcType` in `variables.ts`, but that one
- * matches only the bare `t_contract` id, while storage-layout ids carry the
- * contract name (`t_contract(Foo)12`) — hence the prefix match here.
+ * True for the solc storage-style type ids that are value types (decoded as a
+ * flat slot fragment). Close to `isValueSolcType` in `variables.ts`, but
+ * storage-layout ids carry the contract name (`t_contract(Foo)12`), hence the
+ * prefix match here.
  */
 function isValueTypeId(typeId: string): boolean {
   return (
@@ -222,18 +221,17 @@ function isValueTypeId(typeId: string): boolean {
 }
 
 /**
- * Whether a storage struct's members are ALL value types that each occupy their
- * OWN full slot at offset 0 — the only case the shared render path decodes
- * correctly (it reads the FULL slot word and decodes by type width, applying no
- * sub-word slice). Returns false (→ scalar-slot gap, no nested render) for:
- *   - a sub-word-PACKED member (`offset !== 0`, or two members sharing a slot):
- *     the full-word read cannot isolate it (confirmed: the machineState storage
- *     adapter returns the whole slot word, ignoring the pointer's offset/length);
- *   - a `bytesN` member with `N < 32`: stored LEFT-aligned, so a full-word read
- *     decodes to the value shifted into the high bytes (bytes32 is exempt — it
- *     fills the slot and decodes correctly);
- *   - a REFERENCE-type member (nested struct/array/string/bytes/mapping): out of
- *     this cycle's value-member scope. All deferred to a later cycle.
+ * Whether a storage struct's members are all value types that each occupy their
+ * own full slot at offset 0, the only case the consumer decodes correctly (it
+ * reads the full slot word and decodes by type width, applying no sub-word
+ * slice). Returns false (no member layout) for:
+ *   - a sub-word-packed member (`offset !== 0`, or two members sharing a slot):
+ *     the full-word read cannot isolate it, since the storage read returns the
+ *     whole slot word regardless of the pointer's offset/length;
+ *   - a `bytesN` member with `N < 32`: stored left-aligned, so a full-word read
+ *     decodes the value shifted into the high bytes (bytes32 fills the slot and
+ *     decodes correctly);
+ *   - a reference-type member (nested struct/array/string/bytes/mapping).
  */
 function unpackedValueStruct(members: StorageMember[]): boolean {
   const slots = new Set<number>();
@@ -248,10 +246,10 @@ function unpackedValueStruct(members: StorageMember[]): boolean {
 }
 
 /**
- * The per-member descriptors of a value-member STORAGE struct. Each
- * member `k` sits at the consecutive absolute slot `baseSlot + member.slot`; its
- * pointer is a scalar storage pointer at that slot (member slots are RELATIVE to
- * the struct base in the solc layout).
+ * The per-member descriptors of a value-member storage struct. Each member
+ * sits at the absolute slot `baseSlot + member.slot` (member slots are relative
+ * to the struct base in the solc layout); its pointer is a scalar storage
+ * pointer at that slot.
  */
 function storageStructMembers(
   contract: Contract,

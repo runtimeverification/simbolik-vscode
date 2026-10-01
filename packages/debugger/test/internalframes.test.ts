@@ -1,25 +1,18 @@
 /**
- * Internal-FUNCTION frames as their own DAP stack frames (sub-feature 4a).
+ * Internal-function frames as their own DAP stack frames.
  *
- * Today a Solidity INTERNAL call (a constant-EVM-depth JUMP) collapses into its
- * caller: pausing inside an internal function yields a length-1 stack whose only
- * frame IS the internal function — there is no caller frame. After 4a, the
- * innermost EVM frame is expanded into its internal-function sub-frames, so
- * pausing inside an internal function shows a 2-level stack
- * `[internal function, caller]`, each with its OWN per-frame variable binding.
+ * A Solidity internal call (a constant-EVM-depth JUMP) does not create an EVM
+ * frame, so the innermost EVM frame is expanded into its internal-function
+ * sub-frames: pausing inside an internal function shows a stack
+ * `[internal function, caller]`, each with its own per-frame variable binding.
  *
- * Ground truth (existing fixtures, cross-checked against returns.test.ts /
- * parameters.test.ts / stepping.test.ts and the .sol sources):
+ * Ground truth (from the .sol sources and fixtures):
  *   Returns.calc(5) → helper (internal) @ Returns.sol:17 has y=5, out=12,
  *     local=6; the `helper(x)` call site is Returns.sol:9 in `calc` (x=5).
  *   Stepper.run(10) → double (internal) @ Stepper.sol:14 has v=11 (step 182);
  *     the `double(a)` call site is Stepper.sol:9 in `run`.
- *   Counter.setNumber(42): a plain external call with NO internal frame at the
+ *   Counter.setNumber(42): a plain external call with no internal frame at the
  *     paused step → the stack stays length 1 (`setNumber` only).
- *
- * These tests MUST FAIL before the implementation (tests 1, 2, 4): today the
- * stack is length 1 inside an internal function, so there is no `[1]` caller
- * frame. Test 3 (no-internal regression) MUST PASS already.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -33,9 +26,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixture specs (per contract)
-// ---------------------------------------------------------------------------
+// ## Fixture specs (per contract)
 
 const returnsSpec: Spec = {
   buildInfo: 'returns-build-info.json',
@@ -72,10 +63,8 @@ const nestedSpec: Spec = {
   dialect: 'kontrol',
 };
 
-// ---------------------------------------------------------------------------
-// Per-frame variable helper — the `Locals` scope holds a frame's own
+// ## Per-frame variable helper — the `Locals` scope holds a frame's own
 // params+locals (session.scopes() emits 'State' | 'Locals' | 'EVM' | ...).
-// ---------------------------------------------------------------------------
 
 async function localsOf(
   session: SolidityDebugSession,
@@ -85,9 +74,7 @@ async function localsOf(
   return new Map(vars.map((v) => [v.name, v]));
 }
 
-// ---------------------------------------------------------------------------
-// 1. Returns — internal `helper` frame with its own caller `calc` frame
-// ---------------------------------------------------------------------------
+// ## 1. Returns — internal `helper` frame with its own caller `calc` frame
 
 describe('Returns internal frame — [helper, calc] with per-frame variables', () => {
   async function insideHelper(): Promise<SolidityDebugSession> {
@@ -119,27 +106,24 @@ describe('Returns internal frame — [helper, calc] with per-frame variables', (
     expect(vars.get('local')).toMatchObject({value: '6', type: 'uint256'});
   });
 
-  it('calc frame Locals are calc’s own vars, NOT helper’s (per-frame binding)', async () => {
+  it('calc frame Locals are calc’s own vars, not helper’s (per-frame binding)', async () => {
     const session = await insideHelper();
     const {stackFrames} = session.stackTrace();
     const vars = await localsOf(session, stackFrames[1]!.id);
 
     // calc's own param is present...
     expect(vars.get('x')).toMatchObject({value: '5', type: 'uint256'});
-    // ...and helper's own names must NOT leak into calc's frame.
+    // ...and helper's own names must not leak into calc's frame.
     expect(vars.has('out')).toBe(false);
     expect(vars.has('local')).toBe(false);
     expect(vars.has('y')).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Stepper — internal `double` frame with its own caller `run` frame
-// ---------------------------------------------------------------------------
+// ## 2. Stepper — internal `double` frame with its own caller `run` frame
 
 describe('Stepper internal frame — [double, run] with stack param v', () => {
-  // Reach INSIDE double the way parameters.test.ts / stepping.test.ts do:
-  // breakpoint on line 14 + continue lands on step 182, inside double.
+  // Breakpoint on line 14 + continue lands on step 182, inside double.
   async function insideDouble(): Promise<SolidityDebugSession> {
     return breakAt(stepperSpec, 14);
   }
@@ -167,11 +151,9 @@ describe('Stepper internal frame — [double, run] with stack param v', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. No-internal regression — a plain external call is unchanged (length 1)
-// ---------------------------------------------------------------------------
+// ## 3. No internal call — a plain external call stays a single frame
 
-describe('No-internal regression — Counter.setNumber is a single frame', () => {
+describe('No internal call — Counter.setNumber is a single frame', () => {
   it('at entry the stack is length 1 and the top frame is setNumber', async () => {
     const session = await launch(counterSpec);
     const {stackFrames} = session.stackTrace();
@@ -181,16 +163,13 @@ describe('No-internal regression — Counter.setNumber is a single frame', () =>
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. stepOut consistency — the rendered stack tracks stepping
-// ---------------------------------------------------------------------------
+// ## 4. stepOut consistency — the rendered stack tracks stepping
 
 describe('stepOut consistency — internal frame collapses back to the caller', () => {
   it('inside double the stack is 2 deep; stepOut returns to run (length 1)', async () => {
     const session = await launch(stepperSpec);
 
-    // Drive INSIDE double exactly as stepping.test.ts does:
-    //   next (entry line 8 → line 9), stepIn (line 9 → line 14 inside double).
+    // next (entry line 8 → line 9), stepIn (line 9 → line 14 inside double).
     await session.next();
     await session.stepIn();
     expect(session.stackTrace().stackFrames[0]!.line).toBe(14); // inside double
@@ -208,11 +187,9 @@ describe('stepOut consistency — internal frame collapses back to the caller', 
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. NestedCalls — MULTI-LEVEL internal calls (the pop/re-push core path).
-//    outer(5): NESTED outer→level1→level2, then SEQUENTIAL outer→leaf.
-//    (New live fixture recorded from kontrol-node; single EVM depth.)
-// ---------------------------------------------------------------------------
+// ## 5. NestedCalls — multi-level internal calls (the pop/re-push path).
+//    outer(5): nested outer→level1→level2, then sequential outer→leaf
+//    (single EVM depth).
 
 describe('NestedCalls — nested + sequential internal frames', () => {
   it('inside level2 shows a 3-frame stack [level2@23, level1@18, outer@11]', async () => {
@@ -229,7 +206,7 @@ describe('NestedCalls — nested + sequential internal frames', () => {
     expect(stackFrames[2]!.name).toBe('outer');
     expect(stackFrames[2]!.line).toBe(11); // `level1(x)` call site
 
-    // Per-frame variable binding: each frame reads its OWN param (all = 5).
+    // Per-frame variable binding: each frame reads its own param (all = 5).
     expect((await localsOf(session, stackFrames[0]!.id)).get('z')).toMatchObject({
       value: '5',
     });
@@ -246,7 +223,7 @@ describe('NestedCalls — nested + sequential internal frames', () => {
     const session = await breakAt(nestedSpec, 27);
 
     const {stackFrames} = session.stackTrace();
-    // level1 + level2 have returned before leaf is called → NOT on the stack.
+    // level1 + level2 have returned before leaf is called → not on the stack.
     expect(stackFrames).toHaveLength(2);
     expect(stackFrames[0]!.name).toBe('leaf');
     expect(stackFrames[0]!.line).toBe(27);

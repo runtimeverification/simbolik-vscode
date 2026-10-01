@@ -8,8 +8,9 @@
  *   17      n += 2;
  *
  * Under viaIR, `run`'s code up to the `_bump` call maps to its header, so no
- * statement starts before `_bump`'s: the launch stop used to be INSIDE `_bump`
- * (two frames entered at once). It must be `run` at line 16, like legacy.
+ * statement starts before `_bump`'s and a naive launch stop lands inside
+ * `_bump` (two frames entered at once). It must be `run` at line 16, like
+ * legacy.
  */
 import {describe, expect, it} from 'vitest';
 

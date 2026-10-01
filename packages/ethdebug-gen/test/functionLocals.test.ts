@@ -1,20 +1,16 @@
 /**
- * Static function LOCAL-variable inventory.
+ * Static function local-variable inventory.
  *
- * `functionLocals(cu, sourcePath, contractName, methodName)` returns, in
- * declaration (source) order, a {@link LocalDescriptor} per local variable of a
- * function body — every value type, plus reference-type locals (marked
- * `isValueType: false` so the debugger skips DECODING them while still counting
- * their stack slot). Each descriptor also carries the lexical live-range
- * (`declEnd`/`scopeStart`/`scopeEnd`) the debugger uses to decide which locals are
- * in scope at a given source offset.
+ * `functionLocals` returns, in declaration order, a {@link LocalDescriptor} per
+ * local of a function body: value types, plus reference-type locals (marked
+ * `isValueType: false` but still counted, since they occupy a stack slot).
+ * Each descriptor carries the lexical live range used to decide which locals
+ * are in scope at a source offset.
  *
- * Pinned against the real unoptimized build-info fixture (solc 0.8.35):
- * `Locals.compute` declares — in order —
- *   a, small, signed, flag, who, hash, color, sum (value types),
- *   nums (uint256[]), label (string), pt (struct) (reference types),
- *   tail (value), and — inside nested scopes — i (for-init), step (loop body),
- *   inner (block).
+ * Fixture: unoptimized build-info (solc 0.8.35). `Locals.compute` declares, in
+ * order: a, small, signed, flag, who, hash, color, sum (value types), nums
+ * (uint256[]), label (string), pt (struct) (reference types), tail (value),
+ * and, inside nested scopes, i (for-init), step (loop body), inner (block).
  */
 import {readFileSync} from 'node:fs';
 
@@ -117,7 +113,7 @@ describe('functionLocals — Locals.compute inventory', () => {
     const step = byName.get('step')!;
     const inner = byName.get('inner')!;
 
-    // The loop-body local `step` and the block local `inner` have STRICTLY
+    // The loop-body local `step` and the block local `inner` have strictly
     // narrower lexical scopes than a function-body local like `a`.
     expect(step.scopeStart).toBeGreaterThan(a.scopeStart);
     expect(step.scopeEnd).toBeLessThan(a.scopeEnd);

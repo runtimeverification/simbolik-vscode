@@ -3,8 +3,9 @@
  *
  * `NoReturn.run(5)` (test/fixtures/counter/src/NoReturn.sol) reverts inside
  * `_fail`, which `check` calls on line 16. `_fail` always reverts, so viaIR
- * calls it with a plain JUMP (no source-map `jump:'i'`); the reconstruction used
- * to treat the landing as a jump WITHIN `check`, and `_fail` replaced `check`.
+ * calls it with a plain JUMP (no source-map `jump:'i'`). The landing must still
+ * count as a call: treated as a jump within `check`, `_fail` would replace
+ * `check` on the stack.
  */
 import {describe, expect, it} from 'vitest';
 

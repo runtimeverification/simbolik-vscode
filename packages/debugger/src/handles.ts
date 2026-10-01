@@ -1,9 +1,8 @@
 /**
- * DAP `variablesReference` handles. A handle is bound to a frame IDENTITY (by
- * id) + what it expands; the concrete frame is re-resolved against the CURRENT
- * step at read time, so a scope ref captured before stepping still reads the
- * up-to-date position — the pattern of `scopes()` then `continue()` then
- * `variables(ref)`.
+ * DAP `variablesReference` handles. A handle is bound to a frame identity (by
+ * id) + what it expands; the concrete frame is re-resolved against the current
+ * step at read time, so a scope ref captured before stepping (`scopes()`, then
+ * `continue()`, then `variables(ref)`) reads the up-to-date position.
  */
 
 /** Where a nested complex variable's parent descriptor is re-resolved from. */
@@ -40,7 +39,7 @@ export type Handle =
       complexKind: ComplexKind;
     }
   | {kind: 'GlobalGroup'; frameId: number; group: GlobalGroup}
-  /** Events are GLOBAL (all contracts, up to the current step) — frameless. */
+  /** Events are global (all contracts, up to the current step) — frameless. */
   | {kind: 'Events'}
   | {kind: 'Event'; eventIndex: number};
 

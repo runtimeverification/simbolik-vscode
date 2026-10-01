@@ -1,25 +1,25 @@
 /**
  * Event / LOG decoding surfaced as a read-only "Events" scope.
  *
- * `StorageRefs.populate()` emits ONE event on its last body statement (line 35):
+ * `StorageRefs.populate()` emits one event on its last body statement (line 35):
  *   `event Updated(uint256 indexed key, uint256 value);`  emitted `Updated(7, 100)`
  *
- * It compiles to a single `LOG2` op. This suite pins, against the REAL recorded
+ * It compiles to a single `LOG2` op. This suite pins, against the real recorded
  * trace (storagerefs-populate-trace.raw.json, 974 steps, contract
  * 0x5fbd…80aa3):
  *
  *   • the LOG2 op at step idx 970, pc 1121, depth 1, own-contract (not init code);
- *   • its stack (top-of-stack LAST): offset = stack[len-1] = 0x160 (352),
+ *   • its stack (top-of-stack last): offset = stack[len-1] = 0x160 (352),
  *     size = stack[len-2] = 0x20 (32), topic0 = stack[len-3] (the selector),
  *     topic1 = stack[len-4] = 0x7 (the indexed `key`);
  *   • topic0 == keccak256(utf8("Updated(uint256,uint256)")) — the canonical
- *     signature over ALL params (indexed + non-indexed) in declaration order;
+ *     signature over all params (indexed + non-indexed) in declaration order;
  *   • the LOG data = folded memory[352..384] = 0x…64 = 100 (the non-indexed
  *     `value`).
  * → decoded event = `Updated(key = 7, value = 100)`.
  *
- * The dereference-oracle (independent keccak recompute + topic/data read from the
- * raw trace) is a genuine anchor, not a tautology.
+ * The dereference oracle recomputes the keccak and reads topics/data straight
+ * from the raw trace, independently of the decoder under test.
  */
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {bytesToHex, utf8ToBytes} from 'ethereum-cryptography/utils';
@@ -41,9 +41,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures (loaded EXACTLY as storage-refs.test.ts, via the shared harness)
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 const TRACE = 'storagerefs-populate-trace.raw.json';
 const META = 'storagerefs-populate-meta.json';
@@ -52,8 +50,8 @@ const NAME = 'StorageRefs';
 
 /**
  * The `Updated(uint256,uint256)` event selector — '0x' + keccak256 of the
- * canonical signature. Re-derived independently in the oracle test below and
- * confirmed to equal the LOG2's topic0 in the raw trace.
+ * canonical signature; equals the LOG2's topic0 in the raw trace (re-derived
+ * in the oracle test below).
  */
 const SELECTOR =
   '0xd78a0cb8bb633d06981248b816e7bd33c2a35a6089241d099fa519e361cab902';
@@ -68,8 +66,8 @@ const spec: Spec = {
 };
 
 /**
- * A session run to the TERMINAL step. The LOG2 is at idx 970, the last body
- * statement; a breakpoint at line 35 would stop at the emit's FIRST step (before
+ * A session run to the terminal step. The LOG2 is at idx 970, the last body
+ * statement; a breakpoint at line 35 would stop at the emit's first step (before
  * the LOG executes), so we `continue()` with no breakpoints to the terminal STOP
  * (idx 973, still the own depth-1 StorageRefs frame) — where the event is
  * observable up to the frame's own step.
@@ -80,10 +78,8 @@ async function terminalSession(): Promise<SolidityDebugSession> {
   return session;
 }
 
-// ---------------------------------------------------------------------------
-// 1. Dereference oracle — independently recompute the selector + read the LOG2
-//    topics/data straight from the raw trace (self-anchor; may pass at once).
-// ---------------------------------------------------------------------------
+// ## 1. Dereference oracle — independently recompute the selector + read the LOG2
+//    topics/data straight from the raw trace.
 
 describe('dereference oracle: LOG2 selector + topic1/data', () => {
   it('one LOG2 at idx 970; topic0==keccak(sig), topic1=7, data=100', () => {
@@ -102,7 +98,7 @@ describe('dereference oracle: LOG2 selector + topic1/data', () => {
     // Attributed to the emitting (own) contract.
     expect('0x' + s.codeAddress.toString(16)).toBe(normAddr(metaOf(META).contractAddress));
 
-    // Stack top-of-stack LAST: offset=stack[-1], size=stack[-2],
+    // Stack top-of-stack last: offset=stack[-1], size=stack[-2],
     // topic0=stack[-3], topic1=stack[-4] (n = 2 topics → LOG2).
     const st = s.stack;
     const n = st.length;
@@ -133,19 +129,17 @@ describe('dereference oracle: LOG2 selector + topic1/data', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Enumeration/decoding helper — `enumerateEvents` decodes the LOG2 into the
+// ## 2. Enumeration/decoding helper — `enumerateEvents` decodes the LOG2 into the
 //    single Updated(7, 100) event, bounded by the current step.
 //
-// The helper's HOME is flexible. To stay type-clean, we load it via a RUNTIME
-// (non-literal) dynamic import across the plausible module homes and fall back to
-// `undefined`; the "must be defined" assertion guards that the export is present.
+// The helper is loaded via a runtime (non-literal) dynamic import over candidate
+// modules, falling back to `undefined`, so the test stays type-clean wherever it
+// is exported; the "must be defined" assertion guards that the export exists.
 // The signature is
 // `enumerateEvents(steps, cursor, codeAddress, uptoStepIndex, eventDefs)`.
 //
-// `eventDefs` is supplied as an INLINE literal (matching the solc `events()`
+// `eventDefs` is supplied as an inline literal (matching the solc `events()`
 // inventory shape) so this test is independent of the solc accessor.
-// ---------------------------------------------------------------------------
 
 interface DecodedEventArg {
   name: string;
@@ -164,7 +158,7 @@ type EnumerateEventsFn = (
   eventDefs: unknown,
 ) => DecodedEvent[];
 
-/** The event inventory as the solc `events()` accessor is contracted to yield. */
+/** The event inventory in the shape the solc `events()` accessor yields. */
 const EVENT_DEFS = [
   {
     name: 'Updated',
@@ -176,7 +170,7 @@ const EVENT_DEFS = [
   },
 ];
 
-/** Discover `enumerateEvents` wherever the implementer exports it. */
+/** Find `enumerateEvents` among the candidate modules. */
 async function loadEnumerateEvents(): Promise<EnumerateEventsFn | undefined> {
   const candidates = [
     '../src/events.js',
@@ -218,14 +212,12 @@ describe('enumerateEvents decodes the LOG2 into Updated(7, 100)', () => {
     expect(String(args[0]!.value)).toBe('7');
     expect(String(args[1]!.value)).toBe('100');
 
-    // Bounded by the current step: BEFORE the LOG2 (idx 970) no event exists.
+    // Bounded by the current step: before the LOG2 (idx 970) no event exists.
     expect(enumerate!(steps, cursor, addr, 969, EVENT_DEFS)).toEqual([]);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Session — a read-only `Events` scope that lists the decoded event nested.
-// ---------------------------------------------------------------------------
+// ## 3. Session — a read-only `Events` scope that lists the decoded event nested.
 
 describe('session exposes a read-only Events scope', () => {
   it('scopes() includes Events; it lists Updated with nested key=7, value=100', async () => {
@@ -272,13 +264,10 @@ describe('session exposes a read-only Events scope', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Regression — the new Events scope is ADDITIVE: State/Locals/EVM survive in
-//    order, with Events appended last (the ordering this cycle pins).
-// ---------------------------------------------------------------------------
+// ## 4. Scope order: Events sits between Globals and EVM.
 
-describe('regression: Events is appended to State/Locals/EVM', () => {
-  it('the storagerefs frame exposes State, Locals, EVM, Events in order', async () => {
+describe('scope order includes Events', () => {
+  it('the storagerefs frame exposes Locals, State, Globals, Events, EVM in order', async () => {
     const session = await terminalSession();
     const frameId = session.stackTrace().stackFrames[0]!.id;
     const names = session.scopes(frameId).scopes.map((s) => s.name);
@@ -286,10 +275,8 @@ describe('regression: Events is appended to State/Locals/EVM', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. The Events view is GLOBAL: bounded by the CURRENT step (not the whole
+// ## 5. The Events view is global: bounded by the current step (not the whole
 //    trace), and each entry names the emitting contract.
-// ---------------------------------------------------------------------------
 
 /** The Events scope variables for the top frame of `session`. */
 async function eventsOf(
@@ -301,7 +288,7 @@ async function eventsOf(
 describe('Events view — global, current-step-bounded, emitter-labelled', () => {
   it('is empty at entry (LOG not yet executed) and populated at the terminal', async () => {
     const atEntry = await launch(spec);
-    // At the entry stop the emit has NOT run, so the global Events view is empty.
+    // At the entry stop the emit has not run, so the global Events view is empty.
     expect(await eventsOf(atEntry)).toEqual([]);
 
     // After continue (past the LOG) the event appears, tagged with its emitter.

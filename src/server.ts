@@ -1,29 +1,22 @@
 /**
- * The ESM server ENTRY MODULE (bundled to `build/server.mjs`).
+ * Entry module of the debug server, bundled separately as ESM to
+ * `build/server.mjs`.
  *
- * This is the seam that lets the CJS VSCode extension use the bundled
- * TypeScript debug server (`@simbolik/debugger`) despite the top-level-await
- * blocker: `@simbolik/debugger` transitively imports `@ethdebug/pointers`,
- * which uses TOP-LEVEL AWAIT. esbuild refuses to emit TLA into a `cjs` bundle
- * ("Top-level await is not supported with the cjs output format"), so the
- * extension cannot statically import the server. Instead we bundle the server
- * SEPARATELY as ESM (`--format=esm`, which permits TLA) and the CJS extension
- * reaches it at runtime:
+ * `@simbolik/debugger` transitively imports `@ethdebug/pointers`, which uses
+ * top-level await, and esbuild cannot emit that into the extension's CJS bundle.
+ * The extension therefore reaches this module at runtime, in one of two ways:
  *
- *   - inline mode: `await import('./server.mjs')` from the adapter factory
- *     (a dynamic import from CJS → local ESM, supported by Node 22).
- *   - tcp mode:    spawn `node <path>/server.mjs --port <p>` as a child process
- *     (this module's `main()`).
+ *   - inline mode: a dynamic `import()` from the adapter factory (see
+ *     `serverBridge.ts`);
+ *   - tcp mode: `node <path>/server.mjs --port <p>` as a child process (this
+ *     module's `main()`).
  *
- * IMPORTANT: this module MUST NOT import `vscode` — it runs both in-process in
- * the extension host AND as a standalone Node process, and `vscode` only exists
- * in the former. Keep the VSCode boundary in the extension (`src/`), not here.
+ * This module must not import `vscode`: it also runs as a standalone Node
+ * process, where `vscode` does not exist.
  *
- * SCOPE: this module is the build/dynamic-import seam plus a thin entry. The
- * live `SessionResolver` (forge build → kontrol-node → trace →
- * `SolidityDebugSession`) is {@link productionResolver}, assembled from
- * `./resolver/*` and used by default; callers may inject their own via
- * `createDispatcher` / `startServer`.
+ * The default `SessionResolver` is {@link productionResolver}, assembled from
+ * `./resolver/*`; callers may inject their own via `createDispatcher` /
+ * `startServer`.
  */
 import {
   DapDispatcher,
@@ -49,10 +42,8 @@ export {
 };
 
 /**
- * An explicit "not wired" resolver: throws a clear, actionable error rather than
- * silently doing nothing, so a session that reaches `launch`/`attach` without a
- * real resolver fails loudly with the reason. The default resolver is
- * {@link productionResolver}; inject this only to deliberately disable resolution.
+ * A resolver that always throws, for deliberately disabling resolution: a
+ * session that reaches `launch`/`attach` then fails with an explanatory error.
  */
 export const notWiredResolver: SessionResolver = async () => {
   throw new Error(
@@ -63,12 +54,11 @@ export const notWiredResolver: SessionResolver = async () => {
 };
 
 /**
- * The LIVE resolver: turn DAP launch/attach args into an already-launched
+ * Turn DAP launch/attach args into an already-launched
  * {@link SolidityDebugSession}. `launch` deploys the target contract, calls the
  * method and traces it (see `./resolver/launch`); `attach` replays an
  * already-mined tx from a generic node, resolving each frame's sources via
- * Sourcify + recompile (see `./resolver/attach`). Runs INSIDE the server
- * (inline or spawned) — hence `vscode`-free.
+ * Sourcify (see `./resolver/attach`).
  */
 export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
   const args = (rawArgs ?? {}) as LaunchArgs;
@@ -83,13 +73,11 @@ export const productionResolver: SessionResolver = async (rawArgs, ctx) => {
 };
 
 /**
- * Create a {@link DapDispatcher} for INLINE (in-process) hosting. The extension
- * host calls this after `await import('./server.mjs')` and drives the returned
- * dispatcher's `handle()` directly (no socket).
+ * Create a {@link DapDispatcher} for inline (in-process) hosting. The extension
+ * host drives the returned dispatcher's `handle()` directly (no socket).
  *
  * @param resolve resolves DAP launch/attach args into an already-launched
- *   {@link SolidityDebugSession}. Defaults to {@link productionResolver} (the
- *   live deploy → call → trace flow); inject a different resolver for tests.
+ *   {@link SolidityDebugSession}. Defaults to {@link productionResolver}.
  */
 export function createDispatcher(
   resolve: SessionResolver = productionResolver
@@ -98,7 +86,7 @@ export function createDispatcher(
 }
 
 /**
- * Start the DAP TCP server for TCP (out-of-process) hosting. Wraps
+ * Start the DAP server for tcp (out-of-process) hosting. Wraps
  * {@link startDapServer} with the same default-resolver behavior as
  * {@link createDispatcher}.
  */
@@ -145,9 +133,8 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
-// Run main() ONLY when executed directly as a script (ESM-safe detection),
-// never on import. `import.meta.url` is the file URL of THIS module; `argv[1]`
-// is the script Node was told to run — equal when run as `node server.mjs`.
+// Run main() only when executed directly as a script, never on import:
+// `import.meta.url` equals the URL of `argv[1]` when run as `node server.mjs`.
 const isMainModule =
   process.argv[1] !== undefined &&
   import.meta.url === new URL(`file://${process.argv[1]}`).href;

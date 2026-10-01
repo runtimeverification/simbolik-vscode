@@ -1,8 +1,8 @@
 /**
  * @simbolik/debugger — an in-process Solidity debug session over a recorded
- * trace. It wires the core DAP request sequence
- * (`initialize → launch → threads → stackTrace → scopes → variables`) end to
- * end, culminating in variables read through the real `@ethdebug/pointers` path.
+ * trace, serving the DAP requests (`initialize → launch → threads → stackTrace
+ * → scopes → variables`, stepping, breakpoints) with variables read through
+ * `@ethdebug/pointers`.
  */
 export {
   DapDispatcher,

@@ -6,7 +6,7 @@ import {describe, expect, it} from 'vitest';
 
 import {normalizeKontrolTrace} from '../src/index.js';
 
-// The REAL recorded Counter-deploy trace shared with the engine package.
+// The recorded Counter-deploy trace shared with the engine package.
 const fixture = readFileSync(
   new URL(
     '../../engine/test/fixtures/debug_traceTransaction_0.expected.json',
@@ -23,14 +23,14 @@ const batch = parseJsonLossless(fixture) as [
 ];
 const trace = batch[1].result;
 
-// Ground-truth constants confirmed directly against the fixture.
+// Values taken from the fixture.
 const DEPLOY_ADDR = '0x5fbdb2315678afecb367f032d93f642f64180aa3';
 const SENDER_ADDR = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
 const CODE_ADDRESS = 546584486846459126461364135121053344201067465379n;
 const MSG_SENDER = 1390849295786071768276380950238675083608645509734n;
 
 describe('normalizeKontrolTrace', () => {
-  it('produces exactly 17 Steps from the real fixture', () => {
+  it('produces exactly 17 Steps from the recorded fixture', () => {
     const steps = normalizeKontrolTrace(trace);
     expect(steps).toHaveLength(17);
     expect(trace.structLogs).toHaveLength(17);
@@ -52,7 +52,7 @@ describe('normalizeKontrolTrace', () => {
     expect(s0.isInitCode).toBe(true);
     expect(s0.statusCode).toBe('empty');
 
-    // Addresses / 256-bit values MUST be bigint (lossless), not number.
+    // Addresses / 256-bit values must be bigint (lossless), not number.
     expect(typeof s0.codeAddress).toBe('bigint');
     expect(s0.codeAddress).toBe(CODE_ADDRESS);
     expect(s0.targetAddress).toBe(CODE_ADDRESS);
@@ -71,10 +71,10 @@ describe('normalizeKontrolTrace', () => {
     expect(steps[1].stack).toEqual(['0x80']);
   });
 
-  it('preserves step 0 delta fields RAW (non-null program + populated accounts)', () => {
+  it('preserves step 0 delta fields raw (non-null program + populated accounts)', () => {
     const [s0] = normalizeKontrolTrace(trace);
 
-    // memoryChange at step 0 is an EMPTY array (not null): memory is empty here.
+    // memoryChange at step 0 is an empty array (not null): memory is empty here.
     expect(s0.memoryChange).toEqual([]);
 
     // The init bytecode is present verbatim on step 0.
@@ -105,7 +105,7 @@ describe('normalizeKontrolTrace', () => {
     expect(s0.deployedCodeChanges).toEqual({});
   });
 
-  it('preserves memoryChange === null RAW on step 1 (unchanged this step)', () => {
+  it('preserves memoryChange === null raw on step 1 (unchanged this step)', () => {
     const steps = normalizeKontrolTrace(trace);
     const s1 = steps[1];
 
@@ -129,8 +129,8 @@ describe('normalizeKontrolTrace', () => {
     expect(last.op).toBe('RETURN');
   });
 
-  // The whole fixture never emits a storage or deployed-code delta; assert that
-  // ground truth so accumulation tests below can rely on it.
+  // The whole fixture never emits a storage or deployed-code delta; assert it
+  // so accumulation tests can rely on it.
   it('emits no storage or deployed-code changes anywhere in this fixture', () => {
     const steps = normalizeKontrolTrace(trace);
     for (const step of steps) {
@@ -139,11 +139,11 @@ describe('normalizeKontrolTrace', () => {
     }
   });
 
-  // ── Block/tx context fields for the Solidity Globals scope ─────────────────
+  // ## Block/tx context fields for the Solidity Globals scope
   // The kontrol wire log carries gasCost (== tx.gasprice), difficulty
   // (== block.prevrandao), blockNumber, blockTimestamp and coinbase
-  // (== block.coinbase). `normalizeKontrolTrace` must copy them onto the Step as
-  // OPTIONAL fields. Ground-truth read directly from step 0 of this fixture:
+  // (== block.coinbase). `normalizeKontrolTrace` copies them onto the Step as
+  // optional fields. Values at step 0 of this fixture:
   //   gasCost = 2000000000000, difficulty = 0, blockNumber = 1,
   //   blockTimestamp = 1768610546, coinbase = 0.
   it('copies gasPrice/difficulty/blockNumber/blockTimestamp/coinbase from step 0', () => {
@@ -166,7 +166,7 @@ describe('normalizeKontrolTrace', () => {
     expect(typeof s0.coinbase).toBe('bigint');
   });
 
-  it('populates the block/tx context fields on EVERY step (defined, not undefined)', () => {
+  it('populates the block/tx context fields on every step (defined, not undefined)', () => {
     const steps = normalizeKontrolTrace(trace);
     for (const step of steps) {
       expect(step.gasPrice).toBeDefined();

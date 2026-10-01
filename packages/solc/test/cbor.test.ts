@@ -45,12 +45,11 @@ describe('identifyContractByRuntimeCode', () => {
     expect(identifyContractByRuntimeCode(cu(), '0x6001' as Hex)).toBeUndefined();
   });
 
-  // Regression: with `bytecode_hash = "none"` (Foundry's default, and Uniswap's)
-  // solc's CBOR trailer degrades to `{solc: <version>}` — IDENTICAL across every
-  // contract that compiler produced. The old code matched the FIRST contract with
-  // that shared trailer and returned an arbitrary WRONG contract (e.g. a forge-std
-  // library), which used the wrong source map and silently broke all stepping /
-  // variables. Here Foo and Bar share a trailer (0xaa0001) but have distinct code.
+  // With `bytecode_hash = "none"` solc's CBOR trailer degrades to
+  // `{solc: <version>}`, identical across every contract that compiler
+  // produced, so matching the first contract with that trailer would pick an
+  // arbitrary one (and with it the wrong source map). Here Foo and Bar share a
+  // trailer (0xaa0001) but have distinct code.
   const sharedTrailerCU = () =>
     loadBuildInfo({
       output: {
@@ -64,29 +63,29 @@ describe('identifyContractByRuntimeCode', () => {
       },
     });
 
-  it('shared non-discriminating trailer: identifies by EXACT code, not the first match', () => {
+  it('shared non-discriminating trailer: identifies by exact code, not the first match', () => {
     const cu2 = sharedTrailerCU();
     // Sanity: the two distinct contracts really do share a CBOR trailer.
     expect(cborMetadataHash('0x1122aa0001' as Hex)).toBe('0xaa0001');
     expect(cborMetadataHash('0x3344aa0001' as Hex)).toBe('0xaa0001');
 
-    // Bar must resolve to Bar — NOT to Foo (the first contract sharing the trailer).
+    // Bar must resolve to Bar, not to Foo (the first contract sharing the trailer).
     const bar = identifyContractByRuntimeCode(cu2, '0x3344aa0001' as Hex);
     expect(bar?.name).toBe('Bar');
   });
 
-  it('shared trailer AND identical code is ambiguous → undefined (never a guess)', () => {
+  it('shared trailer and identical code is ambiguous → undefined (never a guess)', () => {
     // Foo and FooClone have identical runtime code, so an exact match is not
     // unique and the shared trailer matches all three — refuse to guess.
     const cu2 = sharedTrailerCU();
     expect(identifyContractByRuntimeCode(cu2, '0x1122aa0001' as Hex)).toBeUndefined();
   });
 
-  // A DEPLOYED contract with immutables differs from its build-info runtime code
+  // A deployed contract with immutables differs from its build-info runtime code
   // only in the immutable byte ranges (filled at deploy time), so an exact match
   // fails. With a non-discriminating CBOR trailer (bytecode_hash="none") the only
-  // way to still identify it — e.g. Uniswap's PoolManager — is to mask those
-  // ranges. (Bytes: object 'aabb00000000cc', immutable = bytes 2..6.)
+  // way to still identify it is to mask those ranges.
+  // (Bytes: object 'aabb00000000cc', immutable = bytes 2..6.)
   const immutableCU = () =>
     loadBuildInfo({
       output: {
@@ -113,7 +112,7 @@ describe('identifyContractByRuntimeCode', () => {
     expect(match?.name).toBe('PM');
   });
 
-  it('does not mask-match when bytes OUTSIDE the immutable range differ', () => {
+  it('does not mask-match when bytes outside the immutable range differ', () => {
     // Byte 0 differs (99 vs aa) — outside the immutable range — so no match.
     expect(identifyContractByRuntimeCode(immutableCU(), '0x99bbdeadbeefcc' as Hex)).toBeUndefined();
   });

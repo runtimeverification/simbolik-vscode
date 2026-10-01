@@ -2,13 +2,13 @@
  * Random-access reconstruction of full EVM machine state from a delta-encoded
  * `Step[]`.
  *
- * The trace only records what CHANGED on each step; to answer "what did memory /
- * storage / the account set look like at step i?" a consumer must ACCUMULATE
- * every delta from step 0 through step i. `StateCursor.at(i)` does exactly that,
- * and — crucially for a debugger that jumps around while reverse-stepping — its
- * result is a pure function of `i`: it never shares a mutable accumulator
- * between calls. To keep random access cheap it snapshots the accumulated state
- * at periodic checkpoints and replays only the tail from the nearest checkpoint.
+ * The trace only records what changed on each step; to answer "what did
+ * memory / storage / the account set look like at step i?" a consumer must
+ * accumulate every delta from step 0 through step i. `StateCursor.at(i)` does
+ * that, and, because a debugger jumps around while reverse-stepping, its result
+ * is a pure function of `i`: it never shares a mutable accumulator between
+ * calls. To keep random access cheap it snapshots the accumulated state at
+ * periodic checkpoints and replays only the tail from the nearest checkpoint.
  */
 import type {Hex} from '@simbolik/protocol';
 
@@ -100,12 +100,12 @@ function applyStep(accum: Accumulator, step: Step): void {
       account = {address, storage: {}};
       accum.accounts.set(address, account);
     }
-    // Scalar fields are REPLACED when present this step, else kept.
+    // Scalar fields are replaced when present this step, else kept.
     if (address in step.balanceChanges) account.balance = step.balanceChanges[address];
     if (address in step.nonceChanges) account.nonce = step.nonceChanges[address];
     if (address in step.deployedCodeChanges) account.code = step.deployedCodeChanges[address];
     if (address in step.initCodeChanges) account.initCode = step.initCodeChanges[address];
-    // Storage is a PER-SLOT merge: earlier slots persist, touched slots win.
+    // Storage is a per-slot merge: earlier slots persist, touched slots win.
     const storageDelta = step.storageChanges[address];
     if (storageDelta !== undefined) {
       account.storage = {...account.storage, ...storageDelta};
@@ -127,19 +127,19 @@ function emptyAccumulator(): Accumulator {
 export class StateCursor {
   readonly length: number;
   readonly #steps: Step[];
-  /** Snapshots keyed by step index: accumulated state THROUGH that step. */
+  /** Snapshots keyed by step index: accumulated state through that step. */
   readonly #checkpoints = new Map<number, Accumulator>();
 
   /**
    * @param steps the normalized trace steps.
-   * @param initialStorage PRE-TRACE storage to seed step 0 with, keyed
+   * @param initialStorage pre-trace storage to seed step 0 with, keyed
    *   `address(hex) → slot(hex) → word(hex)`. A delta-encoded trace only records
-   *   what CHANGED during THIS transaction, so a slot written by an earlier tx
-   *   (e.g. Foundry's `setUp()`) and merely READ here never appears — SLOAD emits
+   *   what changed during this transaction, so a slot written by an earlier tx
+   *   (e.g. Foundry's `setUp()`) and merely read here never appears: SLOAD emits
    *   no delta. Seeding lets the resolver supply that pre-state (read via
    *   `eth_getStorageAt` at the pre-trace block) so it is visible from step 0 and
-   *   is correctly OVERWRITTEN per-slot by any later SSTORE (same minimal-hex key
-   *   the node and the storage lookup use).
+   *   overwritten per slot by any later SSTORE (keys use the same minimal hex as
+   *   the node and the storage lookup).
    */
   constructor(
     steps: Step[],

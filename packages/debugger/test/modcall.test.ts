@@ -10,9 +10,9 @@
  *   27      _guard();                     // modifier `guard`: a bare first call
  *   32      require(stored < …);          // _guard
  *
- * While `_check` runs the stack is [_check, checked, run]. The modifier frame
- * used to vanish there ([_check, run]), because only a modifier at the CURRENT
- * step was materialized — so step-into swapped the modifier for its callee.
+ * While `_check` runs the stack is [_check, checked, run]. Materializing only a
+ * modifier active at the current step would drop the modifier frame there
+ * ([_check, run]), so step-into would swap the modifier for its callee.
  *
  * Under viaIR, `guard`'s code up to its `_guard()` call maps to the modifier
  * header, so its first statement stop is already inside `_guard`: step-into

@@ -1,65 +1,47 @@
 /**
  * Static variable-context producer (`variablesAt`).
  *
- * `variablesAt(cu, sourcePath, contractName, pc)` is the SINGLE, PURE-STATIC
- * source of truth for "what variables are live here and where do their bytes
- * live": given ONLY a pc (zero runtime facts) it returns the storage variables,
- * the function's parameters and the in-scope locals, each with a CONCRETE
- * ethdebug pointer ready to dereference (value types) — stack pointers for
+ * `variablesAt(cu, sourcePath, contractName, pc)` returns, from the pc alone,
+ * the storage variables, the function's parameters and the in-scope locals,
+ * each with a concrete ethdebug pointer (value types): stack pointers for
  * params/locals, storage pointers for state variables.
  *
- * ── How these specs define correctness (the trace ORACLE) ─────────────────────
- * The producer is static, but its pointers are validated DYNAMICALLY: for each
- * function we take the recorded kontrol-node trace, reconstruct the EVM machine
+ * ## The trace oracle
+ * The producer is static, but its pointers are validated dynamically: for each
+ * function we take the recorded kontrol-node trace, reconstruct the machine
  * state at a representative pc (via `StateCursor`), dereference each emitted
- * pointer, decode it by the variable's solc type, and assert the decoded value
- * equals the known ground truth. A wrong slot/offset/length reads the wrong
- * value and fails — so these specs pin the pointers against reality, not against
- * a re-implementation of the slot math.
+ * pointer, decode it by the variable's solc type, and compare against the
+ * known value. A wrong slot/offset/length reads the wrong value, so the specs
+ * check the pointers against real execution rather than a re-implementation of
+ * the slot math.
  *
- * ── Why an inline oracle and not the production `machineStateFor` path ─────────
- * These pointers are the ones the session will dereference next cycle via the
- * debugger's `machineStateFor` + `@ethdebug/pointers` (`readPointerValue`).
- * That path CANNOT serve as this test's oracle, for two empirically-confirmed
- * reasons, both rooted in kontrol storing stack/storage words as MINIMAL hex
- * (the lifting layer deliberately `minimalHex`-es them so storage-slot lookups
- * match):
- *   1. `@ethdebug/pointers`' `Data.fromHex` groups nibbles from the LEFT, so an
- *      ODD-length word of ≥3 digits is misparsed by one nibble:
- *      `Data.fromHex('0x3e8').asUint()` === 15880n, NOT 1000n (`0x120`→4608 not
- *      288, `0x13a`→4874 not 314). 1- and 2-digit words happen to survive.
- *   2. `machineStateFor`'s `stack.peek` returns the WHOLE word and ignores the
- *      pointer's `offset`/`length` slice, and `readPointerValue` returns a raw
- *      `asUint` (no sign-extension, no left-aligned `bytesN`).
- * So routing THIS oracle through production would assert WRONG expected values.
- * Where production is correct (even-length words, clean right-aligned value
- * types, calldata) it agrees with the oracle below (`0x1122`→4386 both ways);
- * where it diverges, production is the buggy side. The inline oracle instead
- * normalizes via `BigInt` (correct for every length) and models ethdebug slice
- * semantics faithfully — it is the AUTHORITATIVE reference here. NOTE for the
- * session cycle: those production bugs are latent (current session stack reads
- * only hit safe words + read external params from padded calldata); the uniform
- * stack model must not regress on odd-length words (e.g. `_b`=1000=`0x3e8`).
+ * ## Why an inline oracle
+ * The oracle is independent of the debugger's `machineStateFor` +
+ * `@ethdebug/pointers` path. kontrol stores stack/storage words as minimal hex,
+ * which `Data.fromHex` misparses when the length is odd
+ * (`Data.fromHex('0x3e8').asUint()` is 15880n, not 1000n), so words must be
+ * padded first; the inline oracle normalizes via `BigInt` and applies the
+ * pointer's offset/length slice itself. Odd-length words such as
+ * `_b` = 1000 = `0x3e8` are deliberately covered.
  *
- * {@link readPointerBytes} normalizes each word to a full 32-byte big-endian hex
- * string and slices it per location convention:
- *   - STACK pointer `{slot, offset, length}`: word = `stack[len-1-slot]`; `offset`
- *     is measured from the HIGH end (left) of the word — value types use
- *     `offset = 32 − numberOfBytes`, `bytesN` use `offset = 0`.
- *   - STORAGE pointer `{slot, offset, length}`: word = the account's slot; `offset`
- *     is the solc storage offset, measured from the LOW-order byte (right).
+ * {@link readPointerBytes} normalizes each word to a full 32-byte big-endian
+ * hex string and slices it per location convention:
+ *   - stack pointer `{slot, offset, length}`: word = `stack[len-1-slot]`;
+ *     `offset` is measured from the high end (left) of the word; value types
+ *     use `offset = 32 − numberOfBytes`, `bytesN` use `offset = 0`.
+ *   - storage pointer `{slot, offset, length}`: word = the account's slot;
+ *     `offset` is the solc storage offset, measured from the low-order byte
+ *     (right).
  * {@link decodeValue} then turns the raw bytes into a display value using the
- * variable's `solcType` (signed int sign-extension, bool, address, bytesN, enum).
+ * variable's `solcType` (signed int sign-extension, bool, address, bytesN,
+ * enum).
  *
- * Ground truth (recorded traces / prior milestones):
+ * Known values in the recorded traces:
  *   Stepper.double v=11; Stepper.run x=10, a=11, b=22; Counter.setNumber
  *   newNumber=42, storage number=42; Vars.setAll _a=7 _b=1000 _flag=true
  *   _owner=0x..aa _delta=-5 _h=0x1122…1122 _color=Blue(2) + the 7 storage vars;
  *   Locals.compute a=11 small=7 signed=-5 flag=true who=0x..aa hash=0x..1122
  *   color=Blue(2) sum=0 tail=18, loop var i, loop-body step, nested-block inner=72.
- *
- * Verifies that `variables.ts` exports `variablesAt` and that its resolved
- * pointers decode to the ground-truth values above.
  */
 import {readFileSync} from 'node:fs';
 
@@ -76,9 +58,7 @@ import {
 
 import {variablesAt, type ResolvedVariable} from '../src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 function loadCu(name: string): CompilationUnit {
   const url = new URL(`../../solc/test/fixtures/${name}`, import.meta.url);
@@ -94,15 +74,13 @@ function loadTrace(name: string): Step[] {
 function loadCodeAddress(metaName: string): string {
   const url = new URL(`../../debugger/test/fixtures/${metaName}`, import.meta.url);
   const meta = JSON.parse(readFileSync(url, 'utf8')) as {contractAddress: string};
-  // Lowercase, 20-byte zero-padded — matches how accounts are keyed in the trace.
+  // Lowercase, 20-byte zero-padded: how accounts are keyed in the trace.
   return '0x' + BigInt(meta.contractAddress).toString(16).padStart(40, '0');
 }
 
-// ---------------------------------------------------------------------------
-// The inline dereference oracle
-// ---------------------------------------------------------------------------
+// ## The inline dereference oracle
 
-/** The concrete pointer shape `variablesAt` emits (a narrowing of `@ethdebug/pointers`' Pointer). */
+/** The concrete pointer shape `variablesAt` emits for value types. */
 interface ConcretePointer {
   location: 'stack' | 'storage';
   slot: number;
@@ -127,10 +105,10 @@ function readPointerBytes(
   if (pointer.location === 'stack') {
     const raw = state.stack[state.stack.length - 1 - pointer.slot] ?? '0x0';
     const w = word32(raw);
-    // Stack offset is from the HIGH end (left) of the 32-byte word.
+    // Stack offset is from the high end (left) of the 32-byte word.
     return w.slice(pointer.offset * 2, (pointer.offset + pointer.length) * 2);
   }
-  // Storage: offset is from the LOW-order byte (right) of the slot word.
+  // Storage: offset is from the low-order byte (right) of the slot word.
   const account = state.accounts.get(codeAddr.toLowerCase());
   const key = '0x' + BigInt(pointer.slot).toString(16);
   const raw = account?.storage[key] ?? '0x0';
@@ -146,7 +124,7 @@ function typeKind(solcType: string): 'uint' | 'int' | 'bool' | 'address' | 'byte
   if (solcType === 't_bool') return 'bool';
   if (solcType === 't_address' || solcType === 't_contract') return 'address';
   if (/^t_int\d+$/.test(solcType)) return 'int';
-  if (/^t_bytes\d+$/.test(solcType)) return 'bytes'; // fixed bytesN (dynamic t_bytes is a ref type)
+  if (/^t_bytes\d+$/.test(solcType)) return 'bytes'; // fixed bytesN only
   if (solcType.startsWith('t_enum')) return 'enum';
   return 'uint';
 }
@@ -173,8 +151,8 @@ function decodeValue(hexSlice: string, solcType: string, numberOfBytes: number):
 }
 
 /**
- * The oracle: dereference a ResolvedVariable's pointer against `state` and decode
- * it. Fails loudly if a value type carries no pointer (the producer must emit one).
+ * The oracle: dereference a ResolvedVariable's pointer against `state` and
+ * decode it. Fails if the variable carries no pointer.
  */
 function readVariable(v: ResolvedVariable, state: MachineState, codeAddr: string): Decoded {
   expect(v.pointer, `variable ${v.name} has no pointer to dereference`).toBeDefined();
@@ -185,9 +163,7 @@ function readVariable(v: ResolvedVariable, state: MachineState, codeAddr: string
   );
 }
 
-// ---------------------------------------------------------------------------
-// Per-scenario harness
-// ---------------------------------------------------------------------------
+// ## Per-scenario harness
 
 interface Scenario {
   buildInfo: string;
@@ -233,7 +209,7 @@ function stateAtPc(p: Prepared, pc: number, occurrence = 0): MachineState {
   throw new Error(`no own-contract step at pc ${pc} occurrence ${occurrence}`);
 }
 
-/** The accumulated final state (all SSTOREs applied) — for storage value checks. */
+/** The final state (all SSTOREs applied), for storage value checks. */
 function finalState(p: Prepared): MachineState {
   return p.cursor.at(p.steps.length - 1);
 }
@@ -282,14 +258,12 @@ const RETURNS: Scenario = {
   meta: 'returns-calc-meta.json',
 };
 
-/** `kind` compared loosely so the specs read before the union gains `'return'`. */
+/** `kind` as a plain string, for loose comparisons. */
 function kindOf(v: ResolvedVariable): string {
   return v.kind as string;
 }
 
-// ---------------------------------------------------------------------------
-// 1. Parameters dereference to their recorded values
-// ---------------------------------------------------------------------------
+// ## Parameters dereference to their recorded values
 
 describe('variablesAt — parameters resolve to correct dereferenced values', () => {
   it('Stepper.double: v (parameter) reads 11 in the body', () => {
@@ -318,11 +292,12 @@ describe('variablesAt — parameters resolve to correct dereferenced values', ()
   });
 
   it('Locals.compute: seed (parameter) reads 10 despite the reserved return slot', () => {
-    // Regression: `compute` is public AND `returns (uint256)`, so the prologue
-    // reserves a stack slot for the return value BETWEEN the params and the
-    // locals. If that slot is not accounted for, `seed` (param rank 0) reads the
-    // zero-initialised return slot instead of 10. The locals stay correct either
-    // way (the frame base absorbs the offset), so only a param read catches this.
+    // `compute` is public and `returns (uint256)`, so the prologue reserves a
+    // stack slot for the return value between the params and the locals. If
+    // that slot is not accounted for, `seed` (param rank 0) reads the
+    // zero-initialised return slot instead of 10. The locals stay correct
+    // either way (the frame base absorbs the offset), so only a param read
+    // catches this.
     const p = prepare(LOCALS);
     const seed = byName(vars(p, 436)).get('seed')!;
     expect(seed).toMatchObject({kind: 'parameter', isValueType: true});
@@ -351,9 +326,7 @@ describe('variablesAt — parameters resolve to correct dereferenced values', ()
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Locals dereference correctly, including scope + rank accounting
-// ---------------------------------------------------------------------------
+// ## Locals dereference correctly, including scope + rank accounting
 
 describe('variablesAt — Locals.compute locals resolve correctly', () => {
   it('value locals read their live values at an in-scope pc (line 37)', () => {
@@ -378,8 +351,8 @@ describe('variablesAt — Locals.compute locals resolve correctly', () => {
   });
 
   it('a value local declared AFTER reference locals reads correctly (rank accounting)', () => {
-    // `tail` follows nums/label/pt (reference types). Reading it as 18 proves the
-    // producer counted the reference locals' stack slots when ranking `tail`.
+    // `tail` follows nums/label/pt (reference types). Reading it as 18 shows the
+    // reference locals' stack slots were counted when ranking `tail`.
     const p = prepare(LOCALS);
     const m = byName(vars(p, 436));
     const tail = m.get('tail')!;
@@ -429,9 +402,7 @@ describe('variablesAt — Locals.compute locals resolve correctly', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Storage variables are always present and resolve to their values
-// ---------------------------------------------------------------------------
+// ## Storage variables are always present and resolve to their values
 
 describe('variablesAt — storage variables', () => {
   it('Counter.setNumber: storage `number` present and reads 42 after the write', () => {
@@ -466,9 +437,7 @@ describe('variablesAt — storage variables', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Kind, ordering, and reference handling
-// ---------------------------------------------------------------------------
+// ## Kind, ordering, and reference handling
 
 describe('variablesAt — kind, ordering & structure', () => {
   it('parameters precede locals, each in declaration order', () => {
@@ -500,9 +469,7 @@ describe('variablesAt — kind, ordering & structure', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. Purity / zero-runtime-facts (structural)
-// ---------------------------------------------------------------------------
+// ## Purely static signature
 
 describe('variablesAt — pure static signature (zero runtime facts)', () => {
   it('takes exactly (cu, sourcePath, contractName, pc) — no trace/height input', () => {
@@ -511,9 +478,7 @@ describe('variablesAt — pure static signature (zero runtime facts)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6. Edge: a pc with no enclosing function returns storage-only, never throws
-// ---------------------------------------------------------------------------
+// ## A pc with no enclosing function returns storage-only, never throws
 
 describe('variablesAt — dispatcher / helper pc', () => {
   it('pc 0 (dispatcher, no enclosing function) returns storage-only', () => {
@@ -528,31 +493,30 @@ describe('variablesAt — dispatcher / helper pc', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 7. RETURN parameters (value types) + internal-return-slot fix
+// Return parameters (value types), external and internal entry
 //
 // `Returns.calc(5)` → doubled=10, tmp=helper(5)=12, tripled=17, stored=27;
 // internally `helper(5)` → y=5, local=6, out=12. solc lays a function's stack
-// variables out as [ params ][ return params ][ locals ] — the return params are
-// zero-initialised slots reserved at entry, BETWEEN the input params and the body
-// locals. The producer EMITS those return params as `kind:'return'` variables in that
-// order, for BOTH external (`calc`) and internal (`helper`) entry.
+// variables out as [ params ][ return params ][ locals ]: the return params are
+// zero-initialised slots reserved at entry, between the input params and the
+// body locals. The producer emits those return params as `kind:'return'`
+// variables in that order, for both external (`calc`) and internal (`helper`)
+// entry.
 //
-// CLEAN body statement pcs (first pc of each statement — no expression
-// temporaries live), established from the recorded trace + the dereference oracle:
+// Clean body statement pcs (first pc of each statement, no expression
+// temporaries live), from the recorded trace:
 //   calc:   pc 153 = line 9  `uint256 tmp = helper(x);` START (tmp not yet live;
 //                             tripled reserved=0; doubled=10; x=5)
 //           pc 165 = line 10 `tripled = tmp + x;`      START (tripled reserved=0;
 //                             tmp=12; doubled=10; x=5)
-//           pc 179 = line 11 `stored = doubled+tripled;` START (ALL assigned:
+//           pc 179 = line 11 `stored = doubled+tripled;` START (all assigned:
 //                             x=5, doubled=10, tripled=17, tmp=12; stored not yet)
 //   helper: pc 224 = line 16 `out = local * 2;`  START (out reserved=0; local=6;
 //                             y=5)
 //           pc 239 = line 17 `return out;`       START (y=5, out=12, local=6)
-// The oracle stack layout confirmed at pc 179 (top→bottom) is
+// The stack layout at pc 179 (top→bottom) is
 //   [tmp=12, tripled=17, doubled=10, x=5, …]  ⇒ order [x, doubled, tripled, tmp];
 // at pc 239 (top→bottom) [local=6, out=12, y=5, retAddr, …] ⇒ [y, out, local].
-// ---------------------------------------------------------------------------
 
 describe('variablesAt — return parameters (external: Returns.calc)', () => {
   it('emits doubled & tripled as kind "return" between the param and the local', () => {
@@ -587,8 +551,8 @@ describe('variablesAt — return parameters (external: Returns.calc)', () => {
   });
 
   it('orders the stack vars [param → returns → local] in decl order', () => {
-    // The emitted order (params, then return params, then locals) mirrors solc's
-    // stack layout AND the slot assignment.
+    // The emitted order (params, then return params, then locals) matches
+    // solc's stack layout and the slot assignment.
     const p = prepare(RETURNS);
     const stackVars = vars(p, 179).filter((v) => kindOf(v) !== 'storage');
     expect(stackVars.map((v) => v.name)).toEqual(['x', 'doubled', 'tripled', 'tmp']);
@@ -609,8 +573,8 @@ describe('variablesAt — return parameters (external: Returns.calc)', () => {
   });
 
   it('a return param reads its reserved 0 before its assignment (pc 165, line 10)', () => {
-    // At line 10 `tripled` has NOT been assigned yet — its reserved slot holds 0 —
-    // while `doubled` (line 8) and `tmp` (line 9) are already live and assigned.
+    // At line 10 `tripled` has not been assigned yet (its reserved slot holds
+    // 0), while `doubled` (line 8) and `tmp` (line 9) are live and assigned.
     const p = prepare(RETURNS);
     const state = stateAtPc(p, 165);
     const m = byName(vars(p, 165));
@@ -645,13 +609,12 @@ describe('variablesAt — return parameters (external: Returns.calc)', () => {
   });
 });
 
-describe('variablesAt — internal-return-slot fix (Returns.helper)', () => {
+describe('variablesAt — internal return slot (Returns.helper)', () => {
   it('helper (INTERNAL) resolves y, out (return) AND local — all correct (pc 239)', () => {
-    // The discriminator: an internal function that reserves a return slot. Before
-    // the fix `variablesAt` did not account for the reserved `out` slot, so `local`
-    // read `out`'s word (12) instead of 6, and `out` was never emitted. All three
-    // must now dereference to their recorded values through the [y][out][local]
-    // layout ([params][returns][locals] holds for internal entry too).
+    // An internal function that reserves a return slot: if the reserved `out`
+    // slot is not accounted for, `local` reads `out`'s word (12) instead of 6.
+    // All three dereference through the [y][out][local] layout
+    // ([params][returns][locals] holds for internal entry too).
     const p = prepare(RETURNS);
     const state = stateAtPc(p, 239);
     const m = byName(vars(p, 239));
@@ -666,7 +629,7 @@ describe('variablesAt — internal-return-slot fix (Returns.helper)', () => {
 
     expect(readVariable(y, state, p.codeAddr)).toBe(5n);
     expect(readVariable(out, state, p.codeAddr)).toBe(12n);
-    expect(readVariable(local, state, p.codeAddr)).toBe(6n); // NOT 12 (the out slot)
+    expect(readVariable(local, state, p.codeAddr)).toBe(6n); // not 12 (the out slot)
   });
 
   it('internal helper ordering is [y(param), out(return), local(local)]', () => {
@@ -677,8 +640,8 @@ describe('variablesAt — internal-return-slot fix (Returns.helper)', () => {
   });
 
   it('internal return slot reads its reserved 0 before assignment (pc 224, line 16)', () => {
-    // At line 16 `out` is not yet assigned; `local` (line 15) is already 6. This
-    // proves `local` is read from its own slot, not the reserved return slot.
+    // At line 16 `out` is not yet assigned; `local` (line 15) is already 6, so
+    // `local` is read from its own slot, not the reserved return slot.
     const p = prepare(RETURNS);
     const state = stateAtPc(p, 224);
     const m = byName(vars(p, 224));
@@ -689,25 +652,23 @@ describe('variablesAt — internal-return-slot fix (Returns.helper)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 8. A VALUE-TYPE MEMORY STRUCT local as a nested variable (producer).
+// A value-type memory struct local as a nested variable
 //
-// `Locals.compute(10)` has `struct Point { uint256 x; uint256 y; }` and the local
-// `Point memory pt = Point(a, small)` = `Point(11, 7)`. `variablesAt`
-// carries `pt`'s member LAYOUT: a `members` array of
-// per-member descriptors (`{name, typeLabel, solcType, numberOfBytes, pointer}`),
-// each with a CONCRETE ethdebug pointer built from the struct's memory offset
-// (read from pt's stack slot) + the member's 32-byte word offset. The pointers are
-// dereferenced through the real `@ethdebug/pointers` path in the debugger suite
-// (`structs.test.ts`) — here we pin the STATIC producer shape only.
+// `Locals.compute(10)` has `struct Point { uint256 x; uint256 y; }` and the
+// local `Point memory pt = Point(a, small)` = `Point(11, 7)`. `variablesAt`
+// carries `pt`'s member layout: a `members` array of per-member descriptors
+// (`{name, typeLabel, solcType, numberOfBytes, pointer}`), each with a concrete
+// ethdebug pointer built from the struct's memory offset (read from pt's stack
+// slot) plus the member's 32-byte word offset. The pointers are dereferenced
+// through `@ethdebug/pointers` in the debugger suite (`structs.test.ts`); here
+// we pin the static producer shape only.
 //
-// `nums` (uint256[]) and `label` (string) are still listed
-// (they consume a stack rank) but with NO members and NO pointer.
+// `nums` (uint256[]) and `label` (string) are listed (they consume a stack
+// rank) but with no members and no pointer.
 //
-// Trace ground-truth (locals-compute-trace.raw.json, pc 436 = line 37 `require`,
-// the first clean body statement AFTER pt is assigned): pt's stack slot holds
+// From the trace (locals-compute-trace.raw.json, pc 436 = line 37 `require`,
+// the first clean body statement after pt is assigned): pt's stack slot holds
 // memory offset 0x120 (=288); memory[288..320]=11 (x), memory[320..352]=7 (y).
-// ---------------------------------------------------------------------------
 
 /** The per-member descriptor under `ResolvedVariable.members`. */
 interface StructMemberShape {
@@ -718,10 +679,7 @@ interface StructMemberShape {
   pointer?: unknown;
 }
 
-/**
- * Loose accessor for the `members` field, read via a cast (like {@link kindOf})
- * so a missing value surfaces as a failed assertion rather than a type error.
- */
+/** Loose accessor for the `members` field. */
 function membersOf(v: ResolvedVariable): StructMemberShape[] | undefined {
   return (v as unknown as {members?: StructMemberShape[]}).members;
 }
@@ -731,7 +689,7 @@ describe('variablesAt — value-type memory struct (nested members)', () => {
     const p = prepare(LOCALS);
     const pt = byName(vars(p, 436)).get('pt')!;
 
-    // The struct stays a COMPLEX (non-flat) variable: no scalar pointer of its own.
+    // The struct stays a nested variable: no scalar pointer of its own.
     expect(pt.kind).toBe('local');
     expect(pt.isValueType).toBe(false);
     expect(pt.pointer).toBeUndefined();
@@ -749,8 +707,8 @@ describe('variablesAt — value-type memory struct (nested members)', () => {
   });
 
   it('nums and label are NOT structs: no `members` field (decoded via array/bytes)', () => {
-    // nums/label are decoded via array/bytes (see the block below), but NOT via
-    // the struct `members` field — that stays struct-only.
+    // nums/label are decoded via array/bytes (see below), not via the
+    // struct-only `members` field.
     const p = prepare(LOCALS);
     const m = byName(vars(p, 436));
     for (const name of ['nums', 'label']) {
@@ -763,36 +721,34 @@ describe('variablesAt — value-type memory struct (nested members)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 9. Dynamic memory ARRAY (nums) + memory STRING (label) as producer
-//    structures.
+// Dynamic memory array (nums) and memory string (label) as producer
+// structures
 //
 // `Locals.compute(10)`:
 //   `uint256[] memory nums = new uint256[](2); nums[0] = a;`  → [11, 0]
 //   `string  memory label = "hi";`                            → "hi" (0x6869)
 //
-// Both are MEMORY reference locals whose stack slot holds a memory OFFSET. At
+// Both are memory reference locals whose stack slot holds a memory offset. At
 // pc 436 (line 37, the first `require`, a clean body stmt after both are set),
-// established from the recorded trace (locals-compute-trace.raw.json):
+// from the recorded trace (locals-compute-trace.raw.json):
 //   nums:  stack depth 3 → memory offset 0x80 (=128); mem[128]=len 2;
 //          mem[160]=nums[0]=11; mem[192]=nums[1]=0.
 //   label: stack depth 2 → memory offset 0xe0 (=224); mem[224]=len 2;
 //          mem[256]=bytes 0x6869 ("hi").
 //
-// PINNED PRODUCER SHAPE (validated by dereferencing through the REAL
-// `@ethdebug/pointers` path in the debugger suite, `arrays.test.ts`):
+// Producer shape (dereferenced through `@ethdebug/pointers` in the debugger
+// suite, `arrays.test.ts`):
 //   - A dynamic array carries an `array` field: `{pointer, elementSolcType,
 //     elementTypeLabel, elementNumberOfBytes}`. `pointer` is a dereferenceable
 //     `Group` that defines named regions `base` (the stack slot = the memory
 //     offset) and `len` (the memory word at `base` = the count), then a `List`
-//     whose element region is NAMED `'element'` — so the consumer collects the
+//     whose element region is named `'element'`, so the consumer collects the
 //     elements via `regions.named('element')`. The variable itself stays
-//     `isValueType:false` with NO top-level pointer and NO `members`.
+//     `isValueType:false` with no top-level pointer and no `members`.
 //   - A memory string/bytes carries a `bytes` field: `{pointer, isString}`.
 //     `pointer` is a `Group` (`base`/`len` named regions, then the raw byte
-//     region of dynamic `length: {$read:'len'}` at `base+32`); its FINAL region
+//     region of dynamic `length: {$read:'len'}` at `base+32`); its final region
 //     is the raw bytes. `isString` is true for `string`, false for `bytes`.
-// ---------------------------------------------------------------------------
 
 /** The `array` field under `ResolvedVariable` (read loosely). */
 interface ArrayShape {
@@ -819,7 +775,7 @@ describe('variablesAt — dynamic memory array + string (producer shape)', () =>
     const p = prepare(LOCALS);
     const nums = byName(vars(p, 436)).get('nums')!;
 
-    // The array stays a COMPLEX (non-flat) variable: no scalar pointer, no members.
+    // The array stays a nested variable: no scalar pointer, no members.
     expect(nums.kind).toBe('local');
     expect(nums.isValueType).toBe(false);
     expect(nums.pointer).toBeUndefined();
@@ -855,7 +811,7 @@ describe('variablesAt — dynamic memory array + string (producer shape)', () =>
     expect(arrayOf(label)).toBeUndefined();
   });
 
-  it('pt still carries struct members (regression, no array/bytes)', () => {
+  it('pt carries struct members, no array/bytes', () => {
     const p = prepare(LOCALS);
     const pt = byName(vars(p, 436)).get('pt')!;
     const members = membersOf(pt);
@@ -876,11 +832,11 @@ describe('variablesAt — dynamic memory array + string (producer shape)', () =>
   });
 });
 
-describe('variablesAt — regression: UNNAMED returns reserve a slot but emit no var', () => {
+describe('variablesAt — unnamed returns reserve a slot but emit no var', () => {
   it('Stepper.double (returns (uint256), unnamed): v reads 11, no "return" var', () => {
-    // An unnamed return reserves a stack slot (so params/locals still rank past it)
-    // but is NOT a named variable — nothing of kind 'return' may be emitted, and
-    // the param `v` must still dereference to 11.
+    // An unnamed return reserves a stack slot (so params/locals still rank past
+    // it) but is not a named variable: nothing of kind 'return' is emitted, and
+    // the param `v` still dereferences to 11.
     const p = prepare(STEPPER);
     const list = vars(p, 171); // double body, line 14
     const v = byName(list).get('v')!;

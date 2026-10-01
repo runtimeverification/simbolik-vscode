@@ -3,9 +3,9 @@
  *
  * Given a raw `field` (a `bigint` already extracted from its packed storage slot
  * or read from a calldata word) and the solc type id + width, produce the
- * `{value, type}` strings a DAP `Variable` carries. Scope is deliberately VALUE
- * TYPES ONLY (uintN, intN, bool, address, contract, bytesN, enum,
- * userDefinedValueType-as-underlying); dynamic/reference types are a follow-up.
+ * `{value, type}` strings a DAP `Variable` carries. Only value types are
+ * handled (uintN, intN, bool, address, contract, bytesN, enum,
+ * userDefinedValueType-as-underlying).
  */
 import {addressHex} from './hex.js';
 
@@ -96,14 +96,12 @@ export function enumAstId(typeId: string): number | undefined {
  * `field` bigint {@link decodeValue} expects — the type's own bytes.
  *
  * The ABI packs a value type into a 32-byte word two different ways:
- * `bytesN` are LEFT-aligned (high-order, zero right-padded), while everything
- * else (`uintN`, `intN`, `bool`, `address`, `enum`) is RIGHT-aligned (low-order,
- * sign- or zero-extended). We therefore reduce the word to exactly the type's
- * `numberOfBytes` so that NARROW types decode correctly — not just the full-word
- * `int256`/`bytes32` the recorded fixture happens to exercise. Without this a
- * negative `int8`/`int128` calldata param would keep the ABI sign-extension bits
- * (decoding to a huge positive number) and a `bytes4` param would carry its zero
- * padding into the hex string.
+ * `bytesN` are left-aligned (high-order, zero right-padded), while everything
+ * else (`uintN`, `intN`, `bool`, `address`, `enum`) is right-aligned (low-order,
+ * sign- or zero-extended). Reducing the word to exactly the type's
+ * `numberOfBytes` makes narrow types decode correctly: otherwise a negative
+ * `int8` would keep the ABI sign-extension bits (decoding to a huge positive
+ * number) and a `bytes4` would carry its zero padding into the hex string.
  */
 export function fieldFromAbiWord(
   word: bigint,

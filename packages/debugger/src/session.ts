@@ -7,9 +7,9 @@
  * ({@link loadTrace}: steps, state cursor, address registry, stepping model),
  * the session's position + breakpoints, and the per-scope renderers.
  *
- * MIXED compilation units are supported: a single transaction can span multiple
+ * Mixed compilation units are supported: a single transaction can span multiple
  * build-infos compiled at different optimization levels (an external CALL runs
- * the callee's code). Source mapping / scopes / variables resolve PER STEP
+ * the callee's code). Source mapping / scopes / variables resolve per step
  * against the resolved contract's own CU, the stack spans external calls, and
  * optimized frames fall back to storage-only scopes and line-based stepping.
  */
@@ -172,7 +172,7 @@ export class SolidityDebugSession {
   }
 
   /**
-   * Set instruction breakpoints (Disassembly View), REPLACING the whole armed
+   * Set instruction breakpoints (Disassembly View), replacing the whole armed
    * set (DAP sends the full list). Keyed by (address, code image) so a runtime
    * pc never matches the same-numbered pc in constructor code.
    */
@@ -187,9 +187,10 @@ export class SolidityDebugSession {
   }
 
   /**
-   * Set the active exception-breakpoint filters — the "dynamic" breakpoints (e.g.
-   * "stop on external calls"). DAP sends the FULL active id list each call, so we
-   * REPLACE the set (ignoring any unknown id). Applied during continue only.
+   * Set the active exception-breakpoint filters — the exception filters and
+   * the "dynamic" breakpoints (e.g. "stop on external calls"). DAP sends the
+   * full active id list each call, so the set is replaced (ignoring any unknown
+   * id).
    */
   setExceptionBreakpoints(args: {filters?: string[]}): {
     breakpoints: DebugProtocol.Breakpoint[];
@@ -198,7 +199,7 @@ export class SolidityDebugSession {
     return {breakpoints: []};
   }
 
-  // ─── stepping ──────────────────────────────────────────────────────────────
+  // ## stepping
 
   /**
    * Step over. At `instruction` granularity (Disassembly View) this is a single
@@ -258,7 +259,7 @@ export class SolidityDebugSession {
 
   /**
    * Run forward to the nearest stop — a source-line breakpoint, an instruction
-   * breakpoint, OR an enabled exception filter (a "dynamic" breakpoint like
+   * breakpoint, or an enabled exception filter (a "dynamic" breakpoint like
    * stop-on-call) — whichever comes first, else the terminal step. Unlike an
    * explicit step past the last statement (which ends the session), continue
    * reports a `stopped` even at the terminal step: the state stays inspectable.
@@ -342,14 +343,14 @@ export class SolidityDebugSession {
     return {};
   }
 
-  // ─── stack + sources ───────────────────────────────────────────────────────
+  // ## stack + sources
 
   /** The single execution thread. */
   threads(): {threads: DebugProtocol.Thread[]} {
     return {threads: [{id: 1, name: 'main'}]};
   }
 
-  /** The call stack at the current step, TOP-FIRST (innermost frame first). */
+  /** The call stack at the current step, top-first (innermost frame first). */
   stackTrace(): {stackFrames: DebugProtocol.StackFrame[]; totalFrames: number} {
     const {trace, sources} = this.#require();
     const stackFrames = this.#frames()
@@ -359,13 +360,13 @@ export class SolidityDebugSession {
         return {
           id: f.id,
           name: f.name,
-          // A FOREIGN frame is not attributed to any Solidity source at all.
+          // A foreign frame is not attributed to any Solidity source at all.
           source:
             f.cu !== undefined ? sources.sourceOrPath(f.cu, f.path) : undefined,
           line: f.line,
           column: f.column,
           // Enables "Open Disassembly View": packs (codeAddress, pc, isInit) so the
-          // disassemble request recovers this frame's CORRECT code image (init vs
+          // disassemble request recovers this frame's code image (init vs
           // runtime) and anchor position.
           instructionPointerReference: encodeInstructionAddress(
             f.address,
@@ -395,14 +396,14 @@ export class SolidityDebugSession {
     };
   }
 
-  // ─── scopes + variables ────────────────────────────────────────────────────
+  // ## scopes + variables
 
   /**
    * The variable scopes for `frameId`, in display order Locals → State →
    * Globals → Events → EVM. Locals is omitted on optimized frames (the stack
    * analysis it needs is unreliable under optimization) and on cheatcode frames
-   * (no Solidity function of their own). A FOREIGN frame has no contract at
-   * all, so it exposes ONLY the address-driven EVM scope.
+   * (no Solidity function of their own). A foreign frame has no contract at
+   * all, so it exposes only the address-driven EVM scope.
    */
   scopes(frameId: number): {scopes: DebugProtocol.Scope[]} {
     const {handles} = this.#require();
@@ -440,7 +441,7 @@ export class SolidityDebugSession {
     return {scopes};
   }
 
-  /** Variables for a scope reference, read through the real ethdebug pointer path. */
+  /** Variables for a scope reference, read through the ethdebug pointers. */
   async variables(
     variablesReference: number
   ): Promise<{variables: DebugProtocol.Variable[]}> {
@@ -452,7 +453,7 @@ export class SolidityDebugSession {
     const handle = s?.handles.get(ref);
     if (s === undefined || handle === undefined) return [];
     const {trace, handles, variables} = s;
-    // Events are GLOBAL — resolved WITHOUT a frame, so they render even at a
+    // Events are global — resolved without a frame, so they render even at a
     // frameless position.
     if (handle.kind === 'Events') {
       return eventsVariables(decodedEvents(trace, s.stop.step), handles.alloc);
@@ -462,7 +463,7 @@ export class SolidityDebugSession {
         decodedEvents(trace, s.stop.step)[handle.eventIndex]
       );
     }
-    // Re-resolve the frame against the CURRENT step (by id, falling back to the
+    // Re-resolve the frame against the current step (by id, falling back to the
     // deepest frame if that depth is no longer live). A synthetic contract frame
     // (an expanded address) is resolved from its own registry first.
     const frame =
@@ -521,7 +522,7 @@ export class SolidityDebugSession {
     this.#launched = undefined;
   }
 
-  // ─── helpers ───────────────────────────────────────────────────────────────
+  // ## helpers
 
   /** The frames at the current stop, bottom-first. */
   #frames(): FrameInfo[] {
@@ -602,7 +603,7 @@ export class SolidityDebugSession {
   }
 
   /**
-   * Report the outcome of a SOURCE-level forward step. If it landed on the
+   * Report the outcome of a source-level forward step. If it landed on the
    * terminal trace step, execution has finished — the trace has no step after
    * it, and that step is the contract's dispatch epilogue (whose source range is
    * the whole contract, so a `stopped` there would park the client on the

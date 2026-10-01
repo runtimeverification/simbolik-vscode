@@ -1,11 +1,8 @@
 /**
- * Fuller EVM State scope — decoded Calldata, Return Data leaf, and Accounts tree.
- *
- * TDD (RED): these tests drive `SolidityDebugSession` against recorded fixtures
- * and assert the three EVM-scope additions. They FAIL until `session.ts`:
- *   - makes the `calldata` row EXPANDABLE (selector + 32-byte chunk children);
- *   - APPENDS a `returnData` leaf; and
- *   - APPENDS an expandable `accounts` tree (address/balance/nonce/code/storage).
+ * EVM scope — decoded Calldata, Return Data leaf, and Accounts tree:
+ *   - the `calldata` row is expandable (selector + 32-byte chunk children);
+ *   - `returnData` is a leaf; and
+ *   - `accounts` is an expandable tree (address/balance/nonce/code/storage).
  *
  * Ground truth (read directly from the fixtures + the accumulated MachineState):
  *   - counter-setNumber (kontrol, single frame):
@@ -33,9 +30,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Launch inputs
-// ---------------------------------------------------------------------------
+// ## Launch inputs
 
 const ACCT0 = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
 const COUNTER_ADDRESS = metaOf('counter-setNumber-meta.json').contractAddress;
@@ -91,9 +86,7 @@ const varsSpec: Spec = {
   methodName: 'setAll',
 };
 
-// ---------------------------------------------------------------------------
-// EVM-scope helpers
-// ---------------------------------------------------------------------------
+// ## EVM-scope helpers
 
 /** The EVM scope rows for a frame; throws if the scope is absent. */
 async function evmRows(
@@ -137,9 +130,7 @@ function child(children: DapVariable[], name: string): DapVariable {
   return c!;
 }
 
-// ===========================================================================
-// 1. Decoded Calldata (counter-setNumber)
-// ===========================================================================
+// # 1. Decoded Calldata (counter-setNumber)
 
 describe('EVM scope — decoded Calldata (counter-setNumber)', () => {
   it('the calldata row is expandable into a selector + one 32-byte arg chunk', async () => {
@@ -149,7 +140,7 @@ describe('EVM scope — decoded Calldata (counter-setNumber)', () => {
     const rows = await evmRows(session, frameId);
     const calldata = row(rows, 'calldata');
 
-    // Was a raw leaf; must become expandable with a byte-count summary value.
+    // Expandable, with a byte-count summary value.
     // 36-byte calldata (4 selector + one 32-byte word).
     expect(calldata.value).toBe('36 bytes');
     expect(calldata.variablesReference, 'calldata must be expandable').not.toBe(0);
@@ -192,9 +183,7 @@ describe('EVM scope — decoded Calldata (counter-setNumber)', () => {
   });
 });
 
-// ===========================================================================
-// 2. Return Data
-// ===========================================================================
+// # 2. Return Data
 
 describe('EVM scope — Return Data leaf', () => {
   it('shows the callee return value hex (mixed-go, after the call returns)', async () => {
@@ -209,7 +198,7 @@ describe('EVM scope — Return Data leaf', () => {
     const returnData = row(rows, 'returnData');
 
     expect(returnData.value).toBe(MIXED_RETURN_DATA);
-    // A leaf — Return Data is NOT expandable.
+    // A leaf — Return Data is not expandable.
     expect(returnData.variablesReference).toBe(0);
   });
 
@@ -224,9 +213,7 @@ describe('EVM scope — Return Data leaf', () => {
   });
 });
 
-// ===========================================================================
-// 3. Accounts tree (counter-setNumber)
-// ===========================================================================
+// # 3. Accounts tree (counter-setNumber)
 
 describe('EVM scope — Accounts tree (counter-setNumber)', () => {
   it('lists the touched accounts and drills into the Counter account', async () => {
@@ -262,7 +249,7 @@ describe('EVM scope — Accounts tree (counter-setNumber)', () => {
     expect(address.type).toBe('address');
     expect(address.variablesReference).toBe(0);
 
-    // balance/nonce are EITHER a decimal string OR exactly 'Unavailable'.
+    // balance/nonce are either a decimal string or exactly 'Unavailable'.
     const balance = child(fields, 'balance');
     expect(balance.value).toMatch(/^(\d+|Unavailable)$/);
     // The fixture records a balanceChange to 0x0 → decimal "0".
@@ -288,7 +275,7 @@ describe('EVM scope — Accounts tree (counter-setNumber)', () => {
     expect(numberSlot.variablesReference).toBe(0);
   });
 
-  it('renders each account its OWN storage, not the frame/shared storage (mixed-go)', async () => {
+  it('renders each account its own storage, not the frame/shared storage (mixed-go)', async () => {
     const session = new SolidityDebugSession();
     await session.launch(mixedInputs());
     session.continue();
@@ -300,7 +287,7 @@ describe('EVM scope — Accounts tree (counter-setNumber)', () => {
     const caller = MIXED_META.callerAddress.toLowerCase();
     const callee = MIXED_META.calleeAddress.toLowerCase();
 
-    // Same slot 0 in both contracts, DIFFERENT values: caller stored 0x2b,
+    // Same slot 0 in both contracts, different values: caller stored 0x2b,
     // callee stored 0x2a. A renderer that leaks the frame's (or a shared)
     // storage into every account would show the same word for both.
     const callerSlots = await expand(

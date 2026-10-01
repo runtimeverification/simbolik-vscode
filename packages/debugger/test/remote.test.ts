@@ -2,15 +2,15 @@
  * Geth-dialect launch through the full debugger pipeline.
  *
  * The session must accept `dialect: 'geth'` + a `txContext` on `LaunchInputs`
- * and drive the SAME pipeline it uses for kontrol traces, reading `number = 42`
- * (storage slot 0) and `newNumber = 42` (calldata[4:36]) from a REAL recorded
+ * and drive the same pipeline it uses for kontrol traces, reading `number = 42`
+ * (storage slot 0) and `newNumber = 42` (calldata[4:36]) from a real recorded
  * anvil (geth-format) trace — identically to the kontrol Counter path.
  *
  * The geth envelope has none of the rich fields `normalizeKontrolTrace` reads, so
  * `launch` routes geth traces through the geth normalizer to produce a valid step
  * model from them.
  *
- * A light back-compat test confirms a kontrol launch (no `dialect`) still works.
+ * A kontrol launch (no `dialect`, the default) is covered too.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -18,15 +18,15 @@ import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
 import {buildInfoOf, metaOf, readDbgFixture} from './support/harness.js';
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
+// ## Fixtures
 
-/** REAL recorded anvil (geth) `debug_traceTransaction` response STRING. */
+/** Recorded anvil (geth) `debug_traceTransaction` response, as raw text. */
 const ANVIL_TRACE_RAW = readDbgFixture('anvil-setNumber-trace.raw.json');
 
-/** REAL recorded kontrol Counter trace STRING (back-compat). */
+/** Recorded kontrol Counter trace, as raw text. */
 const KONTROL_TRACE_RAW = readDbgFixture('counter-setNumber-trace.raw.json');
 
-/** solc standard-json build-info — Counter compiled from the SAME bytecode. */
+/** solc standard-json build-info for Counter (matches the traced bytecode). */
 const BUILD_INFO_JSON: unknown = buildInfoOf('counter-build-info.json');
 
 const ANVIL_META = JSON.parse(
@@ -35,7 +35,7 @@ const ANVIL_META = JSON.parse(
 
 const KONTROL_META = metaOf('counter-setNumber-meta.json');
 
-// ── LaunchInputs builders ─────────────────────────────────────────────────────
+// ## LaunchInputs builders
 
 /** A geth-dialect launch driven by the tx context from the anvil meta. */
 function gethLaunchInputs(): LaunchInputs {
@@ -56,7 +56,7 @@ function gethLaunchInputs(): LaunchInputs {
   } as LaunchInputs;
 }
 
-/** A kontrol launch (no dialect) — the back-compat shape. */
+/** A kontrol launch (no dialect — kontrol is the default). */
 function kontrolLaunchInputs(): LaunchInputs {
   return {
     buildInfoJson: BUILD_INFO_JSON,
@@ -80,7 +80,7 @@ async function scopeVars(
   return variables.map((v) => ({name: v.name, value: v.value}));
 }
 
-// ── geth-dialect launch ───────────────────────────────────────────────────────
+// ## geth-dialect launch
 
 describe('SolidityDebugSession geth-dialect launch (anvil trace)', () => {
   it('stops at the entry statement (line 8) with reason "entry"', async () => {
@@ -112,10 +112,10 @@ describe('SolidityDebugSession geth-dialect launch (anvil trace)', () => {
   });
 });
 
-// ── back-compat: kontrol launch still works ────────────────────────────────────
+// ## kontrol launch (default dialect)
 
-describe('SolidityDebugSession kontrol launch (back-compat, no dialect)', () => {
-  it('still reads number = 42 after continue()', async () => {
+describe('SolidityDebugSession kontrol launch (default, no dialect)', () => {
+  it('reads number = 42 after continue()', async () => {
     const session = new SolidityDebugSession();
     await session.launch(kontrolLaunchInputs());
     await session.continue();

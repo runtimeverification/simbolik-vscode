@@ -4,7 +4,7 @@
  * `normalizeKontrolTrace` turns the raw, delta-encoded `KontrolStructLog[]` into
  * a positional `Step[]`. It performs exactly one transformation beyond copying:
  * it coerces the address / 256-bit scalar fields to `bigint`. Everything else —
- * in particular the `*Change` / `*Changes` delta fields — is preserved RAW
+ * in particular the `*Change` / `*Changes` delta fields — is preserved raw
  * (`null` still means "unchanged this step", `[]`/`{}` still means "empty this
  * step"). Accumulating those deltas into full machine state is the job of
  * `StateCursor`, not of the step model.
@@ -26,11 +26,11 @@ export interface Step {
   msgValue: bigint;
   txOrigin: bigint;
   statusCode: string;
-  /** Stack as hex words, top-of-stack LAST (verbatim from the node). */
+  /** Stack as hex words, top of stack last (verbatim from the node). */
   stack: Hex[];
 
-  // ── Block/tx context for the Solidity Globals scope ───────────────────────
-  // OPTIONAL: only the kontrol dialect carries these. A geth/anvil `Step`
+  // ## Block/tx context for the Solidity Globals scope
+  // Optional: only the kontrol dialect carries these. A geth/anvil `Step`
   // leaves them `undefined`, which the debugger reads as "unavailable".
   /** `tx.gasprice` (the kontrol wire field is misnamed `gasCost`). */
   gasPrice?: bigint;
@@ -41,7 +41,7 @@ export interface Step {
   /** `block.coinbase` (an address). */
   coinbase?: bigint;
 
-  // ── Raw delta fields, exactly as emitted ──────────────────────────────────
+  // ## Raw delta fields, exactly as emitted
   // `null` means "unchanged this step" (carry the parent value forward);
   // `[]` / `{}` means "empty this step". `StateCursor` resolves carry-forward.
   memoryChange: Hex[] | null;

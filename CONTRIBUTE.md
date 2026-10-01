@@ -11,6 +11,7 @@ Welcome! This guide will help you set up your development environment and unders
 - **Visual Studio Code** (latest version)
 - **Git**
 - **Foundry/Forge** (for testing Solidity compilation)
+- **kontrol-node** (the default execution engine; install with `kup install kontrol-node`)
 
 ### Development Setup
 
@@ -39,16 +40,18 @@ Welcome! This guide will help you set up your development environment and unders
 
 ### Building
 
-The extension has two build targets:
-
-- **Desktop Extension:** `npm run build`
+- `npm run build`: bundles the extension (`build/extension.js`, CommonJS) and
+  the debug server (`build/server.mjs`, ESM) with esbuild.
+- `npm run build:dev`: builds the `packages/` workspaces, type-checks the
+  extension and bundles the server with source maps.
+- `npm run typecheck`: type-checks the packages and the server.
 
 ### Running & Debugging
 
-#### Clone Test Code: simbolike-examples
-Clone to the same directory as simbolik-vscode
+#### Clone Test Code: simbolik-examples
+Clone it next to simbolik-vscode:
 `git clone git@github.com:runtimeverification/simbolik-examples.git`
-[launch.json](.vscode/launch.json) References `$workspace/../simbolik-examples`
+[launch.json](.vscode/launch.json) references `$workspace/../simbolik-examples`.
 
 #### Option 1: Launch Configurations (Recommended)
 
@@ -64,22 +67,26 @@ Press `F5` or use the Debug panel to start.
 ```
 simbolik-vscode/
 ├── src/
-│   ├── extension.ts          # Main extension entry point
-│   ├── extension.web.ts      # Web extension entry point
-│   ├── DebugAdapter.ts       # Desktop debug adapter
-│   ├── DebugAdapter.web.ts   # Web debug adapter
+│   ├── extension.ts          # Extension entry point
+│   ├── DebugAdapter.ts       # Debug adapter factory (inline / tcp)
+│   ├── serverBridge.ts       # Loads the ESM debug server from the extension
+│   ├── server.ts             # Debug server entry point (build/server.mjs)
+│   ├── resolver/             # Turns launch/attach args into a debug session
+│   ├── nodeManager.ts        # Starts an execution node per debug session
+│   ├── nodeSetup.ts          # Locates kontrol-node / anvil, explains problems
 │   ├── CodelensProvider.ts   # Provides "Debug" buttons
-│   ├── startDebugging.ts     # Debug session logic
-│   ├── foundry.ts           # Foundry/Forge integration
-│   ├── utils.ts             # Utility functions
-│   └── WorkspaceWatcher.ts   # File change detection
-├── build/                   # Compiled extension (desktop)
-├── build-web/              # Compiled web extension
+│   ├── TestAdapter.ts        # Test explorer integration (run, coverage, debug)
+│   ├── startDebugging.ts     # Builds the launch configuration
+│   ├── foundry.ts            # Foundry/Forge integration
+│   └── utils.ts              # Utility functions
+├── packages/                 # The debug server (see packages/README.md)
+├── build/                    # Bundled extension and debug server
 ├── .vscode/
-│   └── launch.json         # Debug configurations
+│   └── launch.json           # Debug configurations
 ├── .github/workflows/
-│   └── release.yml         # Automated release pipeline
-└── package.json           # Extension manifest
+│   ├── release.yml           # Automated release pipeline
+│   └── test.yml              # CI tests
+└── package.json              # Extension manifest
 ```
 
 ### Code Quality
@@ -104,19 +111,19 @@ npm run clean
 Before committing, ensure:
 
 ```bash
-npm run pretest  # Compiles + lints
-npm test         # Runs test suite
+npm run typecheck  # Type-checks packages and the server
+npm run lint       # Lints
+npm test           # Runs the test suite
 ```
 
 ### Testing
 
 ```bash
-# Run all tests
+# Run all tests (Vitest)
 npm test
 
-# Compile TypeScript
-npm run compile
-npm run compile-web
+# Run the integration test against a live kontrol-node
+npm run test:live
 ```
 
 ## 🔧 Extension Development
@@ -128,30 +135,37 @@ npm run compile-web
 - Provides "Debug" buttons above debuggable functions
 - Identifies contracts and public functions
 
-#### 2. Debug Adapters
-- **Desktop:** `DebugAdapter.ts` - Full Node.js environment
-- **Web:** `DebugAdapter.web.ts` - Browser-compatible version
+#### 2. Debug Adapter (`DebugAdapter.ts`)
+- Populates the launch configuration (build, method signature, arguments)
+- Starts an execution node for the session (`nodeManager.ts`)
+- Hosts the debug server in-process (`inline`, default) or as a child
+  process over TCP (`tcp`), selected by `simbolik.adapterMode`
 
 #### 3. Foundry Integration (`foundry.ts`)
 - Handles `forge build` compilation
 - Loads build artifacts and metadata
 - Configures compilation environment
 
-#### 4. WebSocket Communication
-- Connects to Simbolik server: `wss://www.simbolik.dev`
-- Handles authentication (GitHub OAuth or API key)
-- Sends debug requests and receives responses
+#### 4. Debug Server (`server.ts`, `resolver/`, `packages/`)
+- `launch`: deploys the contract on the execution node, runs `setUp()`,
+  calls the method and fetches its trace
+- `attach`: replays an already-mined transaction, fetching sources from Sourcify
+- Answers DAP requests over the recorded trace
 
 ### Configuration
 
 Extension settings are defined in `package.json` under `contributes.configuration`:
 
-- `simbolik.api-key` - Authentication token
-- `simbolik.server` - WebSocket server URL
 - `simbolik.forge-path` - Path to forge executable
 - `simbolik.autobuild` - Build automation settings
-- `simbolik.json-rpc-url` - Ethereum JSON-RPC endpoint
+- `simbolik.rpc-node-type` - Execution node: `kontrol-node` (default) or `anvil`
+- `simbolik.auto-start-node` - Start a fresh node per debug session
+- `simbolik.kontrol-node-path` / `simbolik.kontrol-node-dir` - kontrol-node
+  executable, or a development checkout
+- `simbolik.anvil-path` - Path to anvil executable
+- `simbolik.json-rpc-url` - Ethereum JSON-RPC endpoint (when not auto-starting)
 - `simbolik.sourcify-url` - Sourcify server for source verification
+- `simbolik.adapterMode` - Host the debug server `inline` or over `tcp`
 
 ### Adding New Features
 
@@ -160,11 +174,8 @@ Extension settings are defined in `package.json` under `contributes.configuratio
 
 2. **Implement Functionality**
    - Add logic to appropriate source files
-   - Follow existing patterns for WebSocket communication
-
-3. **Update Both Versions**
-   - Ensure compatibility with both desktop and web extensions
-   - Test in both environments
+   - Keep `src/server.ts` and `src/resolver/` free of `vscode` imports: they
+     also run as a standalone Node process
 
 ## 📦 Release Process
 
@@ -207,7 +218,6 @@ npm run version:major
    ```bash
    git push origin master
    ```
-   ```
 
 5. **Create PR & Merge**
 
@@ -226,9 +236,9 @@ npm run version:major
 2. **View Extension Logs:**
    - Open Output panel → "Simbolik Solidity Debugger"
 
-3. **Debug WebSocket Communication:**
-   - Enable browser dev tools in web extension
-   - Check Network tab for WebSocket messages
+3. **Inspect the Execution Node and Debug Server:**
+   - Open Output panel → "Simbolik Node" for the node's log
+   - The debug console shows the JSON-RPC calls made while launching
 
 ### Working with Foundry Projects
 
@@ -252,7 +262,8 @@ The extension expects:
 
 1. **Build Errors:** Ensure all dependencies are installed
 2. **Extension Not Loading:** Check console for TypeScript errors
-3. **WebSocket Issues:** Verify server URL and authentication
+3. **Execution Node Not Found:** Install kontrol-node (`kup install kontrol-node`)
+   or set `simbolik.kontrol-node-path`
 4. **Foundry Integration:** Ensure `forge` is in PATH
 
 ## 🤝 Contributing Guidelines

@@ -1,42 +1,30 @@
 /**
  * Static per-pc stack-height analyzer (`stackHeights`).
  *
- * These specs pin the PURE-STATIC analyzer against a trace-derived VALIDATION
- * ORACLE: the static frame-relative heights it computes from solc artifacts
- * alone MUST reproduce what the recorded kontrol-node traces actually observed.
+ * The heights the analyzer computes from solc artifacts alone must match those
+ * observed in recorded kontrol-node traces.
  *
- * `frameRelHeight(pc)` = net stack slots pushed since the enclosing function
+ * `frameRelHeightAt(pc)` = net stack slots pushed since the enclosing function
  * body's entry instruction (0 at entry); `undefined` for pcs outside any
  * analyzed function body (dispatcher / metadata / compiler-generated helpers
  * that have no `FunctionDefinition` in source).
  *
- * ── The oracle (how correctness is defined here) ──────────────────────────────
+ * ## The oracle
  * For a recorded trace we:
- *   1. Keep only steps executing THIS contract's runtime code (`codeAddress`
+ *   1. Keep only steps executing this contract's runtime code (`codeAddress`
  *      matches, non-init).
- *   2. ATTRIBUTE each step to a `FunctionDefinition` exactly the way the analyzer
- *      must: source-map entry at the step's pc → `findInnermostNode` over that
- *      file's AST → `closestFunction`. Steps whose innermost node is not inside a
- *      `FunctionDefinition` (dispatcher, ABI (de)coders, checked-arith helpers)
- *      attribute to no function and are excluded.
- *   3. For each function, the ENTRY step is the FIRST (lowest trace index) step
- *      attributed to it — for the internal `double` this is the JUMPDEST landing
- *      (`Stepper` step 180, pc 169, stack length 7); for `run`/`compute` it is
- *      the body-entry JUMPDEST (pc 86).
- *   4. observed `frameRelHeight(step) = stackLen(step) − stackLen(entryStep)`.
- *      Stack lengths are dialect-agnostic — kontrol op-name quirks (PUSHZERO for
- *      PUSH0, EVMOR for OR) never change stack DEPTH, so they do not matter here.
- * Building `pc → observed height` per function must be CONSISTENT: a pc reached
- * at two different observed heights would be a real CFG signal (a bug), so we
- * assert consistency. Then the analyzer must agree at EVERY attributed body pc.
- *
- * API under test: `stackHeights(cu, sourcePath,
- * contractName) -> { frameRelHeightAt(pc): number | undefined }`. The analyzer
- * needs the contract's runtime bytecode + source map AND the per-source AST
- * (reached via `cu.sourceById(fileId).ast()`), so it takes the CompilationUnit
- * plus the contract identity — mirroring `generateEthdebugProgram`.
- *
- * `stackHeights` is exported and its per-pc heights agree with the oracle.
+ *   2. Attribute each step to a `FunctionDefinition` the way the analyzer
+ *      does: source-map entry at the step's pc → `findInnermostNode` over that
+ *      file's AST → `closestFunction`. Steps not inside a `FunctionDefinition`
+ *      (dispatcher, ABI (de)coders, checked-arith helpers) are excluded.
+ *   3. For each function, the entry step is the first step attributed to it:
+ *      for the internal `double` this is the JUMPDEST landing (`Stepper` step
+ *      180, pc 169, stack length 7); for `run`/`compute` it is the body-entry
+ *      JUMPDEST (pc 86).
+ *   4. Observed `frameRelHeight(step) = stackLen(step) − stackLen(entryStep)`.
+ * A pc observed at two different heights would indicate a CFG bug, so the
+ * oracle is checked for consistency; then the analyzer must agree at every
+ * attributed body pc.
  */
 import {readFileSync} from 'node:fs';
 
@@ -55,9 +43,7 @@ import {normalizeKontrolTrace, type Step} from '@simbolik/lifting';
 
 import {stackHeights} from '../src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 function loadCu(name: string): CompilationUnit {
   const url = new URL(`../../solc/test/fixtures/${name}`, import.meta.url);
@@ -79,9 +65,7 @@ function loadCodeAddress(metaName: string): bigint {
   return BigInt(meta.contractAddress);
 }
 
-// ---------------------------------------------------------------------------
-// Oracle: attribute pcs to functions and derive observed frame-rel heights
-// ---------------------------------------------------------------------------
+// ## Oracle: attribute pcs to functions and derive observed frame-rel heights
 
 /** Attribute a runtime pc to its enclosing `FunctionDefinition`, if any. */
 function attributeFunction(
@@ -169,9 +153,7 @@ function buildOracle(
   return byName;
 }
 
-// ---------------------------------------------------------------------------
-// Scenarios
-// ---------------------------------------------------------------------------
+// ## Scenarios
 
 interface Scenario {
   label: string;
@@ -214,9 +196,7 @@ function prepare(s: Scenario) {
   return {cu, contract, steps, codeAddress, oracle};
 }
 
-// ---------------------------------------------------------------------------
-// 1. The oracle itself is well-formed (sanity: the spec is trustworthy)
-// ---------------------------------------------------------------------------
+// ## The oracle itself is well-formed
 
 describe('trace-derived oracle (spec sanity)', () => {
   for (const s of [STEPPER, LOCALS]) {
@@ -258,9 +238,7 @@ describe('trace-derived oracle (spec sanity)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. The analyzer reproduces the oracle at EVERY body pc
-// ---------------------------------------------------------------------------
+// ## The analyzer reproduces the oracle at every body pc
 
 describe('stackHeights — static analyzer matches recorded traces', () => {
   for (const s of [STEPPER, LOCALS]) {
@@ -305,9 +283,7 @@ describe('stackHeights — static analyzer matches recorded traces', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Hard-coded spot-checks — a broken impl fails obviously
-// ---------------------------------------------------------------------------
+// ## Hard-coded spot-checks
 
 describe('stackHeights — ground-truth spot-checks', () => {
   it('Stepper.double: entry pc 169 → 0, and grows to 1 by the time v is live', () => {
@@ -331,21 +307,14 @@ describe('stackHeights — ground-truth spot-checks', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Edge: pcs outside any analyzed function body → undefined
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// 5. Graceful degradation: a pc reached at two static heights must not crash
-//    the whole analysis. Valid unoptimized solc never does this, but optimizer
-//    block-sharing / modifiers / try-catch / inline-assembly can, and a debug
-//    session must survive an odd contract. We hand-craft such bytecode.
-// ---------------------------------------------------------------------------
+// ## A pc reached at two static heights must not break the whole analysis.
+// Unoptimized solc never emits this, but optimizer block-sharing, modifiers,
+// try/catch or inline assembly can. The bytecode below is hand-crafted.
 
 describe('stackHeights — conflicting merge height degrades gracefully', () => {
   // JUMPDEST at pc 15 is reached at height 0 (via the JUMPI-taken block, which
   // pushes nothing extra) and height 1 (via the fall-through, which pushes one
-  // extra slot) — a genuine frame-relative-height conflict.
+  // extra slot): a frame-relative-height conflict.
   const RUNTIME =
     '0x' +
     '5b' + // 0  JUMPDEST (entry)
@@ -402,14 +371,16 @@ describe('stackHeights — conflicting merge height degrades gracefully', () => 
     expect(() => {
       sh = stackHeights(cu, 'src/T.sol', 'T');
     }).not.toThrow();
-    // The genuinely-ambiguous merge pc is reported as unknown, never a wrong height.
+    // The ambiguous merge pc is reported as unknown, never a wrong height.
     expect(sh!.frameRelHeightAt(15)).toBeUndefined();
-    // Unambiguous pcs before the conflict keep their best-effort heights.
+    // Unambiguous pcs before the conflict keep their heights.
     expect(sh!.frameRelHeightAt(0)).toBe(0); // entry
     expect(sh!.frameRelHeightAt(3)).toBe(1); // after PUSH1 cond
     expect(sh!.frameRelHeightAt(5)).toBe(2); // after PUSH1 taken-target
   });
 });
+
+// ## Pcs outside any analyzed function body
 
 describe('stackHeights — pcs outside any function body', () => {
   it('returns undefined for the dispatcher entry (pc 0), both contracts', () => {
@@ -423,7 +394,7 @@ describe('stackHeights — pcs outside any function body', () => {
       LOCALS.sourcePath,
       LOCALS.contractName,
     );
-    // pc 0 maps to the whole ContractDefinition range — no enclosing function.
+    // pc 0 maps to the whole ContractDefinition range: no enclosing function.
     expect(stepper.frameRelHeightAt(0)).toBeUndefined();
     expect(locals.frameRelHeightAt(0)).toBeUndefined();
   });

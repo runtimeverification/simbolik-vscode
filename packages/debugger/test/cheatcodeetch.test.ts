@@ -1,28 +1,21 @@
 /**
- * Sub-feature 4c — Cheatcode frame shows DECODED dynamic args (behavioral).
+ * A cheatcode frame shows its decoded dynamic args.
  *
- * 4a already prepends a synthetic TOP frame for a cheatcode CALL, named
- * `vm.${display}`. 4a decodes value-type args but renders a dynamic `bytes`/
- * `string` arg as a `<type>` placeholder, so today the frame at the `vm.etch`
- * call reads `vm.etch(0x…beef, <bytes>)`. 4c must decode the dynamic `bytes`
- * arg so the real value appears in the frame label.
+ * A cheatcode CALL gets a synthetic top frame named `vm.${display}`. A dynamic
+ * `bytes`/`string` arg is decoded into the label rather than rendered as a
+ * `<type>` placeholder, so the frame at the `vm.etch` call reads
+ * `vm.etch(0x…beef, 0x600160005260206000f3)`, not `vm.etch(0x…beef, <bytes>)`.
  *
- * ── CONFIRMED GROUND TRUTH (observed by running the real session against the
- *    frozen trace — every index below is deterministic) ─────────────────────
- *   Fixture: etchraw-run-trace.raw.json (kontrol, 420 steps), EtchRaw.run().
- *   - launch() opens PAUSED at step 35.
+ * Ground truth (etchraw-run-trace.raw.json, kontrol, 420 steps, EtchRaw.run();
+ * every index below is deterministic):
+ *   - launch() opens paused at step 35.
  *   - the vm.etch cheatcode CALL is step 191 (op=CALL), mapped to EtchRaw.sol
- *     line 23 (`vm.etch(TARGET, hex"600160005260206000f3");`). REACHED by
- *     stepInstruction() from launch until currentStepIndex === 191.
- *   - at step 191 the stack is [ 'vm.etch(0x00000000…0000beef, <bytes>)@23',
- *     'run@23' ] — a 4a cheatcode frame on top of the real `run` frame.
- *   - decoded args (verified via decodeCheatcodeCall): address 0x…beef and bytes
- *     0x600160005260206000f3 (10 bytes).
- *
- * These MUST FAIL today: the top frame's name contains the `<bytes>` placeholder,
- * not the decoded `600160005260206000f3`, so the "contains the real bytes"
- * assertion fails for the RIGHT reason. The "frame beneath is run" assertion
- * already holds and must NOT regress.
+ *     line 23 (`vm.etch(TARGET, hex"600160005260206000f3");`), reached by
+ *     stepInstruction() from launch.
+ *   - at step 191 the stack is the cheatcode frame on top of the real `run`
+ *     frame, both at line 23.
+ *   - decoded args: address 0x…beef and bytes 0x600160005260206000f3
+ *     (10 bytes).
  */
 import {describe, expect, it} from 'vitest';
 
@@ -52,32 +45,31 @@ async function sessionAtEtch(): Promise<SolidityDebugSession> {
   return session;
 }
 
-describe('cheatcode frame (4c) — decoded bytes in the frame label', () => {
+describe('cheatcode frame — decoded bytes in the frame label', () => {
   it('lands exactly on the vm.etch CALL step (191)', async () => {
     const session = await sessionAtEtch();
     expect(session.currentStepIndex).toBe(ETCH_STEP);
   });
 
-  it('the top frame shows the DECODED etch bytes (not <bytes>)', async () => {
+  it('the top frame shows the decoded etch bytes (not <bytes>)', async () => {
     const session = await sessionAtEtch();
     expect(session.currentStepIndex).toBe(ETCH_STEP);
 
     const {stackFrames} = session.stackTrace();
 
-    // The synthetic cheatcode frame is ADDITIVE: run is preserved beneath it.
+    // The synthetic cheatcode frame is additive: run is preserved beneath it.
     expect(stackFrames.length).toBeGreaterThanOrEqual(2);
 
     const top = stackFrames[0]!;
     expect(top.name).toContain('etch');
     expect(top.name).toContain('beef'); // the etch target address
-    // The real decoded bytes appear in the label (today: the '<bytes>'
-    // placeholder → this fails for the right reason).
+    // The real decoded bytes appear in the label, not a placeholder.
     expect(top.name).toContain('600160005260206000f3');
     expect(top.name).not.toContain('<bytes>');
     expect(top.line).toBe(ETCH_LINE);
     expect(top.source?.name).toBe('EtchRaw.sol');
 
-    // The frame BELOW the cheatcode frame is the real `run` frame.
+    // The frame below the cheatcode frame is the real `run` frame.
     const below = stackFrames[1]!;
     expect(below.name).toContain('run');
   });

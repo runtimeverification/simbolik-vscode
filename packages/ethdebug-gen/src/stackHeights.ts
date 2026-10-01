@@ -1,14 +1,14 @@
 /**
  * Static per-pc stack-height analyzer.
  *
- * {@link stackHeights} computes, for every runtime-bytecode instruction of a
- * contract, its **frame-relative stack height**: the net number of stack slots
+ * {@link stackHeights} computes, for every instruction of a contract's code
+ * image, its **frame-relative stack height**: the net number of stack slots
  * pushed since the enclosing function body's entry instruction (0 at entry),
  * or `undefined` for pcs outside any analyzed function body (dispatcher, ABI
  * (de)coders, checked-arith helpers, metadata — none of which map to a
  * `FunctionDefinition`).
  *
- * The analysis is PURE-STATIC (solc artifacts only, no trace):
+ * The analysis is purely static (solc artifacts only, no trace):
  *
  *  1. Disassembly + attribution of each instruction to its enclosing
  *     `FunctionDefinition` ({@link Program}), with the per-opcode stack deltas of
@@ -16,7 +16,7 @@
  *  2. An intra-function CFG worklist that propagates heights from each entry at
  *     height 0, resolving JUMP/JUMPI targets with a small abstract stack of
  *     known PUSH constants ({@link StackFlow}).
- *  3. Internal calls modelled as a NET stack effect (never followed into): the
+ *  3. Internal calls modelled as a net stack effect (never followed into): the
  *     caller resumes at its return tag with height adjusted by the callee's
  *     analyzed net effect.
  */
@@ -43,8 +43,8 @@ export interface StackHeights {
 
 /**
  * Net stack effect of `op` for the height model. Identical to the shared
- * {@link stackDelta} except BLOBBASEFEE (`0x4a`), which this model has always
- * treated as an unknown opcode (delta 0) rather than a nullary push (+1).
+ * {@link stackDelta} except BLOBBASEFEE (`0x4a`), which this model treats as an
+ * unknown opcode (delta 0) rather than a nullary push (+1).
  */
 function heightDelta(op: number): number {
   return op === 0x4a ? 0 : stackDelta(op);
@@ -119,10 +119,8 @@ class Analyzer {
    * Pcs reached at two conflicting frame-relative heights during propagation.
    * In valid unoptimized solc output this never happens, but optimizer-shared
    * blocks, modifiers, try/catch or inline assembly can merge control flow at a
-   * pc the frame-relative model cannot assign a single height to. Rather than
-   * crash a debug session, such a pc is recorded here and reported as
-   * `undefined` (honest "unknown"), while the rest of the function keeps its
-   * best-effort heights.
+   * pc the frame-relative model cannot assign a single height to. Such a pc is
+   * reported as `undefined`, while the rest of the function keeps its heights.
    */
   private readonly conflicted = new Set<number>();
 
@@ -136,7 +134,7 @@ class Analyzer {
 
   frameRelHeightAt(pc: number): number | undefined {
     if (this.conflicted.has(pc)) {
-      return undefined; // ambiguous merge height ⇒ report unknown, never wrong.
+      return undefined; // ambiguous merge height: unknown rather than wrong.
     }
     return this.heights.get(pc);
   }
@@ -161,15 +159,12 @@ class Analyzer {
       const seen = this.heights.get(pc);
       if (seen !== undefined) {
         if (seen !== height) {
-          // A correct unoptimized function never reaches a pc at two heights;
-          // this signals code the frame-relative model can't handle (optimizer
-          // block-sharing, modifiers, try/catch, inline assembly). Degrade
-          // gracefully: mark the pc unknown and stop this branch instead of
-          // aborting the whole contract's analysis (a debugger must not crash
-          // on an odd contract).
+          // Code the frame-relative model can't handle (see `conflicted`): mark
+          // the pc unknown and stop this branch rather than abort the whole
+          // contract's analysis.
           this.conflicted.add(pc);
         }
-        continue; // already fixed (or now marked conflicted); don't revisit.
+        continue; // already fixed (or now conflicted); don't revisit.
       }
       this.heights.set(pc, height);
 

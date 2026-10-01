@@ -1,5 +1,5 @@
 /**
- * The LIVE launch flow: deploy the target contract on a node, run `setUp()`,
+ * The launch flow: deploy the target contract on a node, run `setUp()`,
  * call the method, fetch the raw trace, and assemble {@link LaunchInputs}.
  * Build-info is read via `node:fs`; the node is driven via `@simbolik/engine`'s
  * JSON-RPC client.
@@ -40,35 +40,27 @@ import {
 const DEFAULT_ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
 /**
- * The deterministic CREATE address of account #0's FIRST deployment (nonce 0):
+ * The deterministic CREATE address of account #0's first deployment (nonce 0):
  * `keccak256(rlp([sender, 0]))[12:]`. Used only as a fallback when a node does
  * not return a receipt (or omits `contractAddress`).
  */
 const FIRST_DEPLOY_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
 
 /**
- * The gas cap for the deploy + setUp + call txs. Must be LARGE: like `forge
- * test`, we execute real transactions against a node, and test contracts are
- * routinely huge — a Foundry test that inherits `Test`/`Deployers` can have a
- * >180 KB runtime, whose code-deposit cost alone (200 gas/byte) exceeds 36M, and
- * its `setUp()` may deploy an entire protocol. The former 30M cap silently failed
- * such deploys (receipt status 0x0, no code), yielding a 0-step trace and a
- * debug session with no frames. kontrol-node ignores the block gas limit; the
- * anvil backend is launched with a matching `--gas-limit` (see `anvilLaunch`).
- * 10B mirrors Foundry's effectively-unbounded test gas and leaves ample headroom.
+ * The gas cap for the deploy + setUp + call txs. It must be large: test
+ * contracts are routinely huge (a Foundry test inheriting `Test` can have a
+ * >180 KB runtime, whose code-deposit cost alone at 200 gas/byte exceeds 36M),
+ * and `setUp()` may deploy an entire protocol. Too low a cap makes the deploy
+ * fail with status 0x0 and no code. 10B approximates Foundry's effectively
+ * unbounded test gas. kontrol-node ignores the block gas limit; anvil is
+ * launched with a matching `--gas-limit` (see `anvilLaunch`).
  */
 const TX_GAS = '0x2540be400'; // 10_000_000_000
 
 /**
- * The ETH balance to grant the test contract (and top up the sender) before
- * `setUp()`, mirroring `forge test`, which pre-funds the test contract. Foundry
- * projects routinely make value-bearing calls from the test contract — e.g.
- * seeding a NATIVE-currency Uniswap-v4 pool sends `1 ether` from `address(this)`
- * — which revert with a balance underflow when the contract is deployed with a
- * plain zero-value transaction (as we do) and thus starts with 0 ETH. `uint96`
- * max (~7.9e10 ETH) matches Foundry's default and is applied via
- * `anvil_setBalance` / `kontrol_setBalance`; best-effort, so a node without it
- * simply keeps today's behavior.
+ * The ETH balance granted to the test contract and sender before `setUp()`
+ * (see {@link fundAccounts}). `uint96` max (~7.9e10 ETH) matches Foundry's
+ * default.
  */
 const TEST_BALANCE = '0xffffffffffffffffffffffff';
 
@@ -131,29 +123,26 @@ export async function launchInputs(
     DEFAULT_ACCOUNT,
   ]);
 
-  // Foundry semantics: `setUp()` establishes the fixture state a test/debug
-  // method depends on (deploy tokens, fund actors, …). Our launch calls ONE
-  // method, so — like `forge test` — run `setUp()` first (a separate tx; the
-  // node persists state between txs) whenever the contract declares it and it is
-  // not itself the method being debugged. Without this, a method reading fixture
-  // state reverts immediately (e.g. calling a token that was never deployed).
+  // Like `forge test`, run `setUp()` first (as a separate tx) whenever the
+  // contract declares it and it is not itself the method being debugged: it
+  // establishes the fixture state the method depends on.
   const setUpSelector = methodSelector(buildInfo, contract, 'setUp()');
   if (setUpSelector !== undefined && methodSignature !== 'setUp()') {
     ctx?.log('Running setUp() …');
     await runSetUp(client, contractAddress, setUpSelector, ctx);
   }
 
-  // Snapshot the PRE-CALL state (after deploy + setUp, before the traced call) in
-  // ONE state-dump request — the source for both contract identification
-  // (runtime code) and pre-trace storage seeding, replacing N × eth_getCode +
-  // M × eth_getStorageAt. Must be taken HERE, before the call, since the dump is
-  // of the CURRENT state. `undefined` on an unsupported node → per-slot fallback.
+  // Snapshot the pre-call state (after deploy + setUp, before the traced call)
+  // in one state-dump request. It serves both contract identification (runtime
+  // code) and pre-trace storage seeding. It must be taken here, since the dump
+  // reflects the current state. `undefined` on an unsupported node, in which
+  // case both fall back to per-address / per-slot RPC reads.
   const preState = await fetchStateDump(client, methods.dumpState);
 
   ctx?.log(`Calling ${methodName}() at ${contractAddress} …`);
-  // Waiting for the receipt is CRITICAL: tracing an unmined hash returns
-  // empty `structLogs` (a 0-step trace), which then has no frames.
-  // The receipt's block number also anchors the fallback pre-trace storage read.
+  // `transact` waits for the receipt: tracing an unmined hash returns empty
+  // `structLogs`. The receipt's block number also anchors the fallback
+  // pre-trace storage read.
   const call = await transact(client, {to: contractAddress, data: calldata});
   const traceJson = await fetchRawTrace(
     client,
@@ -161,11 +150,9 @@ export async function launchInputs(
     call.hash
   );
 
-  // Resolve every EXTERNAL contract the tx touched to its CU. A geth trace has
-  // no per-step code, so without this the debugger can't identify a callee (e.g.
-  // an ERC20 reached via a `mint` call) and mis-maps its steps onto the ENTRY
-  // contract's source — the cursor jumps into unrelated lines, and the bogus
-  // source-map jumps corrupt step-over too.
+  // Resolve every contract the tx executed to its compilation unit. A geth
+  // trace has no per-step code, so without this map a callee's steps would be
+  // mapped onto the entry contract's source, which also breaks step-over.
   const txContext = {
     to: contractAddress,
     from: DEFAULT_ACCOUNT,
@@ -197,7 +184,7 @@ export async function launchInputs(
     callBlockNumber: call.receipt?.blockNumber,
   });
 
-  // Derive the project root so frames can reference the REAL on-disk files.
+  // Derive the project root so frames can reference the real on-disk files.
   const sourceRoot = deriveSourceRoot(args.file, contract.sourcePath);
 
   return {
@@ -233,14 +220,11 @@ async function deploy(
   contract: Contract
 ): Promise<string> {
   const creationBytecode = contract.initBytecode();
-  // Waiting also guarantees the deploy is MINED before the calls that follow.
   const {receipt} = await transact(client, {data: creationBytecode});
-  // A FAILED deploy (status 0x0) still returns a receipt AND a contractAddress,
-  // but deposits no code — a call to it then traces as a 0-step no-op, which used
-  // to surface only as a frameless, un-steppable session. Fail fast with an
-  // actionable message instead. The usual cause is an oversized contract whose
-  // code-deposit gas exceeds the tx gas (see TX_GAS) — report the sizes so the
-  // fix is obvious.
+  // A failed deploy (status 0x0) still returns a receipt and a contractAddress
+  // but deposits no code, so the call would trace as a 0-step no-op. Fail fast
+  // instead. The usual cause is an oversized contract whose code-deposit gas
+  // exceeds the tx gas (see TX_GAS), so report the sizes.
   if (receipt?.status === '0x0') {
     const runtimeBytes = (contract.runtimeBytecode().length - 2) / 2;
     const initBytes = (creationBytecode.length - 2) / 2;
@@ -260,15 +244,12 @@ async function deploy(
 }
 
 /**
- * Pre-fund the test contract (and top up the sender), like `forge test`. A
- * Foundry test contract is deployed by us with a zero-value tx, so it holds 0
- * ETH — yet its `setUp()`/method may make value-bearing calls (a native-currency
- * pool seed sends `1 ether` from `address(this)`), which revert with a balance
- * underflow. Foundry avoids this by giving the test contract a large balance; we
- * mirror that via the node's `setBalanceMethod`. Best-effort: a node lacking it
- * leaves balances unchanged (the setUp-revert warning still fires). Cannot use a
- * value-bearing transfer instead — a test contract is rarely `payable`, so a
- * plain send would itself revert.
+ * Pre-fund the test contract (and top up the sender), like `forge test`. The
+ * contract is deployed with a zero-value tx, yet its `setUp()` or method may
+ * make value-bearing calls from `address(this)`, which would revert with a
+ * balance underflow. Uses the node's `setBalanceMethod` rather than a transfer,
+ * because test contracts are rarely `payable`. Best-effort: a node lacking the
+ * method leaves balances unchanged.
  */
 async function fundAccounts(
   client: JsonRpcClient,
@@ -291,15 +272,12 @@ async function runSetUp(
   setUpSelector: string,
   ctx?: ResolveContext
 ): Promise<void> {
-  // Waiting ensures setUp is mined (state committed) before the debugged call.
   const {receipt} = await transact(client, {
     to: contractAddress,
     data: `0x${setUpSelector}`,
   });
-  // A REVERTED setUp leaves the fixture state incomplete, so the debugged
-  // method will typically revert early (or read zeros). This is not fatal — we
-  // still trace the call — but the user must know their session is running
-  // against a half-initialized fixture rather than a clean one.
+  // A reverted setUp leaves the fixture half-initialized. Not fatal (the call
+  // is still traced), but the user should know.
   if (receipt?.status === '0x0') {
     ctx?.log(
       '⚠ setUp() reverted (status 0x0): the test fixture is only partially ' +

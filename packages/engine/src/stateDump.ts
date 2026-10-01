@@ -2,21 +2,21 @@
  * Parse a state-dump result (`anvil_dumpState` / `kontrol_dumpState`) into a
  * normalized pre-state snapshot.
  *
- * The dump returns the FULL chain state in one call, letting the
- * resolver seed a traced transaction's pre-state (code + storage a prior tx like
- * `setUp()` wrote and the trace only reads) with a SINGLE request instead of
- * one `eth_getCode` per contract plus one `eth_getStorageAt` per storage slot.
+ * The dump returns the full chain state in one call, letting the resolver seed
+ * a traced transaction's pre-state (code + storage a prior tx like `setUp()`
+ * wrote and the trace only reads) with a single request instead of one
+ * `eth_getCode` per contract plus one `eth_getStorageAt` per storage slot.
  *
- * Two wire formats exist and BOTH are handled here (the caller does not need to
+ * Two wire formats exist and both are handled here (the caller does not need to
  * know which node it is talking to):
  *   - **kontrol-node**: the result is a raw JSON object
  *     `{accounts: {<addr>: {code, nonce, balance, storage}}}`. Storage values are
- *     MINIMAL hex; `nonce` is a number.
+ *     minimal hex; `nonce` is a number.
  *   - **anvil**: the result is a `0x`-prefixed, gzip-compressed hex string of the
- *     same JSON. Storage values are 32-byte PADDED hex; `nonce` is a string.
+ *     same JSON. Storage values are 32-byte padded hex; `nonce` is a string.
  *
  * The parser flattens both to the same {@link StateDump}: addresses lowercased,
- * storage keys and values normalized to MINIMAL hex (`0x` + `BigInt(...)` in
+ * storage keys and values normalized to minimal hex (`0x` + `BigInt(...)` in
  * base 16 — the exact form the trace's SSTORE deltas and the session's storage
  * lookup use, so a later SSTORE to a seeded slot overwrites it cleanly), and
  * zero-valued slots dropped (an absent slot already reads as zero). Returns
@@ -62,7 +62,7 @@ function minimalHex(value: string): Hex | undefined {
 }
 
 /**
- * Parse a raw state-dump result (JSON object OR gzip-hex string) into a
+ * Parse a raw state-dump result (JSON object or gzip-hex string) into a
  * normalized {@link StateDump}, or `undefined` if it cannot be parsed.
  */
 export function parseStateDump(rawResult: unknown): StateDump | undefined {

@@ -1,23 +1,23 @@
 /**
  * Mixed compilation units + optimized fallback + multi-frame.
  *
- * Drives `SolidityDebugSession` against the REAL recorded transaction
+ * Drives `SolidityDebugSession` against the real recorded transaction
  * `Caller(unopt).go(callee, 21)` → external `Callee(opt).compute(21)` (488
  * steps; depth 1 = Caller 363 steps, depth 2 = Callee 125 steps). The two
- * contracts live in SEPARATE build-infos compiled at DIFFERENT optimization
+ * contracts live in separate build-infos compiled at different optimization
  * levels, so the session must:
  *   - launch with multiple build-infos (`buildInfos`) and build an
  *     address→{contract, cu} registry via CBOR runtime-code identification;
- *   - resolve source mapping / scopes / variables PER STEP against the
- *     resolved contract's own CU (external CALLs now map to the callee's CU);
- *   - return a MULTI-FRAME stackTrace across the external call (top = Callee,
+ *   - resolve source mapping / scopes / variables per step against the
+ *     resolved contract's own CU (external CALLs map to the callee's CU);
+ *   - return a multi-frame stackTrace across the external call (top = Callee,
  *     bottom = Caller) at a depth-2 position;
- *   - apply the OPTIMIZED-frame fallback to the Callee frame — storage-only
- *     scopes `['State','EVM']` (NO Locals) — while the unoptimized Caller
+ *   - apply the optimized-frame fallback to the Callee frame — storage-only
+ *     scopes `['State','EVM']` (no Locals) — while the unoptimized Caller
  *     frame keeps its `Locals` scope. Display order is
  *     Locals → State → Globals → Events → EVM.
  *
- * Ground-truth (confirmed against the raw trace + build-info fixtures):
+ * Ground truth (from the raw trace + build-info fixtures):
  *   - 488 steps; depth-1 = Caller (0xe7f1…512), depth-2 = Callee (0x5fbd…aa3);
  *     first depth-2 step index = 249; depth-2 runs 249–373.
  *   - Callee SSTORE completes at raw step 331; `stored` = 0x2a = 42 from step
@@ -30,9 +30,7 @@ import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
 import {buildInfoOf, metaOf, readDbgFixture} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures + LaunchInputs helper
-// ---------------------------------------------------------------------------
+// ## Fixtures + LaunchInputs helper
 
 const MIXED_TRACE_RAW = readDbgFixture('mixed-go-trace.raw.json');
 
@@ -82,7 +80,7 @@ function scopeRefsFor(
 }
 
 /**
- * Drive the session from entry to a depth-2 position INSIDE the Callee frame,
+ * Drive the session from entry to a depth-2 position inside the Callee frame,
  * by arming a breakpoint at `src/Callee.sol` line 8 (`stored = x * 2`) and
  * continuing. Returns once `stackTrace()` shows two frames.
  */
@@ -102,9 +100,7 @@ interface V {
   variablesReference?: number;
 }
 
-// ---------------------------------------------------------------------------
-// 1. Multi-frame stackTrace at a depth-2 position
-// ---------------------------------------------------------------------------
+// ## 1. Multi-frame stackTrace at a depth-2 position
 
 describe('mixed-CU stackTrace — multi-frame across the external call', () => {
   it('at entry (depth 1) reports a single Caller frame', async () => {
@@ -120,18 +116,16 @@ describe('mixed-CU stackTrace — multi-frame across the external call', () => {
 
     const {stackFrames} = session.stackTrace();
     expect(stackFrames).toHaveLength(2);
-    // TOP-FIRST DAP ordering: innermost (Callee) first, caller last.
+    // Top-first DAP ordering: innermost (Callee) first, caller last.
     expect(stackFrames[0]!.source?.path).toBe(CALLEE_PATH);
     expect(stackFrames[1]!.source?.path).toBe(CALLER_PATH);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Per-frame scopes — optimized-frame fallback (no Locals)
-// ---------------------------------------------------------------------------
+// ## 2. Per-frame scopes — optimized-frame fallback (no Locals)
 
 describe('mixed-CU scopes — per-frame optimized fallback', () => {
-  it('the optimized Callee (top) frame exposes State + EVM only (NO Locals)', async () => {
+  it('the optimized Callee (top) frame exposes State + EVM only (no Locals)', async () => {
     const session = await mixedSession();
     continueIntoCallee(session);
 
@@ -163,16 +157,14 @@ describe('mixed-CU scopes — per-frame optimized fallback', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Per-frame variables — decoded against each frame's own CU
-// ---------------------------------------------------------------------------
+// ## 3. Per-frame variables — decoded against each frame's own CU
 
 describe('mixed-CU variables — per-frame storage decode', () => {
   it("Callee State shows stored = '42' (uint256) after its SSTORE", async () => {
     const session = await mixedSession();
     continueIntoCallee(session);
 
-    // The optimized breakpoint lands at the FIRST line-8 step, which precedes
+    // The optimized breakpoint lands at the first line-8 step, which precedes
     // the SSTORE. Advance instruction-by-instruction (staying in the Callee
     // frame) until the write is observable in the Callee State scope.
     let stored: V | undefined;
@@ -211,9 +203,7 @@ describe('mixed-CU variables — per-frame storage decode', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Registry / per-step contract resolution (observable via source.path)
-// ---------------------------------------------------------------------------
+// ## 4. Registry / per-step contract resolution (observable via source.path)
 
 describe('mixed-CU registry — per-step contract resolution', () => {
   it('a depth-1 step resolves to src/Caller.sol; a depth-2 step to src/Callee.sol', async () => {
@@ -222,8 +212,7 @@ describe('mixed-CU registry — per-step contract resolution', () => {
     // Entry step is depth-1 → Caller CU.
     expect(session.stackTrace().stackFrames[0]!.source?.path).toBe(CALLER_PATH);
 
-    // Cross the external CALL: a depth-2 step must resolve to the Callee CU
-    // (the single-contract limitation the registry fixes).
+    // Cross the external CALL: a depth-2 step must resolve to the Callee CU.
     continueIntoCallee(session);
     expect(session.stackTrace().stackFrames[0]!.source?.path).toBe(CALLEE_PATH);
   });
@@ -238,11 +227,9 @@ describe('mixed-CU registry — per-step contract resolution', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. Back-compat — the new `buildInfos` array works for a single CU
-// ---------------------------------------------------------------------------
+// ## 5. A single CU launched through the `buildInfos` array
 
-describe('mixed-CU launch — single-CU back-compat via buildInfos', () => {
+describe('mixed-CU launch — single CU via buildInfos', () => {
   const COUNTER_TRACE_RAW = readDbgFixture('counter-setNumber-trace.raw.json');
   const COUNTER_JSON: unknown = buildInfoOf('counter-build-info.json');
   const COUNTER_META = metaOf('counter-setNumber-meta.json');
@@ -268,16 +255,14 @@ describe('mixed-CU launch — single-CU back-compat via buildInfos', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6. Registry robustness — settings-aware CBOR is order-independent
-// ---------------------------------------------------------------------------
+// ## 6. Registry robustness — settings-aware CBOR is order-independent
 
-// Both fixture build-infos define BOTH `Caller` and `Callee` (the callee CU is
-// a superset), differing only by optimizer settings. So resolution CANNOT be by
+// Both fixture build-infos define both `Caller` and `Callee` (the callee CU is
+// a superset), differing only by optimizer settings. So resolution cannot be by
 // contract name / array order — it must key off the settings-specific CBOR
-// metadata trailer. These tests reverse the `buildInfos` order to prove the
-// entry still resolves to the UNOPTIMIZED Caller CU (Locals present) and the
-// depth-2 frame to the OPTIMIZED Callee CU (Locals absent) regardless of order.
+// metadata trailer. These tests reverse the `buildInfos` order: the entry still
+// resolves to the unoptimized Caller CU (Locals present) and the depth-2 frame
+// to the optimized Callee CU (Locals absent).
 describe('mixed-CU registry — settings-aware CBOR is order-independent', () => {
   function reversedInputs(): LaunchInputs {
     return {
@@ -290,7 +275,7 @@ describe('mixed-CU registry — settings-aware CBOR is order-independent', () =>
     } as LaunchInputs;
   }
 
-  it('entry resolves to the UNOPTIMIZED Caller even when its CU is listed last', async () => {
+  it('entry resolves to the unoptimized Caller even when its CU is listed last', async () => {
     const session = new SolidityDebugSession();
     await session.launch(reversedInputs());
 
@@ -298,7 +283,7 @@ describe('mixed-CU registry — settings-aware CBOR is order-independent', () =>
     expect(stackFrames).toHaveLength(1);
     expect(stackFrames[0]!.source?.path).toBe(CALLER_PATH);
     // Unoptimized ⇒ Locals present. If resolution were name/order-based it would
-    // pick the OPTIMIZED Caller in the first CU and drop Locals.
+    // pick the optimized Caller in the first CU and drop Locals.
     // A read-only `Events` scope is appended on every frame.
     expect(scopeRefsFor(session, stackFrames[0]!.id).names).toEqual([
       'Locals',
@@ -309,7 +294,7 @@ describe('mixed-CU registry — settings-aware CBOR is order-independent', () =>
     ]);
   });
 
-  it('depth-2 resolves to the OPTIMIZED Callee regardless of CU order', async () => {
+  it('depth-2 resolves to the optimized Callee regardless of CU order', async () => {
     const session = new SolidityDebugSession();
     await session.launch(reversedInputs());
     continueIntoCallee(session);
@@ -317,7 +302,7 @@ describe('mixed-CU registry — settings-aware CBOR is order-independent', () =>
     const {stackFrames} = session.stackTrace();
     expect(stackFrames).toHaveLength(2);
     expect(stackFrames[0]!.source?.path).toBe(CALLEE_PATH);
-    // Optimized ⇒ NO Locals. A read-only `Events` scope is appended
+    // Optimized ⇒ no Locals. A read-only `Events` scope is appended
     // (independent of the optimized no-Locals fallback).
     expect(scopeRefsFor(session, stackFrames[0]!.id).names).toEqual([
       'State',

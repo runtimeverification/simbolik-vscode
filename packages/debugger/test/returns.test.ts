@@ -1,21 +1,21 @@
 /**
  * Return parameters surface through the debugger's real dereference path, for
- * external AND internal functions.
+ * external and internal functions.
  *
- * `Returns.calc(5)` returns two NAMED values, `(uint256 doubled, uint256 tripled)`,
- * and calls the INTERNAL `helper(uint256 y) returns (uint256 out)` with a body
+ * `Returns.calc(5)` returns two named values, `(uint256 doubled, uint256 tripled)`,
+ * and calls the internal `helper(uint256 y) returns (uint256 out)` with a body
  * local `local`. solc lays a frame out as [ params ][ return params ][ locals ];
- * once `variablesAt` emits the return params (kind 'return') and the session's
- * Locals scope admits that kind, they flow through `machineStateFor` +
+ * `variablesAt` emits the return params (kind 'return') and the session's
+ * Locals scope admits that kind, so they flow through `machineStateFor` +
  * `readPointerValue` like any other stack variable.
  *
- * Ground truth (recorded kontrol trace, established with the ethdebug-gen oracle):
+ * Ground truth (recorded kontrol trace):
  *   calc @ line 11: x=5, doubled=10, tripled=17, tmp=12.
  *   helper (internal) @ line 17: y=5, out=12, local=6.
  *
  * These pin the return-param handling: at line 11 the Locals scope shows
  * doubled/tripled alongside x & tmp; at line 17 `local` reads 6 (not the reserved
- * return slot's 12) and `out` is present — guarding the internal-return-slot bug.
+ * return slot's 12) and `out` is present.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -63,10 +63,9 @@ describe('Returns — named return params surface in the Locals scope', () => {
     expect(v.get('tmp')).toMatchObject({value: '12', type: 'uint256'});
   });
 
-  it('helper (INTERNAL) @ line 17: out=12 (return) and local=6 both correct', async () => {
-    // The internal-return-slot discriminator through the session's real path:
-    // `out` must appear (12) and `local` must read its own slot (6), NOT the
-    // reserved return slot (which held 12 before the fix).
+  it('helper (internal) @ line 17: out=12 (return) and local=6 both correct', async () => {
+    // Through the session's real path, `out` must appear (12) and `local` must
+    // read its own slot (6), not the reserved return slot (which holds 12).
     const session = await breakAt(17);
     expect(session.stackTrace().stackFrames[0]!.line).toBe(17);
     expect(session.stackTrace().stackFrames[0]!.name).toBe('helper');

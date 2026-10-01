@@ -1,11 +1,11 @@
 /**
- * Value-type classification of AST declarations — a build-info-derived fact
- * shared by the static parameter/local inventories, the variable producer and
- * the debugger's runtime reader (which re-exports {@link describeValueTypeString}).
+ * Value-type classification of AST declarations, shared by the static
+ * parameter/local inventories and the variable producer, and exported as
+ * {@link describeValueTypeString}.
  */
 import type {AstNode, CompilationUnit} from '@simbolik/solc';
 
-/** The value-type shape of a declaration: storage-style type id + byte width. */
+/** The value-type shape of a declaration: storage-style type id, byte width. */
 export interface ValueTypeShape {
   typeId: string;
   numberOfBytes: number;
@@ -17,8 +17,7 @@ export interface ValueTypeShape {
  * The value-type shape of a solc `typeString` (as carried by an AST
  * `VariableDeclaration.typeDescriptions.typeString`): its storage-style type id
  * and byte width, plus the enum simple name when applicable. Returns `undefined`
- * for reference/dynamic types (bytes/string/array/struct/mapping), which are out
- * of scope for the value-type inventory.
+ * for reference/dynamic types (bytes/string/array/struct/mapping).
  */
 export function describeValueTypeString(
   typeString: string
@@ -56,16 +55,15 @@ export function describeValueTypeString(
 }
 
 /**
- * The value-type descriptor for a `VariableDeclaration`, resolving a USER-DEFINED
- * VALUE TYPE (`type X is <elementary>`) to its underlying type.
+ * The value-type descriptor for a `VariableDeclaration`, resolving a
+ * user-defined value type (`type X is <elementary>`) to its underlying type.
  *
  * A UDVT variable's `typeString` is the alias name (e.g. `Currency`), which
- * {@link describeValueTypeString} does not recognise, so such a local/param would
- * be misclassified as a reference type and shown without a value. Its
- * declaration's `UserDefinedTypeName` child carries a `referencedDeclaration`
- * pointing at the `UserDefinedValueTypeDefinition` (possibly in another source),
- * whose `ElementaryTypeName` child is the real value type (e.g. `address`). Falls
- * back to `undefined` for genuine reference/dynamic types.
+ * {@link describeValueTypeString} does not recognise. Its declaration's
+ * `UserDefinedTypeName` child carries a `referencedDeclaration` pointing at the
+ * `UserDefinedValueTypeDefinition` (possibly in another source), whose
+ * `ElementaryTypeName` child is the real value type (e.g. `address`). Returns
+ * `undefined` for reference/dynamic types.
  */
 export function describeDeclValueType(
   decl: AstNode,
@@ -98,7 +96,7 @@ export function describeDeclValueType(
 
 /** The type facts every stack-variable descriptor (param/return/local) carries. */
 export interface DeclTypeFacts {
-  /** solc storage-style type id for value types; the structural type id otherwise. */
+  /** Storage-style type id for value types; the structural type id otherwise. */
   solcType: string;
   /** Solidity type string for display. */
   typeLabel: string;
@@ -109,8 +107,8 @@ export interface DeclTypeFacts {
 
 /**
  * The {@link DeclTypeFacts} of a `VariableDeclaration`. A value type carries its
- * storage-style id; a reference type (struct/array/string/bytes/mapping) still
- * carries its solc STRUCTURAL type id (e.g. `t_struct$_Point_$10_memory_ptr`,
+ * storage-style id; a reference type (struct/array/string/bytes/mapping)
+ * carries its solc structural type id (e.g. `t_struct$_Point_$10_memory_ptr`,
  * `t_array$_t_uint256_$dyn_memory_ptr`, `t_string_memory_ptr`) so the variable
  * producer can resolve its shape (memory struct → members; dynamic memory
  * array/string/bytes).

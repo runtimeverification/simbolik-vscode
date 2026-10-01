@@ -4,7 +4,7 @@ import type {KontrolStructLog} from '../src/trace.js';
 describe('trace types', () => {
   it('types kontrol address/256-bit fields as bigint (lossless-parse contract)', () => {
     // A real 160-bit address from the kontrol-node example trace; far beyond
-    // Number.MAX_SAFE_INTEGER, so it MUST be a bigint, not a number.
+    // Number.MAX_SAFE_INTEGER, so it must be a bigint, not a number.
     const codeAddress = 546584486846459126461364135121053344201067465379n;
     expect(codeAddress > BigInt(Number.MAX_SAFE_INTEGER)).toBe(true);
 

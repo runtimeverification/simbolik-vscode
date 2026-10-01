@@ -52,7 +52,7 @@ export function parseLcov(input: string): LcovRecord[] {
   const records: LcovRecord[] = [];
   let record = createEmptyRecord();
 
-  // Ensure we flush the last record only when we see end_of_record.
+  // A record is flushed only at end_of_record; a trailing partial one is dropped.
   const lines = input.split(/\r?\n/);
 
   for (const rawLine of lines) {
@@ -140,7 +140,6 @@ export function parseLcov(input: string): LcovRecord[] {
         break;
       }
       default:
-        // ignore unknown tags
         break;
     }
   }

@@ -2,15 +2,15 @@
  * Parent EVM frames keep their internal call chain.
  *
  * `Forwarder.go(callee, 21)` (test/fixtures/counter/src/Forwarder.sol) makes its
- * EXTERNAL call from inside the INTERNAL function `_forward`:
+ * external call from inside the internal function `_forward`:
  *
  *   14  uint256 r = _forward(callee, x);
  *   20  uint256 r = ICallee(callee).compute(x);   // → Callee.compute (Callee.sol:8)
  *
  * While the callee runs, the caller's EVM frame must still show `go → _forward`.
- * Only the innermost EVM frame used to be expanded into internal frames, so the
- * caller collapsed to one frame during the call and re-expanded on return —
- * stepping out of the callee looked like entering two frames at once.
+ * If only the innermost EVM frame were expanded into internal frames, the
+ * caller would collapse to one frame during the call and re-expand on return,
+ * so stepping out of the callee would look like entering two frames at once.
  */
 import {describe, expect, it} from 'vitest';
 

@@ -4,17 +4,17 @@ import type {Hex} from '@simbolik/protocol';
 
 /** Inputs to launch a session against a recorded transaction. */
 export interface LaunchInputs {
-  /** solc standard-json build-info (single-CU back-compat). Optional. */
+  /** A single solc standard-json build-info (alternative to `buildInfos`). */
   buildInfoJson?: unknown;
   /** Order-independent array of standard-json build-infos. */
   buildInfos?: unknown[];
-  /** The raw trace JSON-RPC response STRING (has `.result`). */
+  /** The raw trace JSON-RPC response string (has `.result`). */
   traceJson: unknown;
   /** Source path within the build-info, e.g. `'src/Counter.sol'`. */
   sourcePath: string;
   /**
-   * Absolute directory the build-info's RELATIVE source paths resolve against
-   * (the project root, for a LOCAL launch). When set and a source file exists on
+   * Absolute directory the build-info's relative source paths resolve against
+   * (the project root, for a local launch). When set and a source file exists on
    * disk, frames reference the real file (VSCode opens the editable document and
    * gutter breakpoints work); otherwise frames fall back to a `sourceReference`
    * whose content is served via the `source` request (remote replay). Omit for
@@ -32,10 +32,10 @@ export interface LaunchInputs {
   /** The transaction context a geth trace lacks per-step (required for geth). */
   txContext?: GethTraceContext;
   /**
-   * An explicit address→build-info map, keyed by LOWERCASE `0x` address.
-   * Resolves each frame's CU BY ADDRESS, taking PRECEDENCE over the CBOR-from-trace
-   * registry (the only workable path for geth, whose trace carries no per-step
-   * code). Optional — omitting it preserves all existing behavior.
+   * An explicit address→build-info map, keyed by lowercase `0x` address.
+   * Resolves each frame's CU by address, taking precedence over CBOR matching
+   * of the traced code (the only workable path for geth, whose trace carries no
+   * per-step code).
    */
   contractsByAddress?: Record<
     string,
@@ -43,7 +43,7 @@ export interface LaunchInputs {
       buildInfoJson: unknown;
       contractName?: string;
       /**
-       * The declaring source path. Contract names are NOT unique within a build
+       * The declaring source path. Contract names are not unique within a build
        * (forge-std and solmate both declare `MockERC20`), so a name alone can
        * select the wrong contract; with the path the pick is exact.
        */
@@ -51,9 +51,9 @@ export interface LaunchInputs {
     }
   >;
   /**
-   * PRE-TRACE storage to seed the cursor with, keyed `address(hex) → slot(hex) →
+   * Pre-trace storage to seed the cursor with, keyed `address(hex) → slot(hex) →
    * word(hex)` (minimal-hex slot keys, as the node emits and the lookup expects).
-   * A delta-encoded trace omits slots that an EARLIER tx wrote and this one only
+   * A delta-encoded trace omits slots that an earlier tx wrote and this one only
    * reads (SLOAD emits no delta), so fixture state established by `setUp()` would
    * otherwise read as zero. The resolver populates this from `eth_getStorageAt`
    * at the pre-trace block for each known contract's static layout slots.

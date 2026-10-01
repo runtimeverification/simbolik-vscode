@@ -105,7 +105,7 @@ async function defaultLoadCompiler(
   const solc = (await import('solc')).default as SolcModule;
 
   if (compilerVersion.split('+')[0] === solc.version().split('+')[0]) {
-    // Exact-version match — use the bundled compiler, no network.
+    // The bundled compiler matches; no network needed.
     return solc;
   }
 
@@ -141,8 +141,8 @@ export async function recompile(
   const loadCompiler = opts?.loadCompiler ?? defaultLoadCompiler;
   const compiler = await loadCompiler(resolved.compilerVersion);
 
-  // Feed the standard-json VERBATIM (paths + settings verbatim keep the CBOR
-  // trailer / source map aligned); only ADD outputSelection.
+  // Feed the standard-json verbatim (unchanged paths and settings keep the CBOR
+  // trailer and source maps aligned); only add outputSelection.
   const input: StandardJsonInput & {settings: Record<string, unknown>} = {
     ...resolved.standardJsonInput,
     settings: {

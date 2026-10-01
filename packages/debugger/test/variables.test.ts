@@ -1,27 +1,24 @@
 /**
  * Value-type decoding + storage packing + EVM scope.
  *
- * Drives `SolidityDebugSession` against the REAL recorded
+ * Drives `SolidityDebugSession` against the real recorded
  * `Vars.setAll(7, 1000, true, 0x..aa, -5, 0x1122.., Blue)` trace (570 steps,
  * unoptimized solc 0.8.35). The debugger must:
- *   - expose THREE scopes: State, Locals, EVM (in that order);
+ *   - expose the scopes Locals, State, Globals, Events, EVM (in that order);
  *   - decode every storage value type from the packed layout (uint8/uint16/bool
  *     packed in slot 0, int256, bytes32, enum member name);
  *   - decode the calldata value-type params as Locals;
  *   - expose a raw EVM scope (pc + storage word view).
  *
- * All ground-truth values below were verified against the real trace +
- * build-info fixtures (terminal step 569, pc 315 STOP; slot0 packed word
- * `0x…aa0103e807`).
+ * Ground truth: terminal step 569, pc 315 STOP; slot0 packed word
+ * `0x…aa0103e807`.
  */
 import {describe, expect, it} from 'vitest';
 
 import {type SolidityDebugSession} from '../src/index.js';
 import {launch, type Spec} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures + LaunchInputs helper
-// ---------------------------------------------------------------------------
+// ## Fixtures + LaunchInputs helper
 
 const spec: Spec = {
   buildInfo: 'vars-build-info.json',
@@ -32,7 +29,7 @@ const spec: Spec = {
   methodName: 'setAll',
 };
 
-/** The confirmed packed word committed to slot 0 at the terminal step. */
+/** The packed word committed to slot 0 at the terminal step. */
 const SLOT0_WORD =
   '0x00000000000000000000000000000000000000000000000000000000aa0103e807';
 
@@ -65,12 +62,10 @@ function normHex(value: string): string {
   return value.replace(/^0x/i, '').toLowerCase().replace(/^0+/, '');
 }
 
-// ---------------------------------------------------------------------------
-// 1. scopes — now THREE: State, Locals, EVM
-// ---------------------------------------------------------------------------
+// ## 1. scopes — including EVM
 
 describe('SolidityDebugSession.scopes (includes EVM)', () => {
-  it('returns State, Locals, EVM in order with distinct positive refs', async () => {
+  it('returns Locals, State, Globals, Events, EVM in order with distinct positive refs', async () => {
     const session = await launchedSession();
     const frameId = session.stackTrace().stackFrames[0]!.id;
     const {scopes} = session.scopes(frameId);
@@ -92,9 +87,7 @@ describe('SolidityDebugSession.scopes (includes EVM)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. variables(State) — all 7 value types, decoded from packed storage
-// ---------------------------------------------------------------------------
+// ## 2. variables(State) — all 7 value types, decoded from packed storage
 
 describe('SolidityDebugSession.variables(State) — value-type decoding', () => {
   /** Reach the terminal step (all storage committed), then read State. */
@@ -159,7 +152,7 @@ describe('SolidityDebugSession.variables(State) — value-type decoding', () => 
     expect(h.type).toBe('bytes32');
   });
 
-  it('decodes enum color to its member NAME (Blue)', async () => {
+  it('decodes enum color to its member name (Blue)', async () => {
     const color = (await terminalState()).find((v) => v.name === 'color')!;
     expect(color.value).toBe('Blue');
     // Type is the enum simple name; accept either `Color` or `enum Vars.Color`.
@@ -167,9 +160,7 @@ describe('SolidityDebugSession.variables(State) — value-type decoding', () => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. variables(Locals) — value-type params decoded from calldata
-// ---------------------------------------------------------------------------
+// ## 3. variables(Locals) — value-type params decoded from calldata
 
 describe('SolidityDebugSession.variables(Locals) — calldata params', () => {
   /** Locals are readable at entry: calldata is constant through the call. */
@@ -197,7 +188,7 @@ describe('SolidityDebugSession.variables(Locals) — calldata params', () => {
     });
   });
 
-  it('decodes the enum param _color to member NAME (Blue)', async () => {
+  it('decodes the enum param _color to member name (Blue)', async () => {
     const color = (await entryLocals()).find((v) => v.name === '_color')!;
     expect(color).toBeDefined();
     expect(color.value).toBe('Blue');
@@ -205,9 +196,7 @@ describe('SolidityDebugSession.variables(Locals) — calldata params', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. variables(EVM) — raw machine state (pc + storage word view)
-// ---------------------------------------------------------------------------
+// ## 4. variables(EVM) — raw machine state (pc + storage word view)
 
 describe('SolidityDebugSession.variables(EVM) — raw machine scope', () => {
   /**
@@ -265,7 +254,7 @@ describe('SolidityDebugSession.variables(EVM) — raw machine scope', () => {
     expect(memory, 'EVM scope must expose a memory row').toBeDefined();
     const wordCount = Number(/^(\d+) words$/.exec(memory!.value)?.[1]);
     expect(Number.isInteger(wordCount)).toBe(true);
-    // The Counter run uses memory (free pointer, hashing), so it is non-empty and
+    // The run uses memory (free pointer, hashing), so it is non-empty and
     // therefore expandable.
     expect(wordCount).toBeGreaterThan(0);
     expect(memory!.variablesReference).toBeGreaterThan(0);
@@ -285,9 +274,7 @@ describe('SolidityDebugSession.variables(EVM) — raw machine scope', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. Focused packed-extraction pin for `b` (offset 1, len 2 → 1000)
-// ---------------------------------------------------------------------------
+// ## 5. Focused packed-extraction pin for `b` (offset 1, len 2 → 1000)
 
 describe('storage packed extraction pins the shift/mask for b', () => {
   it('b (offset 1, length 2) extracts to 1000 from the shared slot-0 word', async () => {

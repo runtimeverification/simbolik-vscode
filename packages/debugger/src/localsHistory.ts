@@ -2,7 +2,7 @@
  * Trace-based reasoning about a frame's params/locals over its invocation:
  * where to read them, whether the static model's location applies on the
  * executed path, whether a live slot holds a stale copy, and where the variable
- * was last located. Pure trace reconstruction — all variable LAYOUT comes from
+ * was last located. Pure trace reconstruction — all variable layout comes from
  * `variablesAt` (`@simbolik/ethdebug-gen`).
  */
 import type {ResolvedVariable} from '@simbolik/ethdebug-gen';
@@ -27,7 +27,7 @@ function isShuffleOp(op: string): boolean {
   );
 }
 
-/** Opcodes that push NO result (everything else except DUP/SWAP pushes exactly one). */
+/** Opcodes that push no result (everything else except DUP/SWAP pushes one). */
 // prettier-ignore
 const NO_RESULT_OPS = new Set([
   'POP', 'JUMP', 'JUMPI', 'JUMPDEST', 'MSTORE', 'MSTORE8', 'SSTORE', 'TSTORE',
@@ -73,10 +73,10 @@ export class LocalsHistory {
 
   /**
    * The step to read the frame's params/locals at. Normally the frame's own step,
-   * but when the frame is parked at its function PROLOGUE/EPILOGUE (a step with no
+   * but when the frame is parked at its function prologue/epilogue (a step with no
    * enclosing body statement — e.g. the terminal STOP after `continue`), the
    * on-stack variables have already unwound. Walk back within the same frame
-   * occurrence (same depth + address) to the last step that IS inside a body
+   * occurrence (same depth + address) to the last step that is inside a body
    * statement, where the variables are still live.
    */
   readStep(frame: FrameInfo): number {
@@ -94,8 +94,8 @@ export class LocalsHistory {
   }
 
   /**
-   * The frame invocation's reference offset between the RUNTIME stack length and
-   * the provenance MODEL's stack length. Wherever the static model matches the
+   * The frame invocation's reference offset between the runtime stack length and
+   * the provenance model's stack length. Wherever the static model matches the
    * executed path this offset is constant (it is the caller's share of the
    * stack); the most common offset over the invocation's first located steps is
    * the reference. Memoized per invocation.
@@ -167,8 +167,8 @@ export class LocalsHistory {
 
   /**
    * Whether the live stack slot `v.pointer` names at `curStep` holds a value
-   * produced BEFORE the start of `v`'s last write in this frame invocation — i.e.
-   * a leftover copy of an OLD value (value numbering names values, not variables,
+   * produced before the start of `v`'s last write in this frame invocation — i.e.
+   * a leftover copy of an old value (value numbering names values, not variables,
    * so after `x = …` / `x -= …` a surviving copy of x's previous value may still
    * be named `x`). Decided from the trace: the slot's value is followed backward
    * through DUP (copy source) / SWAP (move) to the step that produced it.
@@ -186,16 +186,16 @@ export class LocalsHistory {
     const {steps} = this.#trace;
     const evmDepth = steps[curStep]!.depth;
     // Follow the slot's value back through its lineage (DUP = copy of a source
-    // slot, SWAP = move). The variable's current value was produced OR copied
-    // while its last write executed; a leftover copy of an OLD value never
+    // slot, SWAP = move). The variable's current value was produced or copied
+    // while its last write executed; a leftover copy of an old value never
     // touches that span. (A plain "produced after the write" test is wrong: a
     // write may copy an existing value, e.g. `lo = a` returning a parameter.)
     //
-    // A COMPOUND write (`x -= e`, `x++`) always computes a FRESH value inside the
-    // statement, so only a value PRODUCED during it can be x's; shuffles (DUP/
-    // SWAP) of older values during the statement prove nothing. A PLAIN write
-    // (`x = e`, a declaration) may just copy an existing value (`lo = a`), so
-    // there being copied/moved during the write counts as current.
+    // A compound write (`x -= e`, `x++`) always computes a fresh value inside the
+    // statement, so only a value produced during it can be x's; shuffles (DUP/
+    // SWAP) of older values during the statement prove nothing. A plain write
+    // (`x = e`, a declaration) may just copy an existing value (`lo = a`), so a
+    // copy or move during the write counts as current.
     let i = steps[curStep]!.stack.length - 1 - ptr.slot; // absolute index from bottom
     const inWrite = (j: number): boolean => j >= start && j <= end;
     for (let j = curStep - 1; j >= start; j--) {
@@ -226,7 +226,7 @@ export class LocalsHistory {
       }
       if (i >= after) return false; // defensive: index out of range
     }
-    return true; // lineage predates the write ⇒ an OLD value's copy
+    return true; // lineage predates the write ⇒ an old value's copy
   }
 
   /**
@@ -285,13 +285,13 @@ export class LocalsHistory {
    * Candidate earlier locations of a param/local `name` that is in scope at
    * `curStep` but has no live location there (its slot was freed or reused),
    * most recent first. Scans backward — bounded to the current frame invocation
-   * via the stepping model's `combinedDepth` (a step SHALLOWER than the frame's
-   * own level ends the invocation; a DEEPER one is a sub-call, skipped) and the
+   * via the stepping model's `combinedDepth` (a step shallower than the frame's
+   * own level ends the invocation; a deeper one is a sub-call, skipped) and the
    * frame's address — for steps where `variablesAt` gives `name` a concrete
-   * SCALAR location (a value-type pointer, or a memory string/bytes layout the
+   * scalar location (a value-type pointer, or a memory string/bytes layout the
    * caller may still fail to decode). Ends at a write to the variable (an older
-   * value is superseded, not merely stale) or at a COMPLEX reference type
-   * (struct/array — shown only while live). NEVER yields the current step, so a
+   * value is superseded, not merely stale) or at a complex reference type
+   * (struct/array — shown only while live). Never yields the current step, so a
    * value read is always one the variable genuinely held.
    */
   *earlierLocations(
@@ -313,7 +313,7 @@ export class LocalsHistory {
       if (m.combinedDepth < frameDepth) return; // returned out of this invocation
       if (m.combinedDepth > frameDepth) continue; // inside a sub-call
       if (this.#addressAt(j) !== frame.address) continue;
-      // Never reach back ACROSS a write to the variable.
+      // Never reach back across a write to the variable.
       if (writes(m.stmtId)) return;
       const v = variablesAtStep(frame, steps[j]!).find(
         x => x.name === name && isFrameLocal(x)

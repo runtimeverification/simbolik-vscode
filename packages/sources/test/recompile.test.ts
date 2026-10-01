@@ -9,12 +9,11 @@ import {loadBuildInfo} from '@simbolik/solc';
 /**
  * Tests for `recompile`.
  *
- * Mirroring the `sourcify.test.ts` pattern, we import the public entry point
- * with a LOOSE dynamic-import cast plus a `toBeDefined` guard. That keeps the
- * suite type-clean (no "has no exported member" compile error) and surfaces a
- * missing export as a runtime/assertion failure rather than a compile error.
+ * As in `sourcify.test.ts`, the public entry point is imported with a loose
+ * dynamic-import cast plus a `toBeDefined` guard, so a missing export surfaces
+ * as an assertion failure rather than a compile error.
  *
- * These tests are HERMETIC: they compile a tiny inline contract at the BUNDLED
+ * These tests are hermetic: they compile a tiny inline contract at the bundled
  * solc version (`solc.version()`), so no `loadRemoteVersion` / network is used.
  * The single live round-trip (Multicall3 @ 0.8.12) is gated behind
  * `SIMBOLIK_LIVE` and skipped by default.
@@ -22,7 +21,7 @@ import {loadBuildInfo} from '@simbolik/solc';
 
 const require = createRequire(import.meta.url);
 
-/** The bundled solc, loaded synchronously via `require` (matches the impl). */
+/** The bundled solc, loaded synchronously via `require`. */
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const solc = require('solc') as {version: () => string; compile: (input: string) => string};
 
@@ -40,10 +39,10 @@ const SAMPLE =
   'pragma solidity ^0.8.0;\n' +
   'contract Sample { uint256 public value; struct P { uint256 x; } event E(uint256 indexed a); function set(uint256 v) public { value = v; } }';
 
-/** Scratch-verified topic-0 selector for `event E(uint256 indexed a)`. */
+/** Topic-0 selector for `event E(uint256 indexed a)`. */
 const E_SELECTOR = '0x' + bytesToHex(keccak256(utf8ToBytes('E(uint256)')));
 
-// --- Loose structural shapes (kept deliberately permissive) --------------------
+// ## Loose structural shapes (kept deliberately permissive)
 
 type StandardJsonInputLike = {
   language: string;
@@ -84,7 +83,7 @@ type BuildInfoLike = {
   };
 };
 
-/** Injectable compiler loader stub — same call signature the contract specifies. */
+/** Shape of the injectable compiler and loader. */
 type SolcCompilerLike = {version: () => string; compile: (input: string) => string};
 type RecompileOpts = {loadCompiler?: (version: string) => Promise<SolcCompilerLike>};
 type RecompileFn = (
@@ -133,7 +132,7 @@ describe('recompile', () => {
 
       const bi = await recompile!(resolvedSample());
 
-      // solcVersion is the SHORT bundled version.
+      // solcVersion is the short bundled version.
       expect(bi.solcVersion).toBe(BUNDLED_SHORT);
 
       // input carries the source content through verbatim.
@@ -184,7 +183,7 @@ describe('recompile', () => {
       // runtime source map is populated.
       expect(contract!.runtimeSourceMap().length).toBeGreaterThan(0);
 
-      // events: `E` with the scratch-verified topic-0 selector.
+      // events: `E` with its keccak topic-0 selector.
       const event = contract!.events().find((e) => e.name === 'E');
       expect(event).toBeDefined();
       expect(event!.selector).toBe(E_SELECTOR);
@@ -215,7 +214,7 @@ describe('recompile', () => {
       const recompile = await loadRecompile();
       expect(recompile).toBeDefined();
 
-      // The stub IS the bundled compiler — so if the impl uses `opts.loadCompiler`
+      // The stub is the bundled compiler, so when `opts.loadCompiler` is used
       // there is no default bundled/remote decision and no network at all.
       const loadCompiler = vi.fn(async (_version: string) => solc);
 
@@ -232,7 +231,7 @@ describe('recompile', () => {
     });
   });
 
-  // --- Gated LIVE: real Sourcify fetch + arbitrary-version recompile -----------
+  // ## Gated live test: real Sourcify fetch + arbitrary-version recompile
   describe.skipIf(!process.env.SIMBOLIK_LIVE)('live round-trip (network)', () => {
     it('fetches Multicall3, recompiles @ 0.8.12, round-trips', async () => {
       const recompile = await loadRecompile();

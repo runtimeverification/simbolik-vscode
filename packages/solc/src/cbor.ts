@@ -25,22 +25,21 @@ export function cborMetadataHash(runtimeBytecode: Hex): Hex | undefined {
  * Identify which contract in the compilation unit a deployed runtime code
  * belongs to. Returns `undefined` when the code cannot be attributed to exactly
  * one contract (the caller then falls back to the launch `contractName`, or
- * treats the code as foreign) — NEVER a guess, because a wrong identification
- * uses the wrong source map and silently corrupts all source/variable/stepping
+ * treats the code as foreign). It never guesses: a wrong identification uses
+ * the wrong source map and silently corrupts all source, variable and stepping
  * resolution.
  *
- * Three matchers, most-reliable first:
- *  1. EXACT runtime-bytecode match. A kontrol trace carries the concrete deployed
- *     code, so an exact, unique match is definitive.
+ * Three matchers, most reliable first:
+ *  1. Exact runtime-bytecode match. A kontrol trace carries the concrete
+ *     deployed code, so an exact, unique match is definitive.
  *  2. The same, with immutable byte ranges masked out (see below).
- *  3. CBOR metadata trailer, but ONLY when it uniquely identifies one contract.
+ *  3. CBOR metadata trailer, but only when it uniquely identifies one contract.
  *     The trailer's IPFS/bzzr hash pins a source+settings compilation and is
- *     robust to differing immutable/library-address bytes — BUT with
- *     `bytecode_hash = "none"` (Foundry's default, and Uniswap's) it degrades to
- *     just `{solc: <version>}`, IDENTICAL across every contract that compiler
- *     produced. Matching the first such contract would return an arbitrary,
- *     usually WRONG contract (e.g. a forge-std library), so we require the
- *     trailer to match exactly one contract and otherwise give up.
+ *     robust to differing immutable/library-address bytes. With
+ *     `bytecode_hash = "none"` (common in Foundry projects), however, it
+ *     degrades to just `{solc: <version>}`, identical across every contract
+ *     that compiler produced; taking the first match would return an arbitrary
+ *     contract (e.g. a forge-std library).
  */
 export function identifyContractByRuntimeCode(
   cu: CompilationUnit,
@@ -54,12 +53,13 @@ export function identifyContractByRuntimeCode(
   );
   if (exact.length === 1) return exact[0];
 
-  // Immutable-masked exact match: a DEPLOYED contract differs from its build-info
-  // runtime code only in its immutable byte ranges (and linked-library address
-  // bytes, reported the same way), which are filled at deploy time. Zeroing those
-  // ranges in BOTH strings lets a contract WITH immutables (e.g. Uniswap's
-  // PoolManager) still be identified when the CBOR trailer is non-discriminating
-  // (bytecode_hash="none"). Same length is required (immutables never resize).
+  // Immutable-masked exact match: a deployed contract differs from its
+  // build-info runtime code only in its immutable byte ranges (and
+  // linked-library address bytes, reported the same way), which are filled at
+  // deploy time.
+  // Zeroing those ranges in both strings identifies a contract with immutables
+  // even when the CBOR trailer is non-discriminating (bytecode_hash="none").
+  // Same length is required (immutables never resize).
   const masked = contracts.filter((c) => {
     const code = normalizeCode(c.runtimeBytecode());
     if (code.length !== target.length || c.immutableRanges().length === 0) {

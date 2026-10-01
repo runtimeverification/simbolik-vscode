@@ -2,7 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {SUPPORTED_RPC_NODE_TYPES, type RpcNodeType} from '../src/index.js';
 
 describe('protocol', () => {
-  it('supports both anvil and kontrol-node trace dialects from the start', () => {
+  it('supports both anvil and kontrol-node trace dialects', () => {
     expect(SUPPORTED_RPC_NODE_TYPES).toEqual(['anvil', 'kontrol-node']);
   });
 

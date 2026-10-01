@@ -1,19 +1,19 @@
 /**
- * A dynamic memory ARRAY (`nums`) as a NESTED DAP variable and a memory
- * STRING (`label`) as a SCALAR DAP variable.
+ * A dynamic memory array (`nums`) as a nested DAP variable and a memory
+ * string (`label`) as a scalar DAP variable.
  *
  * `Locals.compute(10)` declares:
  *   `uint256[] memory nums = new uint256[](2); nums[0] = a;`  → [11, 0]
  *   `string  memory label = "hi";`                            → "hi" (bytes 0x6869)
  *
- * Both are memory reference locals whose stack slot holds a memory OFFSET; the
+ * Both are memory reference locals whose stack slot holds a memory offset; the
  * array's length + the string's byte length are read from memory at that offset.
- * `variablesAt` emits the LAYOUT statically: `nums` gets an `array`
+ * `variablesAt` emits the layout statically: `nums` gets an `array`
  * structure (a dereferenceable `List` whose element regions are named `'element'`)
  * and `label` gets a `bytes` structure (a dynamic-length byte region). The values
- * are read at dereference time through the REAL `@ethdebug/pointers` path.
+ * are read at dereference time through the real `@ethdebug/pointers` path.
  *
- * ── Trace ground-truth (locals-compute-trace.raw.json, pc 436 = line 37) ───────
+ * ## Trace ground-truth (locals-compute-trace.raw.json, pc 436 = line 37)
  * Established by reading the recorded trace memory directly:
  *   nums:  stack slot holds memory offset 0x80 (=128); mem[128]=len 2;
  *          mem[160]=nums[0]=11; mem[192]=nums[1]=0.
@@ -26,8 +26,8 @@
  *   2. The session renders nums as a nested variable (non-zero
  *      `variablesReference`; children `0`=11, `1`=0, type uint256) and label as a
  *      scalar (`value === '"hi"'`, `variablesReference: 0`, type string).
- *   3. Regression: pt (struct) still nests {x:11, y:7}; the value locals still
- *      decode.
+ *   3. pt (struct) nests {x:11, y:7} and the value locals decode alongside
+ *      them.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -45,9 +45,9 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ── Loose accessors for the producer fields ───────────────────────────────────
+// ## Loose accessors for the producer fields
 
-/** The `array` field added under `ResolvedVariable`. */
+/** The `array` field of a `ResolvedVariable`. */
 interface ArrayShape {
   pointer?: Pointer;
   elementSolcType: string;
@@ -57,7 +57,7 @@ interface ArrayShape {
 function arrayOf(v: ResolvedVariable): ArrayShape | undefined {
   return (v as unknown as {array?: ArrayShape}).array;
 }
-/** The `bytes` field added under `ResolvedVariable`. */
+/** The `bytes` field of a `ResolvedVariable`. */
 interface BytesShape {
   pointer?: Pointer;
   isString: boolean;
@@ -79,9 +79,7 @@ const spec: Spec = {
   methodName: 'compute',
 };
 
-// ---------------------------------------------------------------------------
-// 1. The array pointer dereferences to its concrete elements [11, 0]
-// ---------------------------------------------------------------------------
+// ## 1. The array pointer dereferences to its concrete elements [11, 0]
 
 describe('nums array pointer dereferences through @ethdebug/pointers', () => {
   it('nums resolves to elements [11n, 0n] at pc 436 (real deref path)', async () => {
@@ -108,9 +106,7 @@ describe('nums array pointer dereferences through @ethdebug/pointers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. The string pointer decodes to "hi"
-// ---------------------------------------------------------------------------
+// ## 2. The string pointer decodes to "hi"
 
 describe('label string pointer decodes through @ethdebug/pointers', () => {
   it('label resolves to the UTF-8 string "hi" at pc 436 (real deref path)', async () => {
@@ -127,7 +123,7 @@ describe('label string pointer decodes through @ethdebug/pointers', () => {
     const cursor = await dereference(b!.pointer as Pointer, {state: ms});
     const view = await cursor.view(ms);
 
-    // The FINAL region is the raw bytes (dynamic length read from memory).
+    // The final region is the raw bytes (dynamic length read from memory).
     const raw = view.regions[view.regions.length - 1]!;
     const hex = (await view.read(raw)).toHex();
     expect(hex).toBe('0x6869');
@@ -135,9 +131,7 @@ describe('label string pointer decodes through @ethdebug/pointers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. The session renders nums nested + label scalar
-// ---------------------------------------------------------------------------
+// ## 3. The session renders nums nested + label scalar
 
 describe('session renders nums as a nested DAP variable', () => {
   it('nums has a non-zero variablesReference; children 0=11, 1=0 (uint256)', async () => {
@@ -184,22 +178,19 @@ describe('session renders label as a scalar DAP variable', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Regression: struct pt still nests; value locals still decode
-// ---------------------------------------------------------------------------
+// ## 4. Struct pt nests; value locals decode
 
-describe('regression: struct pt + value locals unaffected', () => {
-  it('pt still nests {x:11, y:7} and the value locals still decode', async () => {
+describe('struct pt + value locals alongside reference locals', () => {
+  it('pt nests {x:11, y:7} and the value locals decode', async () => {
     const session = await breakAt(spec, 37);
     const m = await locals(session);
 
-    // Value locals unaffected.
     expect(m.get('a')).toMatchObject({value: '11', type: 'uint256'});
     expect(m.get('small')).toMatchObject({value: '7', type: 'uint8'});
     expect(m.get('sum')).toMatchObject({value: '0', type: 'uint256'});
     expect(m.get('tail')).toMatchObject({value: '18', type: 'uint256'});
 
-    // pt is still a nested struct with children x=11, y=7.
+    // pt is a nested struct with children x=11, y=7.
     const pt = m.get('pt');
     expect(pt).toBeDefined();
     expect(pt!.variablesReference).not.toBe(0);

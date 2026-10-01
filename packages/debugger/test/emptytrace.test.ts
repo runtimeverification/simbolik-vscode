@@ -1,13 +1,13 @@
 /**
- * Regression: a 0-step trace must fail fast with a clear, actionable error at
- * `launch`, NOT build a degenerate stepping model that later throws a cryptic
+ * A 0-step trace fails fast at `launch` with a clear, actionable error instead
+ * of building a degenerate stepping model that later throws a cryptic
  * "Cannot destructure property 'stmtId' of undefined" on the first step command.
  *
- * The real-world trigger (found debugging uniswap-v4-core's PoolManager.clear.t):
- * an oversized test contract (>180 KB runtime) whose deploy failed for want of
- * gas, leaving the entry address code-less — so the traced call executed zero EVM
- * instructions. The launch resolver now rejects the failed deploy earlier, but
- * this guard covers every other 0-step path (geth attach, a call to an EOA, …).
+ * A typical trigger is an oversized test contract (>180 KB runtime) whose
+ * deploy fails for want of gas, leaving the entry address code-less, so the
+ * traced call executes zero EVM instructions. The launch resolver rejects a
+ * failed deploy earlier; this guard covers every other 0-step path (geth
+ * attach, a call to an EOA, …).
  */
 import {describe, expect, it} from 'vitest';
 

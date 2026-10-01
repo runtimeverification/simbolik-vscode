@@ -1,5 +1,5 @@
 /**
- * Find where exceptions ORIGINATE in a recorded trace, and whether the
+ * Find where exceptions originate in a recorded trace, and whether the
  * transaction survived them.
  *
  * A call fails in one of four ways: its frame executes REVERT, executes the
@@ -12,11 +12,11 @@
  *
  * A failure that a caller merely passes on is not a new exception: Solidity
  * bubbles a failed call's revert data up by copying it (RETURNDATACOPY) and
- * REVERTing with the same bytes. Such a REVERT is recorded as a RETHROW of the
+ * REVERTing with the same bytes. Such a REVERT is recorded as a rethrow of the
  * original exception, so every exception is reported once, at the instruction
- * that caused it. An exception is CAUGHT
- * when a caller carries on (try/catch, a low-level call whose result is
- * checked, …) and UNCAUGHT when it reaches the top frame and fails the
+ * that caused it. An exception is caught when a caller carries on (try/catch, a
+ * low-level call whose result is checked, …) and uncaught when it reaches the
+ * top frame and fails the
  * transaction. `vm.expectRevert` turns an expected revert into a success, which
  * the caller sees as a success flag of 1 despite the callee's REVERT.
  */

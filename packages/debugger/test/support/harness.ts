@@ -1,18 +1,16 @@
 /**
- * Shared test harness for the debugger suite.
+ * Shared test harness for the debugger suite: fixture loading, session launch
+ * and variable inspection, so a test reads as intent, not plumbing.
  *
- * NOT a test file (no `*.test.ts` suffix) so vitest's `packages/*&#47;test/**&#47;*.test.ts`
- * glob never collects it. It consolidates the fixture-loading, session-launch and
- * variable-inspection boilerplate that was previously copy-pasted across ~35 test
- * files (`readTrace`/`solcFixture`/`inputs()`/`launched()`/`breakAt`/`stepToLine`/
- * `localsRef`/`localsMap`/…), so a test reads as intent, not plumbing.
+ * Not a test file (no `*.test.ts` suffix), so vitest's test glob never
+ * collects it.
  *
- * Two fixture conventions coexist and neither is guessed: a {@link Spec} names the
- * build-info, trace and meta files EXPLICITLY (e.g. `locals-compute-trace.raw.json`
- * vs `bytesarray-viair-run-trace.raw.json`).
+ * Fixture names are never guessed: a {@link Spec} names the build-info, trace
+ * and meta files explicitly (e.g. `locals-compute-trace.raw.json` vs
+ * `bytesarray-viair-run-trace.raw.json`).
  *
- * The {@link eachMode} helper runs one shared test body against both a viaIR and a
- * legacy fixture pair — the mechanism behind the dual-pipeline coverage matrix.
+ * {@link eachMode} runs one shared test body against both a viaIR and a legacy
+ * fixture pair.
  */
 import {readFileSync} from 'node:fs';
 
@@ -32,9 +30,7 @@ import {
   type LaunchInputs,
 } from '../../src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixture readers
-// ---------------------------------------------------------------------------
+// ## Fixture readers
 
 /** Raw text of a build-info fixture in `packages/solc/test/fixtures`. */
 export function readSolcFixture(name: string): string {
@@ -63,7 +59,7 @@ export function loadCu(buildInfoName: string): CompilationUnit {
 }
 
 /**
- * Normalized steps from a RAW kontrol `debug_traceTransaction` fixture. Parsed
+ * Normalized steps from a raw kontrol `debug_traceTransaction` fixture. Parsed
  * losslessly — kontrol emits 256-bit values as decimals that plain `JSON.parse`
  * would corrupt.
  */
@@ -94,7 +90,7 @@ export function normAddr(a: string): string {
 }
 
 /**
- * The ethdebug `Machine.State` at the first OWN-contract (non-init) step whose pc
+ * The ethdebug `Machine.State` at the first own-contract (non-init) step whose pc
  * is `pc`. Used by the raw `@ethdebug/pointers` dereference tests.
  */
 export function machineStateAtPc(
@@ -112,9 +108,7 @@ export function machineStateAtPc(
   throw new Error(`no own-contract step at pc ${pc} in ${traceName}`);
 }
 
-// ---------------------------------------------------------------------------
-// Launch
-// ---------------------------------------------------------------------------
+// ## Launch
 
 /** A fixture bundle + entry coordinates: everything a launch needs. */
 export interface Spec {
@@ -139,7 +133,7 @@ export interface Spec {
   buildInfos?: LaunchInputs['buildInfos'];
 }
 
-/** Build `LaunchInputs` from a {@link Spec} (RAW trace text; codeAddress from meta). */
+/** Build `LaunchInputs` from a {@link Spec} (raw trace text; codeAddress from meta). */
 export function toLaunchInputs(spec: Spec): LaunchInputs {
   return {
     buildInfoJson: buildInfoOf(spec.buildInfo),
@@ -181,9 +175,7 @@ export async function breakAt(
   return session;
 }
 
-// ---------------------------------------------------------------------------
-// Navigation
-// ---------------------------------------------------------------------------
+// ## Navigation
 
 /** The current top frame's 1-based line (undefined at the terminal step). */
 export function line(session: SolidityDebugSession): number | undefined {
@@ -195,7 +187,7 @@ export function topFrameId(session: SolidityDebugSession): number {
   return session.stackTrace().stackFrames[0]!.id;
 }
 
-/** Step OVER until stopped on `targetLine`, or throw after `max` steps. */
+/** Step over until stopped on `targetLine`, or throw after `max` steps. */
 export function stepToLine(
   session: SolidityDebugSession,
   targetLine: number,
@@ -209,9 +201,7 @@ export function stepToLine(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Variable inspection
-// ---------------------------------------------------------------------------
+// ## Variable inspection
 
 /** A DAP variable as the session emits it. */
 export interface DapVariable {
@@ -279,9 +269,7 @@ export async function stateVars(
   return new Map(vars.map((v) => [v.name, v]));
 }
 
-// ---------------------------------------------------------------------------
-// Pipeline-mode matrix
-// ---------------------------------------------------------------------------
+// ## Pipeline-mode matrix
 
 /** A compilation pipeline. */
 export type Mode = 'viair' | 'legacy';

@@ -122,7 +122,7 @@ describe('buildInstructionIndex — PUSH data skipping (synthetic)', () => {
     expect(pcToInstruction.get(0)).toBe(0);
     expect(pcToInstruction.get(2)).toBe(1);
     expect(pcToInstruction.get(4)).toBe(2);
-    // PUSH immediate data bytes are NOT instruction starts.
+    // PUSH immediate data bytes are not instruction starts.
     expect(pcToInstruction.get(1)).toBeUndefined();
     expect(pcToInstruction.get(3)).toBeUndefined();
   });

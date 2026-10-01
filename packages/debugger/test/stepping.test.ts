@@ -4,16 +4,15 @@
  * Drives interactive stepping (`next`/`stepIn`/`stepOut`/`stepBack`/`stepOver`
  * via `next`, `stepInstruction`/`stepBackInstruction`), source-line breakpoints
  * (`setBreakpoints` + `continue`/`reverseContinue`), and the DAP
- * `configurationDone` handshake — in-memory against a REAL recorded
+ * `configurationDone` handshake — in-memory against a real recorded
  * `Stepper.run(10)` trace (339 steps).
  *
  * `run(10)` computes: a = 11, b = double(11) = 22, total = 33. The internal
  * `double()` call is a Solidity JUMP at constant EVM depth, so stepping relies
- * on COMBINED depth (EVM depth + jump depth) to enter/skip/leave it.
+ * on combined depth (EVM depth + jump depth) to enter/skip/leave it.
  *
- * Every step-transition assertion below is CONFIRMED against the real trace:
- *   statement-start steps of run(10) are exactly
- *     113 (line 8, ENTRY) → 175 (line 9) → 182 (line 14, inside double)
+ * Statement-start steps of run(10) in the recorded trace are exactly
+ *     113 (line 8, entry) → 175 (line 9) → 182 (line 14, inside double)
  *     → 266 (line 9, back in run) → 269 (line 10); terminal step = 338.
  *
  * These exercise the stepping methods (`configurationDone`, `next`, `stepIn`,
@@ -26,9 +25,7 @@ import {describe, expect, it} from 'vitest';
 import type {SolidityDebugSession} from '../src/index.js';
 import {launch, line as currentLine, type Spec} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures + LaunchInputs helper
-// ---------------------------------------------------------------------------
+// ## Fixtures + LaunchInputs helper
 
 const spec: Spec = {
   buildInfo: 'stepper-build-info.json',
@@ -61,8 +58,7 @@ function terminated(session: SolidityDebugSession): boolean {
   return session.events.some((e) => e.event === 'terminated');
 }
 
-// The confirmed step indices behind the source lines (used for the exact
-// step-index assertions below — see file header for the ground-truth table).
+// The step indices behind the source lines (see the file header).
 const ENTRY = 113; //  line 8  `uint256 a = x + 1`
 const LINE9 = 175; //  line 9  `uint256 b = double(a)`
 const LINE14 = 182; // line 14 `return v * 2`  (inside double)
@@ -70,9 +66,7 @@ const BACK9 = 266; //  line 9  back in run (assign b)
 const LINE10 = 269; // line 10 `total = a + b`
 const TERMINAL = 338;
 
-// ---------------------------------------------------------------------------
-// 1. launch → entry stop at the first executable statement (line 8)
-// ---------------------------------------------------------------------------
+// ## 1. launch → entry stop at the first executable statement (line 8)
 
 describe('launch (Stepper) stops at the entry statement', () => {
   it('positions at line 8 and queues stopped reason "entry"', async () => {
@@ -88,9 +82,7 @@ describe('launch (Stepper) stops at the entry statement', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. next / stepIn / stepOut / stepBack / stepOver transitions
-// ---------------------------------------------------------------------------
+// ## 2. next / stepIn / stepOut / stepBack / stepOver transitions
 
 describe('statement stepping transitions', () => {
   it('next from entry (line 8) → line 9', async () => {
@@ -152,7 +144,7 @@ describe('statement stepping transitions', () => {
     expect(lastStopped(session)!.body.reason).toBe('step');
   });
 
-  it('step-over past the last statement (line 10) ENDS the session', async () => {
+  it('step-over past the last statement (line 10) ends the session', async () => {
     const session = await launchedStepper();
     await session.next(); // → line 9 (175)
     await session.next(); // → line 10 (269), skipping double
@@ -161,7 +153,7 @@ describe('statement stepping transitions', () => {
     // No later statement-start exists: the function returns to the EVM dispatch
     // epilogue (whose source range is the whole contract). A `stopped` there
     // would park the client on the contract-declaration line and freeze it, so
-    // step-over past the last statement must END the session instead.
+    // step-over past the last statement must end the session instead.
     await session.next();
 
     expect(session.currentStepIndex).toBe(TERMINAL);
@@ -188,9 +180,7 @@ describe('statement stepping transitions', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. setBreakpoints + continue
-// ---------------------------------------------------------------------------
+// ## 3. setBreakpoints + continue
 
 describe('breakpoints and continue', () => {
   it('setBreakpoints verifies every requested line as-is', async () => {
@@ -233,8 +223,8 @@ describe('breakpoints and continue', () => {
   });
 
   it('continue to terminal reports reason "step" even if a breakpoint is on a non-statement line', async () => {
-    // Regression: line 7 (`function run(...)`) is the terminal step's mapped
-    // line but is NOT a statement start, so no step can ever "hit" it. continue
+    // Line 7 (`function run(...)`) is the terminal step's mapped line but is
+    // not a statement start, so no step can ever "hit" it. continue
     // must fall through to the terminal and report 'step', not a false
     // 'breakpoint'.
     const session = await launchedStepper();
@@ -269,9 +259,7 @@ describe('breakpoints and continue', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. reverseContinue
-// ---------------------------------------------------------------------------
+// ## 4. reverseContinue
 
 describe('reverseContinue', () => {
   it('from a later position stops at a breakpoint on line 8', async () => {
@@ -297,9 +285,7 @@ describe('reverseContinue', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. stepInstruction / stepBackInstruction (net ±1)
-// ---------------------------------------------------------------------------
+// ## 5. stepInstruction / stepBackInstruction (net ±1)
 
 describe('instruction stepping is net ±1', () => {
   it('stepInstruction then stepBackInstruction returns to the same step', async () => {
@@ -316,9 +302,7 @@ describe('instruction stepping is net ±1', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5b. instruction-GRANULARITY stepping (Disassembly View sends granularity)
-// ---------------------------------------------------------------------------
+// ## 5b. instruction-granularity stepping (Disassembly View sends granularity)
 
 describe('step requests honor instruction granularity', () => {
   it('next/stepIn/stepBack at instruction granularity move a single opcode', async () => {
@@ -336,7 +320,7 @@ describe('step requests honor instruction granularity', () => {
     expect(session.currentStepIndex).toBe(start + 1);
   });
 
-  it('next WITHOUT granularity still does statement stepping (→ line 9)', async () => {
+  it('next without granularity does statement stepping (→ line 9)', async () => {
     const session = await launchedStepper();
     session.next();
     expect(session.currentStepIndex).toBe(LINE9);
@@ -344,9 +328,7 @@ describe('step requests honor instruction granularity', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5c. instruction breakpoints (Disassembly View)
-// ---------------------------------------------------------------------------
+// ## 5c. instruction breakpoints (Disassembly View)
 
 describe('instruction breakpoints', () => {
   /** The packed (codeAddress, pc) address of the frame `steps` opcodes ahead. */
@@ -399,9 +381,7 @@ describe('instruction breakpoints', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6. configurationDone handshake
-// ---------------------------------------------------------------------------
+// ## 6. configurationDone handshake
 
 describe('configurationDone', () => {
   it('returns without throwing', async () => {

@@ -1,5 +1,5 @@
 {
-  "//": "M10b-1: type-check the ESM server entry (src/server.ts + src/resolver/ → build/server.mjs) as ES modules. It is EXCLUDED from tsconfig.json (the CJS extension compile) because it uses import.meta + ESM-only syntax, which the commonjs extension target cannot compile.",
+  "//": "Type-checks the ESM server entry (src/server.ts + src/resolver/ → build/server.mjs) as ES modules. It is excluded from tsconfig.json (the CJS extension compile) because it uses import.meta, which the commonjs target cannot compile.",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "composite": false,

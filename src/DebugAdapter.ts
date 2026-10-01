@@ -16,10 +16,9 @@ import {
 const SERVER_START_TIMEOUT = 10_000;
 
 /**
- * The local debug-adapter factory. It drives the BUNDLED TypeScript
- * debug server (`build/server.mjs`, source `src/server.ts`) instead of the old
- * remote WebSocket service. Two hosting modes, selected by
- * `simbolik.adapterMode`:
+ * The debug-adapter factory. It drives the bundled debug server
+ * (`build/server.mjs`, source `src/server.ts`) in one of two hosting modes,
+ * selected by `simbolik.adapterMode`:
  *
  *   - `inline` (default): dynamic-import the ESM server in-process
  *     ({@link loadServer}) and drive its {@link DapDispatcher} directly through a
@@ -27,7 +26,7 @@ const SERVER_START_TIMEOUT = 10_000;
  *   - `tcp`: spawn `node build/server.mjs --port 0` and connect over TCP via
  *     `vscode.DebugAdapterServer`.
  *
- * In BOTH modes the launch configuration is first populated
+ * In both modes the launch configuration is first populated
  * ({@link populateDebugConfiguration}: forge build → method signature → payload)
  * and flows to the server's `productionResolver` as the DAP launch arguments.
  */
@@ -47,7 +46,7 @@ export class SolidityDebugAdapterDescriptorFactory
     executable: vscode.DebugAdapterExecutable | undefined
   ): Promise<vscode.ProviderResult<vscode.DebugAdapterDescriptor>> {
     // Host-side diagnostics (compilation output, chosen backend) are produced
-    // BEFORE the adapter exists, so buffer them here and flush to this session's
+    // before the adapter exists, so buffer them here and flush to this session's
     // debug console once it starts. Server-side diagnostics (RPC traffic) flow
     // separately as DAP `output` events from the resolver.
     const hostLog: string[] = [];
@@ -65,7 +64,7 @@ export class SolidityDebugAdapterDescriptorFactory
 
     // For `launch`, auto-start a fresh execution node for this session and point
     // the config at it (unless the user opted out via `auto-start-node`). Runs
-    // AFTER populate so a fast config error (e.g. build failure) short-circuits
+    // after populating so a fast config error (e.g. build failure) short-circuits
     // before we spawn anything; a node failure throws, aborting the session with
     // a clear notification. `attach` replays a remote tx and needs no local node.
     if (config.request === 'launch') {
@@ -228,7 +227,7 @@ class DispatcherAdapter implements vscode.DebugAdapter {
     hostLog: string[] = []
   ) {
     this.#hostLog = hostLog;
-    // Let the dispatcher STREAM output events (live launch diagnostics) straight
+    // Let the dispatcher stream output events (live launch diagnostics) straight
     // to VSCode as they happen, rather than only in the handle() return batch.
     this.dispatcher.setEmitter(out =>
       this.#emitter.fire(out as unknown as vscode.DebugProtocolMessage)
@@ -248,7 +247,7 @@ class DispatcherAdapter implements vscode.DebugAdapter {
     // failures to error responses); the catch is a defensive backstop.
     this.#queue = this.#queue
       .then(() => {
-        // Flush host-side diagnostics FIRST (streamed via the dispatcher so they
+        // Flush host-side diagnostics first (streamed via the dispatcher so they
         // share its seq sequence), so compile/node lines precede the server-side
         // RPC lines emitted during resolve.
         if (isLaunch && this.#hostLog.length > 0) {

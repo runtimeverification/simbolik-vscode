@@ -1,31 +1,26 @@
 /**
- * Static function LOCAL-variable inventory.
+ * Static function local-variable inventory.
  *
  * {@link functionLocals} walks a `FunctionDefinition` body and returns, in
- * declaration (source) order, a {@link LocalDescriptor} for every local variable
- * — i.e. every `VariableDeclaration` that is the child of a
+ * declaration (source) order, a {@link LocalDescriptor} for every local
+ * variable: every `VariableDeclaration` that is the child of a
  * `VariableDeclarationStatement` (this excludes the function's parameters and
  * return variables, which live under `ParameterList`).
  *
- * Each descriptor carries the variable's lexical live-range as source offsets:
- * `[declEnd, scopeEnd)` bounded below by `scopeStart`. A local is LIVE at a source
- * offset `o` when `scopeStart <= o < scopeEnd` and `o >= declEnd` (its declaration
- * statement has completed). The debugger uses this, plus the runtime stack height,
- * to bind each live local to its stack slot: locals occupy contiguous slots above
- * the frame base in declaration order, and inner-block locals reuse the slots
- * freed when an earlier block exits — so a local's slot is
- * `frameBase + rank`, where `rank` is its position among the CURRENTLY-live
- * locals ordered by declaration.
+ * Each descriptor carries the variable's lexical live range as source offsets.
+ * A local is live at a source offset `o` when `scopeStart <= o < scopeEnd` and
+ * `o >= declEnd` (its declaration statement has completed). The legacy
+ * frame-relative slot model in `variables.ts` uses this: locals occupy
+ * contiguous slots above the frame base in declaration order, and inner-block
+ * locals reuse the slots freed when an earlier block exits, so a local's slot
+ * is `frameBase + rank`, where `rank` is its position among the currently live
+ * locals.
  *
- * KNOWN LIMITATION: the `frameBase + rank` model
- * above assumes every local occupies EXACTLY ONE stack slot. That holds for
- * value types and for memory/storage reference pointers, but a dynamically-sized
- * CALLDATA local (`bytes`/`string`/`T[] calldata`) occupies TWO slots
- * (offset + length). This inventory does not yet carry a per-local stack size,
- * so if such a two-slot local were live before another local, every later
- * local's `rank`/slot would be off by one. No such local appears in the
- * fixture; a `stackSize` field on {@link LocalDescriptor} (accumulated instead of
- * `rank`) is the intended fix.
+ * Known limitation: that model assumes every local occupies one stack slot.
+ * That holds for value types and memory/storage reference pointers, but a
+ * dynamically-sized calldata local (`bytes`/`string`/`T[] calldata`) occupies
+ * two (offset + length), so every later local's slot would be off by one. A
+ * per-local `stackSize` (accumulated instead of `rank`) would fix this.
  */
 import type {AstNode, CompilationUnit} from '@simbolik/solc';
 
@@ -34,13 +29,12 @@ import {declTypeFacts} from './valueTypes.js';
 
 /** A single function local variable's static descriptor. */
 export interface LocalDescriptor {
-  /** Declared variable name. */
   name: string;
-  /** AST declaration id — the key the stack-provenance analyzer tags slots by. */
+  /** AST declaration id; the key the stack-provenance analyzer tags slots by. */
   declId: number;
   /** 0-based declaration (source) order across the whole function body. */
   index: number;
-  /** solc storage-style type id, e.g. `t_uint256` (empty for reference types). */
+  /** solc type id, e.g. `t_uint256`; the structural id for reference types. */
   solcType: string;
   /** Solidity type string for display, e.g. `uint8`, `enum Locals.Color`. */
   typeLabel: string;
@@ -57,8 +51,8 @@ export interface LocalDescriptor {
 }
 
 /**
- * Whether a local is live at source `offset`: its enclosing lexical scope covers
- * the offset AND its declaration statement has completed.
+ * Whether a local is live at source `offset`: its enclosing lexical scope
+ * covers the offset and its declaration statement has completed.
  */
 export function isLocalLiveAt(local: LocalDescriptor, offset: number): boolean {
   return (
@@ -69,9 +63,8 @@ export function isLocalLiveAt(local: LocalDescriptor, offset: number): boolean {
 }
 
 /**
- * The nearest enclosing lexical-scope node whose exit POPS the local's stack
- * slot: a plain `Block`, an `UncheckedBlock` (`unchecked { … }` is a real block
- * scope — its locals are popped at its close just like a plain block), or a
+ * The nearest enclosing lexical-scope node whose exit pops the local's stack
+ * slot: a `Block`, an `UncheckedBlock` (a real block scope), or a
  * `ForStatement` (whose init-clause locals are scoped to the whole loop).
  */
 function enclosingScope(decl: AstNode): AstNode | undefined {
@@ -86,7 +79,7 @@ function enclosingScope(decl: AstNode): AstNode | undefined {
   return undefined;
 }
 
-/** Collect the local `VariableDeclaration`s of a function body, in source order. */
+/** The local `VariableDeclaration`s of a function body, in source order. */
 function collectLocalDeclarations(fnNode: AstNode): AstNode[] {
   const out: AstNode[] = [];
   walkAst(fnNode, node => {
@@ -116,10 +109,10 @@ export function functionLocals(
 
 /**
  * The static local-variable inventory for an already-resolved
- * `FunctionDefinition` node. Prefer this over {@link functionLocals} when the node
- * is known (e.g. resolved from a source map at a pc): a by-name lookup is scoped
- * to a single contract's own members, so it misses INHERITED functions (defined in
- * a base contract) and cannot disambiguate overloads — whereas the node is exact.
+ * `FunctionDefinition` node. Prefer this over {@link functionLocals} when the
+ * node is known (e.g. resolved from a source map at a pc): a by-name lookup is
+ * scoped to a single contract's own members, so it misses inherited functions
+ * and cannot disambiguate overloads.
  */
 export function localsFromFunctionNode(
   fn: AstNode,

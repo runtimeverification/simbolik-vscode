@@ -26,7 +26,7 @@ export function walkAst(node: AstNode, visit: (node: AstNode) => void): void {
   for (const child of node.children()) walkAst(child, visit);
 }
 
-/** Pre-order walk of every source's AST (sources whose AST fails to load are skipped). */
+/** Pre-order walk of every source's AST, skipping ASTs that fail to load. */
 export function walkAllSources(
   cu: CompilationUnit,
   visit: (node: AstNode) => void

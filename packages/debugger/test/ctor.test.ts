@@ -1,5 +1,5 @@
 /**
- * Params/locals of constructor frames, which execute INIT code.
+ * Params/locals of constructor frames, which execute init code.
  *
  * `CtorFactory.run()` (test/fixtures/counter/src/Ctor.sol) does `new Ctor(5, 7)`:
  *
@@ -80,7 +80,7 @@ async function walk(s: Session): Promise<void> {
   }
 }
 
-// Legacy INLINES the base constructor into the derived one (no call): its body
+// Legacy inlines the base constructor into the derived one (no call): its body
 // shares the derived frame, and its param is a DUP copy of the derived `b` —
 // the two must still be told apart. viaIR calls it as a separate function.
 describe('constructor locals — CtorFactory.run', () => {

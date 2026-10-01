@@ -31,7 +31,7 @@ export const NODE_RPC_METHODS: Readonly<Record<RpcNodeType, NodeRpcMethods>> = {
 };
 
 /**
- * The trace methods to try, in order, against a node of UNKNOWN type (attach to
+ * The trace methods to try, in order, against a node of unknown type (attach to
  * a remote node): the geth-standard name every Ethereum client uses first, then
  * kontrol-node's.
  */

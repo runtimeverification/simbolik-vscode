@@ -1,5 +1,5 @@
 /**
- * Which variables a statement may WRITE — a static AST analysis the Locals
+ * Which variables a statement may write — a static AST analysis the Locals
  * scope uses to bound "last known value" lookups and detect stale stack copies.
  */
 import type {AstNode, CompilationUnit} from '@simbolik/solc';
@@ -13,7 +13,7 @@ interface StatementWrites {
 
 const cache = new WeakMap<CompilationUnit, Map<number, StatementWrites>>();
 
-/** A statement or block node (the boundary of a statement's OWN expressions). */
+/** A statement or block node (the boundary of a statement's own expressions). */
 function isNestedStatement(n: AstNode): boolean {
   const t = n.nodeType;
   return (
@@ -108,13 +108,13 @@ function analyze(stmt: AstNode | undefined): StatementWrites {
       writes.add(n.referencedDeclaration);
       if (compoundNow) compound.add(n.referencedDeclaration);
     }
-    // Index/member accesses on the LHS write into the base's CONTENTS, not
+    // Index/member accesses on the LHS write into the base's contents, not
     // the stack variable itself (a memory handle is unchanged).
     const lhsPasses =
       inLhs &&
       (n.nodeType === 'TupleExpression' || n.nodeType === 'Identifier');
     for (const k of n.children()) {
-      // Only the statement's OWN expressions: a nested statement (an `if`/
+      // Only the statement's own expressions: a nested statement (an `if`/
       // `while` body) runs under its own steps — the loop's condition steps
       // must not count as writing what the body assigns.
       if (k !== stmt && isNestedStatement(k)) continue;

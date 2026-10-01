@@ -1,5 +1,5 @@
 /**
- * Reading function LOCAL variables (value types) through the debugger,
+ * Reading function local variables (value types) through the debugger,
  * across nested lexical scopes.
  *
  * Local variables live on the EVM stack. Their absolute slot is fixed at
@@ -8,12 +8,12 @@
  * `depth = currentStackLength − 1 − slot` per step from the live stack height —
  * exactly the trace-based approach used for internal stack params.
  *
- * The key behaviours pinned here (verified against the REAL recorded trace of
+ * The key behaviours pinned here (against the recorded trace of
  * `Locals.compute(10)`):
  *   - every value-type local decodes to its true value + type;
- *   - loop-body and nested-block locals appear ONLY while in scope and reuse the
+ *   - loop-body and nested-block locals appear only while in scope and reuse the
  *     stack slots freed when an earlier block exits;
- *   - a value local declared AFTER reference-type locals still reads correctly
+ *   - a value local declared after reference-type locals still reads correctly
  *     (reference locals consume a stack slot but are not decoded);
  *   - the slot depth tracks the live stack height across instruction steps.
  *
@@ -49,9 +49,7 @@ const spec: Spec = {
 /** Launch and continue to the first stop on `line`. */
 const breakAt = (line: number) => breakAtSpec(spec, line);
 
-// ---------------------------------------------------------------------------
-// 1. All value-type locals decode at the top-level function scope (line 37)
-// ---------------------------------------------------------------------------
+// ## 1. All value-type locals decode at the top-level function scope (line 37)
 
 describe('Locals — every value type at function scope', () => {
   it('decodes all eight value-type locals (+ the param seed)', async () => {
@@ -78,7 +76,7 @@ describe('Locals — every value type at function scope', () => {
     expect(v.get('sum')).toMatchObject({value: '0', type: 'uint256'});
   });
 
-  it('reads a value local declared AFTER reference-type locals (slot accounting)', async () => {
+  it('reads a value local declared after reference-type locals (slot accounting)', async () => {
     // `tail` is declared after nums (uint256[]), label (string) and pt (struct);
     // reading tail = a + small = 18 proves the stack-slot rank counts the three
     // reference-type slots even though those locals are not themselves decoded.
@@ -87,7 +85,7 @@ describe('Locals — every value type at function scope', () => {
     expect(v.get('tail')).toMatchObject({value: '18', type: 'uint256'});
   });
 
-  it('surfaces the struct pt AND the array nums + string label', async () => {
+  it('surfaces the struct pt and the array nums + string label', async () => {
     // The value-type memory struct `pt` is decoded as a nested variable; the
     // dynamic array `nums` (nested) and the string `label` (scalar) are decoded
     // too — detailed assertions live in structs.test.ts / arrays.test.ts.
@@ -99,9 +97,7 @@ describe('Locals — every value type at function scope', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Nested scopes: loop-body + block locals appear only while in scope
-// ---------------------------------------------------------------------------
+// ## 2. Nested scopes: loop-body + block locals appear only while in scope
 
 describe('Locals — nested lexical scopes', () => {
   it('exposes the loop variable and loop-body local inside the loop', async () => {
@@ -114,7 +110,7 @@ describe('Locals — nested lexical scopes', () => {
     // Outer locals stay visible.
     expect(v.get('a')).toMatchObject({value: '11'});
     expect(v.get('tail')).toMatchObject({value: '18'});
-    // The nested-block local is NOT in scope yet.
+    // The nested-block local is not in scope yet.
     expect(v.has('inner')).toBe(false);
   });
 
@@ -124,7 +120,7 @@ describe('Locals — nested lexical scopes', () => {
     // After the loop: sum=36, inner=sum*2=72.
     expect(v.get('inner')).toMatchObject({value: '72', type: 'uint256'});
     expect(v.get('sum')).toMatchObject({value: '36', type: 'uint256'});
-    // The loop locals have left scope (their slots are now reused by `inner`).
+    // The loop locals have left scope (their slots are reused by `inner`).
     expect(v.has('i')).toBe(false);
     expect(v.has('step')).toBe(false);
   });
@@ -141,9 +137,7 @@ describe('Locals — nested lexical scopes', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Dynamic depth: the slot tracks the live stack height across steps
-// ---------------------------------------------------------------------------
+// ## 3. Dynamic depth: the slot tracks the live stack height across steps
 
 describe('Locals — depth recomputed per step', () => {
   it('keeps reading correct values as the stack grows mid-statement', async () => {
@@ -154,8 +148,8 @@ describe('Locals — depth recomputed per step', () => {
     let grew = false;
     for (let k = 0; k < 4; k++) {
       session.stepInstruction();
-      // Non-tautology guard: prove temporaries actually pile up above the locals
-      // (so a fixed depth WOULD mis-read); the dynamic depth must still hold.
+      // Temporaries must actually pile up above the locals (so a fixed depth
+      // would mis-read) for this test to mean anything.
       if (RAW_STACK_LENGTHS[session.currentStepIndex]! > stackAtBreak) grew = true;
       const v = await varsAt(session);
       expect(v.get('a')).toMatchObject({value: '11', type: 'uint256'});
@@ -166,25 +160,18 @@ describe('Locals — depth recomputed per step', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. REGRESSION: reading locals while stepping THROUGH the for-loop
-//    header (line 41) must stay correct even once the loop variable `i` has been
-//    physically pushed but is not yet lexically live.
+// ## 4. Reading locals while stepping through the for-loop header (line 41) stays
+//    correct even once the loop variable `i` has been physically pushed but is
+//    not yet lexically live.
 //
-//    History: an earlier #frameBaseHeight re-derived the base per query as
-//    `stackLength − liveCount` at the nearest statement-boundary step. At the
-//    for-header, `i` is already PHYSICALLY on the stack (pushed by the for-init),
-//    but the lexical liveness rule (`offset >= declEnd`) reports it as not-yet-
-//    live, so liveCount under-counted by one and the base came out one slot too
-//    high — every local then read one slot up (e.g. a=7, small's value; tail=0).
-//    This test was a `it.fails` tripwire while that bug stood.
-//
-//    The fix ANCHORS the frame base once at body entry (see #frameBaseHeight), so
-//    it no longer depends on the per-step live count. The test now runs as a
-//    plain `it` and locks in the corrected behaviour.
-// ---------------------------------------------------------------------------
+//    At the for-header, `i` is already on the stack (pushed by the for-init),
+//    but the lexical liveness rule (`offset >= declEnd`) reports it as not yet
+//    live. A frame base derived per step as `stackLength − liveCount` would
+//    come out one slot too high, and every local would read one slot up (e.g.
+//    a=7, small's value; tail=0). The frame base is therefore anchored once at
+//    body entry (see #frameBaseHeight).
 
-describe('Locals — for-header frame base (regression)', () => {
+describe('Locals — for-header frame base', () => {
   it(
     'keeps locals correct while stepping through the for-header (line 41)',
     async () => {

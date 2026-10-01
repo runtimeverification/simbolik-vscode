@@ -1,23 +1,22 @@
 /**
- * Regression: step-over must not DRIFT to the terminal step across a sub-call
- * that unbalances the source-map jump fold.
+ * Step-over does not drift to the terminal step across a sub-call that
+ * unbalances the source-map jump fold.
  *
  * Real trace of `RevertStep.run(reverter)` (313 steps): three statements —
  *   line 25  a = 1;                              (origin)
- *   line 26  try Reverter(r).boom() {} catch {}  (reverting EXTERNAL call)
+ *   line 26  try Reverter(r).boom() {} catch {}  (reverting external call)
  *   line 27  b = 2;                              (must be reachable)
  *
  * The reverting external call is entered via a source-map `jump:'i'` but exits
- * via REVERT, skipping the balancing `jump:'o'`. With a single GLOBAL jump-fold
- * accumulator that leak inflated every later statement's combinedDepth, so
- * step-over from line 26 (which stops at the first statement whose combinedDepth
- * is <= the origin's) skipped line 27 and ran to the terminal step. The
- * per-EVM-frame fold discards the reverted callee's imbalance on return, so
- * combinedDepth returns to the caller's level and stepping stays correct.
+ * via REVERT, skipping the balancing `jump:'o'`. With a single global jump-fold
+ * accumulator that leak would inflate every later statement's combinedDepth, so
+ * step-over from line 26 (which stops at the first statement whose
+ * combinedDepth is <= the origin's) would skip line 27 and run to the terminal
+ * step (312, line 24, the function's closing). The jump fold is therefore kept
+ * per EVM frame and discards the reverted callee's imbalance on return.
  *
- * Ground truth (fixed model): statement-start steps are 133 (line 25) → 139
- * (line 26) → 303 (line 27); terminal step = 312. Pre-fix, the second step-over
- * landed on 312 (line 24, the function's closing) instead of 303.
+ * Ground truth: statement-start steps are 133 (line 25) → 139 (line 26) → 303
+ * (line 27); terminal step = 312.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -57,7 +56,7 @@ describe('step-over across a reverting external call (combinedDepth drift)', () 
   it('steps over the reverting call to statement 3 (line 27), not the end', async () => {
     const s = await launched();
     s.next(); // 25 -> 26
-    s.next(); // 26 -> 27  (pre-fix: drifted to the terminal step)
+    s.next(); // 26 -> 27, not the terminal step
     expect(line(s)).toBe(27);
     expect(s.currentStepIndex).toBeLessThan(META.traceStepCount - 1);
   });

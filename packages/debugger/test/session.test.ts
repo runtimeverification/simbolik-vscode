@@ -3,7 +3,7 @@
  *
  * Drives the core DAP request sequence
  * (`initialize → launch → threads → stackTrace → scopes → variables`) in-memory
- * against a REAL recorded `Counter.setNumber(42)` trace, plus a focused test of
+ * against a real recorded `Counter.setNumber(42)` trace, plus a focused test of
  * the `Machine.State` adapter + `readPointerValue` path through the real
  * `@ethdebug/pointers` library.
  *
@@ -12,9 +12,6 @@
  * `number` still unset → "0"); a `continue()`-to-terminal test covers the read
  * path (`number` → "42"). The `machineStateFor` + `readPointerValue` adapter test
  * exercises the real `@ethdebug/pointers` path.
- *
- * All ground-truth values below were verified against the real trace +
- * build-info fixtures.
  */
 import {fileURLToPath} from 'node:url';
 import * as nodePath from 'node:path';
@@ -36,9 +33,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures + LaunchInputs helper
-// ---------------------------------------------------------------------------
+// ## Fixtures + LaunchInputs helper
 
 const TRACE = 'counter-setNumber-trace.raw.json';
 
@@ -65,9 +60,7 @@ async function launchedSession(): Promise<SolidityDebugSession> {
   return launch(spec);
 }
 
-// ---------------------------------------------------------------------------
-// 1. initialize
-// ---------------------------------------------------------------------------
+// ## 1. initialize
 
 describe('SolidityDebugSession.initialize', () => {
   it('advertises supportsConfigurationDoneRequest', () => {
@@ -77,9 +70,7 @@ describe('SolidityDebugSession.initialize', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. launch → 'stopped' event
-// ---------------------------------------------------------------------------
+// ## 2. launch → 'stopped' event
 
 describe('SolidityDebugSession.launch', () => {
   it('queues a "stopped" event with reason "entry" on thread 1', async () => {
@@ -93,9 +84,7 @@ describe('SolidityDebugSession.launch', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. threads
-// ---------------------------------------------------------------------------
+// ## 3. threads
 
 describe('SolidityDebugSession.threads', () => {
   it('returns exactly one thread with id 1', async () => {
@@ -106,9 +95,7 @@ describe('SolidityDebugSession.threads', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. stackTrace
-// ---------------------------------------------------------------------------
+// ## 4. stackTrace
 
 describe('SolidityDebugSession.stackTrace', () => {
   it('returns exactly one frame at the entry statement (src/Counter.sol 8:18)', async () => {
@@ -145,7 +132,7 @@ describe('SolidityDebugSession.stackTrace', () => {
     expect(() => session.source(999999)).toThrow(/unknown sourceReference/);
   });
 
-  it('references the REAL on-disk file when sourceRoot is set (no sourceReference)', async () => {
+  it('references the real on-disk file when sourceRoot is set (no sourceReference)', async () => {
     // The counter foundry fixture has src/Counter.sol on disk under this root.
     const root = fileURLToPath(
       new URL('../../../test/fixtures/counter', import.meta.url),
@@ -154,7 +141,7 @@ describe('SolidityDebugSession.stackTrace', () => {
     await session.launch({...launchInputs(), sourceRoot: root});
 
     const frame = session.stackTrace().stackFrames[0]!;
-    // Real file → absolute path, and NO sourceReference (VSCode opens the file).
+    // Real file → absolute path, and no sourceReference (VSCode opens the file).
     expect(frame.source?.sourceReference).toBeUndefined();
     expect(frame.source?.path).toBe(nodePath.join(root, 'src/Counter.sol'));
   });
@@ -166,7 +153,7 @@ describe('SolidityDebugSession.stackTrace', () => {
     const session = new SolidityDebugSession();
     await session.launch({...launchInputs(), sourceRoot: root});
 
-    // Run to the terminal, then set a breakpoint on line 8 using the ABSOLUTE
+    // Run to the terminal, then set a breakpoint on line 8 using the absolute
     // path VSCode sends for the real file. reverseContinue must land on it —
     // which only happens if the path was normalized to the model's relative key.
     session.continue();
@@ -179,9 +166,7 @@ describe('SolidityDebugSession.stackTrace', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. scopes
-// ---------------------------------------------------------------------------
+// ## 5. scopes
 
 describe('SolidityDebugSession.scopes', () => {
   it('returns State, Locals, EVM, each with a distinct positive ref', async () => {
@@ -217,9 +202,7 @@ describe('SolidityDebugSession.scopes', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6-8. variables
-// ---------------------------------------------------------------------------
+// ## 6-8. variables
 
 describe('SolidityDebugSession.variables', () => {
   /** Resolve the two scope refs for the single frame. */
@@ -242,7 +225,7 @@ describe('SolidityDebugSession.variables', () => {
     const {session, stateRef} = await scopeRefs();
     const {variables} = await session.variables(stateRef);
     expect(variables).toHaveLength(1);
-    // At the entry stop the assignment has NOT executed yet, so storage slot 0
+    // At the entry stop the assignment has not executed yet, so storage slot 0
     // is still zero.
     expect(variables[0]).toEqual({
       name: 'number',
@@ -253,7 +236,7 @@ describe('SolidityDebugSession.variables', () => {
   });
 
   it('State scope reflects seeded initialStorage at entry (setUp-style pre-state)', async () => {
-    // A prior tx (e.g. `setUp()`) wrote slot 0 to 123; this trace only READS it,
+    // A prior tx (e.g. `setUp()`) wrote slot 0 to 123; this trace only reads it,
     // so a delta trace carries no SLOAD delta. Seeding the pre-state (keyed by
     // the minimal-hex slot the node/lookup use) must surface it from step 0.
     const session = new SolidityDebugSession();
@@ -309,9 +292,7 @@ describe('SolidityDebugSession.variables', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 9. disconnect
-// ---------------------------------------------------------------------------
+// ## 9. disconnect
 
 describe('SolidityDebugSession.disconnect', () => {
   it('does not throw', async () => {
@@ -320,9 +301,7 @@ describe('SolidityDebugSession.disconnect', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 10. Machine.State adapter + readPointerValue (the real @ethdebug path)
-// ---------------------------------------------------------------------------
+// ## 10. Machine.State adapter + readPointerValue (the real @ethdebug path)
 
 describe('machineStateFor + readPointerValue (terminal step 117)', () => {
   it('reads storage slot 0 and calldata[4:36] as 42n', async () => {

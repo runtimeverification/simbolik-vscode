@@ -8,7 +8,8 @@ import type {
 import * as vscode from 'vscode';
 
 /**
- * CodelensProvider
+ * Adds a "Debug" code lens above every externally callable function of a
+ * contract that can be deployed without constructor arguments.
  */
 export class CodelensProvider implements vscode.CodeLensProvider {
   private _onDidChangeCodeLenses: vscode.EventEmitter<void> =

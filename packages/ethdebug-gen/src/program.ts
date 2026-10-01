@@ -1,6 +1,6 @@
 /**
- * The ethdebug PROGRAM of one contract: instruction→source mapping + storage
- * (state) variable pointers, from an UNOPTIMIZED solc standard-json compilation.
+ * The ethdebug program of one contract: instruction→source mapping and storage
+ * (state) variable pointers, from a solc standard-json compilation.
  */
 import type {Pointer} from '@ethdebug/pointers';
 import {
@@ -18,13 +18,11 @@ import type {
 } from './layouts.js';
 import {storageReferenceLayout} from './storageLayouts.js';
 
-/** One runtime instruction with its resolved source range (from the source map). */
+/** One instruction with its source range (from the source map). */
 export interface EthdebugInstruction {
-  /** Program counter of the instruction start. */
   pc: number;
   /** Index into the source map / instruction stream. */
   instructionIndex: number;
-  /** Opcode byte. */
   op: number;
   /** Absent when the source-map fileId is -1 or the file is not in the output. */
   source?: {
@@ -46,30 +44,30 @@ export interface EthdebugStorageVariable {
   length: number;
   pointer: Pointer;
   /**
-   * For a dynamic-array storage var, its element layout + a
+   * For a dynamic-array storage variable, its element layout and a
    * dereferenceable storage `List` pointer (element regions named `'element'`),
-   * mirroring the memory {@link ArrayLayout} so the session reuses one path.
+   * in the same shape as the memory {@link ArrayLayout}.
    */
   array?: ArrayLayout;
   /**
-   * For a value-struct storage var, its per-member descriptors, each
-   * with a concrete storage pointer at the consecutive absolute slot — mirroring
-   * the memory {@link StructMember} shape.
+   * For a value-struct storage variable, its per-member descriptors, each with
+   * a concrete storage pointer at its absolute slot, in the same shape as the
+   * memory {@link StructMember}.
    */
   members?: StructMember[];
   /**
-   * For a dynamic-`bytes`-encoded (`string`/`bytes`) storage var, the
-   * layout facts the session parity-selects on — the inline/flag word pointer, the
-   * STATIC keccak base slot for long-form data words, and string-vs-bytes decode.
-   * The session owns the encoding RULES (parity, high-byte slice, multi-word trim).
+   * For a `string`/`bytes` storage variable, the layout facts needed to decode
+   * it: the inline/flag word pointer, the static keccak base slot for long-form
+   * data words, and string-vs-bytes. The consumer applies the encoding rules
+   * (parity, high-byte slice, multi-word trim).
    */
   bytesStorage?: BytesStorageLayout;
   /**
-   * For a `mapping`-encoded storage var, the STATIC layout facts —
-   * the base slot and the solc key/value type ids. Mapping keys are NOT
-   * enumerable from the layout (only the base slot is fixed); the debugger
-   * enumerates observed keys from the trace's `keccak256(key‖slot)` preimages
-   * and computes each entry slot as `keccak256(key32 ‖ baseSlot32)`.
+   * For a `mapping` storage variable, the static layout facts: the base slot
+   * and the solc key/value type ids. Mapping keys are not enumerable from the
+   * layout; a consumer must discover keys at runtime (e.g. from observed
+   * `keccak256(key‖slot)` preimages) and compute each entry slot as
+   * `keccak256(key32 ‖ baseSlot32)`.
    */
   mapping?: MappingLayout;
 }
@@ -110,7 +108,7 @@ function instructions(
   const {bytecode, sourceMap} = codeImage(contract, kind);
   const {instructionToPc} = buildInstructionIndex(bytecode);
 
-  // The instruction stream aligns 1:1 with the source map, NOT with the raw
+  // The instruction stream aligns 1:1 with the source map, not with the raw
   // disassembly (which runs past the source map into the CBOR metadata trailer).
   return sourceMap.map((entry, i) => {
     const pc = instructionToPc[i]!;
@@ -136,7 +134,7 @@ function instructions(
   });
 }
 
-/** Read the opcode byte at `pc` from a `0x`-prefixed bytecode hex string. */
+/** The opcode byte at `pc` of a `0x`-prefixed bytecode hex string. */
 function opAt(bytecode: string, pc: number): number {
   return parseInt(bytecode.slice(2 + pc * 2, 2 + pc * 2 + 2), 16);
 }
@@ -144,7 +142,7 @@ function opAt(bytecode: string, pc: number): number {
 /**
  * The contract's state variables. The scalar slot pointer is always emitted;
  * the reference layout (arrays, value structs, string/bytes, mappings) is
- * additive — see `storageLayouts.ts`.
+ * added where supported; see `storageLayouts.ts`.
  */
 function storageVariables(contract: Contract): EthdebugStorageVariable[] {
   const out: EthdebugStorageVariable[] = [];

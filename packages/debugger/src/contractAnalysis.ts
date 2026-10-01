@@ -5,7 +5,7 @@
  *
  * Every result is a pure function of the (immutable) parsed `Contract` plus its
  * code image (init vs runtime), so it is memoized in a `WeakMap` keyed by the
- * `Contract` IDENTITY — never by name: the same contract name can appear in two
+ * `Contract` identity — never by name: the same contract name can appear in two
  * CUs (compiled at different optimization levels) or in two source paths, where
  * the same pc denotes different code.
  */
@@ -57,7 +57,7 @@ function memo<K, V>(map: Map<K, V>, key: K, compute: () => V): V {
 
 /**
  * The source-map index of a contract's code image. Init (constructor) code has
- * its OWN bytecode + source map, distinct from runtime code — a CREATE frame's
+ * its own bytecode + source map, distinct from runtime code — a CREATE frame's
  * pcs index into it, not the runtime map.
  */
 const sourceIndex = perImage((contract, isInit) => ({
@@ -104,7 +104,7 @@ export interface ResolvedPosition {
   offset: number;
   /** Nearest enclosing FunctionDefinition. */
   fnNode: AstNode | undefined;
-  /** Nearest enclosing FunctionDefinition OR ModifierDefinition. */
+  /** Nearest enclosing FunctionDefinition or ModifierDefinition. */
   defNode: AstNode | undefined;
   /** Source-map modifier depth of this step. */
   modifierDepth: number;
@@ -158,7 +158,7 @@ export function disassemble(bytecode: Hex): Disassembly {
 
 /**
  * The disassembly of a contract's code image. A CREATE frame executes init code
- * with its OWN pc space, so disassembling runtime bytecode there would show the
+ * with its own pc space, so disassembling runtime bytecode there would show the
  * wrong instructions and mis-anchor the pointer.
  */
 export const contractDisassembly = perImage((contract, isInit) =>

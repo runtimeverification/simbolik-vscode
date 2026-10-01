@@ -1,9 +1,9 @@
 /**
- * LEGACY stepping guard: the viaIR straight-line-setup artifact heuristics
- * (`#persists` / `#isBackwardSetupArtifact` in stepping.ts) must NOT misfire on
+ * Legacy stepping guard: the viaIR straight-line-setup artifact heuristics
+ * (`#persists` / `#isBackwardSetupArtifact` in stepping.ts) must not misfire on
  * classic codegen.
  *
- * `StepStress.run()` (compiled LEGACY) has the exact shapes those heuristics key
+ * `StepStress.run()` (compiled legacy) has the exact shapes those heuristics key
  * on under viaIR — sequential declarations, a `for` loop with a back-edge, and a
  * multi-argument internal call built from earlier locals:
  *   22 uint256 x = 1;   23 y = 2;   24 z = 3;   25 sum = 0;
@@ -13,8 +13,8 @@
  *
  * On legacy codegen the statements map in source order, so step-over must walk
  * them in order (never jumping forward to 30/31 before the loop + call have run)
- * and step-into must land on combine's FIRST line (17). If a future change lets
- * the backward-fall-through heuristic fire on legacy, this goes red.
+ * and step-into must land on combine's first line (17), i.e. the
+ * backward-fall-through heuristic must not fire on legacy.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -54,8 +54,8 @@ describe('legacy stepping is not disturbed by the viaIR artifact heuristics', ()
     expect(idx(29)).toBeLessThan(idx(30));
     expect(idx(30)).toBeLessThan(idx(31));
 
-    // The reported viaIR bug shape was a forward jump to a LATER statement before
-    // the earlier ones ran — assert we never landed on 30/31 before the call.
+    // The viaIR failure shape is a forward jump to a later statement before the
+    // earlier ones ran — assert we never landed on 30/31 before the call.
     expect(seen.slice(0, idx(29))).not.toContain(30);
     expect(seen.slice(0, idx(29))).not.toContain(31);
   });

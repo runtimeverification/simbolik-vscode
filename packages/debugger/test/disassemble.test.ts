@@ -61,12 +61,12 @@ describe('instruction address codec', () => {
     expect(back).toEqual({codeAddress: addr, pc: 1234, isInit: true});
   });
 
-  it('gives init and runtime the SAME (addr, pc) DISTINCT references', () => {
+  it('gives init and runtime the same (addr, pc) distinct references', () => {
     const addr = '0x00000000000000000000000000000000000000ff';
     const runtime = encodeInstructionAddress(addr, 42, false);
     const init = encodeInstructionAddress(addr, 42, true);
     expect(init).not.toBe(runtime);
-    // A legacy (2-arg) reference decodes as runtime — back-compatible.
+    // A reference encoded without the init flag decodes as runtime.
     expect(decodeInstructionAddress(runtime).isInit).toBe(false);
   });
 
@@ -78,7 +78,7 @@ describe('instruction address codec', () => {
   });
 });
 
-// --- End-to-end over the real Counter trace --------------------------------
+// ## End-to-end over the real Counter trace
 
 const META = metaOf('counter-setNumber-meta.json');
 

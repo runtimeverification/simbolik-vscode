@@ -1,6 +1,6 @@
 /**
- * The read-only Events scope: ALL events emitted across ALL contracts, in
- * emission order, up to the CURRENT step — not tied to the selected frame, so an
+ * The read-only Events scope: all events emitted across all contracts, in
+ * emission order, up to the current step — not tied to the selected frame, so an
  * event emitted later never appears while paused earlier (and reverse-stepping
  * hides it again). Each LOG is decoded against the ABI of the contract whose
  * code emitted it.
@@ -15,7 +15,7 @@ import type {Trace} from './trace.js';
 /** The events decoded up to (and including) step `step`. */
 export function decodedEvents(trace: Trace, step: number): DecodedEvent[] {
   return enumerateAllEvents(trace.steps, trace.cursor, step, codeAddress => {
-    // A FOREIGN emitter has no ABI to decode its logs against.
+    // A foreign emitter has no ABI to decode its logs against.
     const resolution = trace.registry.contractAt(addressHex(codeAddress));
     return resolution === undefined
       ? undefined

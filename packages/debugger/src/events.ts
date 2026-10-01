@@ -1,19 +1,18 @@
 /**
- * Enumerate + decode the events (LOG records) emitted by a frame's own
- * contract from an execution trace.
+ * Enumerate + decode the events (LOG records) emitted during an execution
+ * trace.
  *
  * A Solidity `emit` compiles to a `LOG0`…`LOG4` op: `topic0` is the event
- * selector (keccak of the canonical signature), `topic1..` carry the INDEXED
- * value-type args, and the LOG data (memory[offset..offset+size]) carries the
- * NON-INDEXED args as sequential 32-byte ABI words. Matching `topic0` to a
- * contract's ABI event inventory (see `Contract.events()` in `@simbolik/solc`)
- * lets us decode each record back into `{name, args}`.
+ * selector (keccak of the canonical signature), `topic1..` carry the indexed
+ * args, and the LOG data (memory[offset..offset+size]) carries the non-indexed
+ * args as sequential 32-byte ABI words. Matching `topic0` to a contract's ABI
+ * event inventory (see `Contract.events()` in `@simbolik/solc`) decodes each
+ * record back into `{name, args}`.
  *
- * This is a TRACE-AWARE step (like `enumerateMappingKeys`): the enumeration +
- * ABI decoding live here so the session render stays thin. Scope is VALUE-TYPE
- * args only this cycle — an indexed reference-type arg (string/bytes/array/
- * struct) is hashed into its topic and only rendered as `<indexed 0x…>`, and
- * anonymous / unmatched-selector logs are skipped.
+ * Only value-type args are decoded. An indexed reference-type arg
+ * (string/bytes/array/struct) is hashed into its topic and rendered as
+ * `<indexed 0x…>`; a non-indexed one as a `<type>` placeholder. Anonymous and
+ * unmatched-selector logs are skipped.
  */
 import type {StateCursor, Step} from '@simbolik/lifting';
 
@@ -66,10 +65,10 @@ export interface EventEmitter {
  * matched against `eventDefs` by selector, in emission order.
  *
  * `codeAddress` is a lowercase, zero-padded 20-byte hex string (the frame's own
- * contract). For a `LOG<n>` op the stack (top-of-stack LAST) gives
+ * contract). For a `LOG<n>` op the stack (top-of-stack last) gives
  * `offset = stack[len-1]`, `size = stack[len-2]`, and `topic_j = stack[len-3-j]`
  * (n topics); the data bytes are the folded memory byte-slice
- * `[offset, offset+size)`. Args are decoded in DECLARATION order: indexed value
+ * `[offset, offset+size)`. Args are decoded in declaration order: indexed value
  * types consume `topics[1..]` sequentially, non-indexed value types consume the
  * data 32-byte words sequentially.
  */
@@ -94,9 +93,9 @@ export function enumerateEvents(
 }
 
 /**
- * Decode EVERY event across ALL contracts in emission (chronological) order, up
+ * Decode every event across all contracts in emission (chronological) order, up
  * to `uptoStepIndex`. Each LOG is decoded against the ABI of the contract that
- * EMITTED it — resolved by its executing code address via `resolveEmitter`; a LOG
+ * emitted it — resolved by its executing code address via `resolveEmitter`; a LOG
  * from an unresolved contract (or with no matching selector) is skipped. Powers
  * the frame-independent "Events" view.
  */
@@ -141,7 +140,7 @@ function selectorMap(eventDefs: EventDef[]): Map<bigint, EventDef> {
 }
 
 /**
- * Decode ONE `LOG1..LOG4` step against `bySelector`, or `undefined` when it is
+ * Decode one `LOG1..LOG4` step against `bySelector`, or `undefined` when it is
  * not a selector'd log or its selector is unmatched. See the module header for
  * the topic/data layout.
  */
@@ -154,7 +153,7 @@ function decodeLogStep(
   const match = /^LOG([0-4])$/.exec(step.op);
   if (match === null) return undefined;
   const n = Number(match[1]);
-  if (n === 0) return undefined; // anonymous (no selector topic) — out of scope.
+  if (n === 0) return undefined; // anonymous (no selector topic)
 
   const st = step.stack;
   const len = st.length;
@@ -165,10 +164,10 @@ function decodeLogStep(
   for (let j = 0; j < n; j++) topics.push(BigInt(st[len - 3 - j]!));
 
   const def = bySelector.get(topics[0]!);
-  if (def === undefined) return undefined; // unmatched selector — out of scope.
+  if (def === undefined) return undefined; // unmatched selector
 
   // LOG data = folded memory byte-slice [offset, offset+size). Memory is a
-  // 32-byte-WORD array: flatten (each word padded to a full word) then slice.
+  // 32-byte-word array: flatten (each word padded to a full word) then slice.
   const flat = cursor
     .at(index)
     .memory.map((w) => w.replace(/^0x/, '').padStart(64, '0'))
@@ -197,12 +196,10 @@ function decodeLogStep(
         });
       }
     } else {
-      // Non-indexed: consume ONE head data word. Every param occupies exactly
-      // one 32-byte head word; for a dynamic/reference type that word is an ABI
-      // OFFSET into the tail, not the value — tail decoding is out of scope this
-      // cycle, so render a placeholder rather than the raw offset (a wrong
-      // number). Advancing the cursor by one word regardless keeps any later
-      // value-type args aligned to their own head words.
+      // Non-indexed: consume one head data word. For a dynamic/reference type
+      // that word is an ABI offset into the tail, not the value; tails are not
+      // decoded, so render a placeholder rather than the raw offset. Advancing
+      // by one word regardless keeps later value-type args aligned.
       const wordHex = dataHex.slice(dataWord * 64, (dataWord + 1) * 64);
       dataWord++;
       if (!isValueType(solcType, typeLabel)) {

@@ -2,13 +2,12 @@ import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 import {loadBuildInfo} from '../src/index.js';
 
-/** Parse a fixture JSON file resolved relative to this test's src/ location. */
+/** Parse a JSON fixture from `test/fixtures`. */
 function loadFixture(name: string): unknown {
   const url = new URL(`./fixtures/${name}`, import.meta.url);
   return JSON.parse(readFileSync(url, 'utf8')) as unknown;
 }
 
-// Sanity: fixtures resolve from packages/solc/src/*.test.ts via ../test/fixtures.
 describe('fixture resolution', () => {
   it('reads the real build-info fixture', () => {
     const json = loadFixture('counter-build-info.json') as {solcVersion: string};
@@ -112,7 +111,7 @@ describe('Contract.storageLayout', () => {
       'Counter',
     )!;
 
-  it('returns the single "number" slot with confirmed ground-truth', () => {
+  it('returns the single "number" slot', () => {
     const layout = contract().storageLayout();
     expect(layout).toHaveLength(1);
     const entry = layout[0]!;
@@ -125,9 +124,7 @@ describe('Contract.storageLayout', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// CompilationUnit.optimizer() from input.settings.optimizer
-// ---------------------------------------------------------------------------
+// ## CompilationUnit.optimizer() from input.settings.optimizer
 
 describe('CompilationUnit.optimizer', () => {
   const callerCU = () =>
@@ -135,19 +132,18 @@ describe('CompilationUnit.optimizer', () => {
   const calleeCU = () =>
     loadBuildInfo(loadFixture('callee-opt-build-info.json'));
 
-  it('reports the caller build-info as UNOPTIMIZED (enabled === false)', () => {
+  it('reports the caller build-info as unoptimized (enabled === false)', () => {
     expect(callerCU().optimizer().enabled).toBe(false);
   });
 
-  it('reports the callee build-info as OPTIMIZED with runs === 200', () => {
+  it('reports the callee build-info as optimized with runs === 200', () => {
     const opt = calleeCU().optimizer();
     expect(opt.enabled).toBe(true);
     expect(opt.runs).toBe(200);
   });
 
   it('defaults to {enabled:false} when input.settings.optimizer is absent', () => {
-    // The counter fixture is a normal build-info; whatever its setting, an
-    // absent optimizer section must not throw and must default to disabled.
+    // An absent optimizer section must not throw and defaults to disabled.
     const opt = loadBuildInfo({
       solcVersion: '0.8.35',
       input: {sources: {}, settings: {}},

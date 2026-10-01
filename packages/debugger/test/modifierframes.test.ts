@@ -1,18 +1,17 @@
 /**
- * Solidity MODIFIER frames as their own DAP stack frames (sub-feature 4b).
+ * Solidity modifier frames as their own DAP stack frames.
  *
- * A modifier body should appear as its OWN DAP stack frame, on TOP of the
- * function it decorates. Paused inside the modifier body (pre-placeholder) the
- * stack should be `[onlyPositive, bump]`; paused inside the function body (after
- * the `_;` placeholder) the modifier is SUSPENDED and the stack is just `[bump]`.
+ * A modifier body appears as its own DAP stack frame, on top of the function
+ * it decorates. Paused inside the modifier body (pre-placeholder) the stack is
+ * `[onlyPositive, bump]`; paused inside the function body (after the `_;`
+ * placeholder) the modifier is suspended and the stack is just `[bump]`.
  *
- * Scope of this cycle: frame NAME + source line only. Modifier params/locals
- * (x, doubled) are DEFERRED — the modifier frame shows storage-only Locals — so
- * these tests deliberately do NOT assert on modifier-frame Locals contents.
+ * This suite pins frame names + source lines only; it does not assert on
+ * modifier-frame Locals contents (modifier params/locals such as x, doubled).
  *
- * Ground truth (recorded fixture Modifiers.bump(5), 326 steps, kontrol —
- * observed by running the session, cross-checked against src/Modifiers.sol):
- *   - Launch opens PAUSED just before step 110, on `bump`'s header at the
+ * Ground truth (fixture Modifiers.bump(5), 326 steps, kontrol; see
+ * src/Modifiers.sol):
+ *   - Launch opens paused just before step 110, on `bump`'s header at the
  *     `onlyPositive(x)` invocation (line 17); one step-in enters the modifier at
  *     step 110, line 12 (`uint256 doubled = x * 2;`).
  *   - Modifier decl: line 11; body lines 12–13; placeholder `_;`: line 14.
@@ -21,20 +20,15 @@
  *   - Breakpoint on line 18 + continue → step 197, function body (modifier
  *     suspended).
  *
- * These tests MUST FAIL before implementation. Today at step 110 the stack is
- * length 1 and the single frame is named "Modifiers" (the CONTRACT — because
- * closestFunction returns undefined for a ModifierDefinition, so no modifier
- * frame is pushed and #buildFrame falls back to the contract name). So test 1
- * fails for the right reason. Test 2 (function body → [bump@18]) already passes
- * today — 4a yields it — and 4b must not regress it.
+ * `closestFunction` returns undefined for a ModifierDefinition, so without
+ * explicit modifier frames the single frame at step 110 falls back to the
+ * contract name ("Modifiers").
  */
 import {describe, expect, it} from 'vitest';
 
 import {breakAt, launch, type Spec} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixture spec — pointed at the Modifiers fixture.
-// ---------------------------------------------------------------------------
+// ## Fixture spec
 
 const modifiersSpec: Spec = {
   buildInfo: 'modifiers-build-info.json',
@@ -46,9 +40,7 @@ const modifiersSpec: Spec = {
   dialect: 'kontrol',
 };
 
-// ---------------------------------------------------------------------------
-// 1. Modifier frame at launch — paused inside the modifier body.
-// ---------------------------------------------------------------------------
+// ## 1. Modifier frame at launch — paused inside the modifier body.
 
 describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier body', () => {
   it('launch opens on the modifier invocation, before the modifier frame', async () => {
@@ -66,8 +58,8 @@ describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier 
     const session = await launch(modifiersSpec);
     session.stepIn();
 
-    // FIRST confirm WHERE we paused (observed by running the session): the
-    // launch opens inside the modifier body, not the function body.
+    // First confirm where we paused: inside the modifier body, not the
+    // function body.
     expect(session.currentStepIndex).toBe(110);
     const {stackFrames} = session.stackTrace();
     // The innermost/top frame sits at the paused source line — line 12, which
@@ -83,23 +75,20 @@ describe('Modifiers modifier frame — [onlyPositive, bump] inside the modifier 
     const {stackFrames} = session.stackTrace();
 
     expect(stackFrames).toHaveLength(2);
-    // [0] top = the MODIFIER body at the paused line (entry line 12, observed).
+    // [0] top = the modifier body at the paused line (line 12).
     expect(stackFrames[0]!.name).toBe('onlyPositive');
     expect(stackFrames[0]!.line).toBe(12);
     expect(stackFrames[0]!.source?.name).toBe('Modifiers.sol');
-    // [1] = the decorated FUNCTION, positioned at its decl / the
-    // `onlyPositive(x)` application call site (line 17) — the parent-at-call-site
-    // convention 4a already uses.
+    // [1] = the decorated function, positioned at its decl / the
+    // `onlyPositive(x)` application call site (line 17) — the same
+    // parent-at-call-site convention as internal-function frames.
     expect(stackFrames[1]!.name).toBe('bump');
     expect(stackFrames[1]!.line).toBe(17);
     expect(stackFrames[1]!.source?.name).toBe('Modifiers.sol');
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Function body SUSPENDS the modifier — [bump@18] (length 1).
-//    4a already yields this; 4b must NOT regress it.
-// ---------------------------------------------------------------------------
+// ## 2. The function body suspends the modifier — [bump@18] (length 1).
 
 describe('Modifiers function body — modifier suspended → [bump@18]', () => {
   it('breakpoint on line 18 + continue → length-1 stack [bump@18]', async () => {
@@ -108,7 +97,7 @@ describe('Modifiers function body — modifier suspended → [bump@18]', () => {
     expect(session.currentStepIndex).toBe(197); // inside the function body
     const {stackFrames} = session.stackTrace();
 
-    // The modifier is SUSPENDED across the `_;` — NOT [onlyPositive, bump].
+    // The modifier is suspended across the `_;` — not [onlyPositive, bump].
     expect(stackFrames).toHaveLength(1);
     expect(stackFrames[0]!.name).toBe('bump');
     expect(stackFrames[0]!.line).toBe(18);
@@ -116,11 +105,8 @@ describe('Modifiers function body — modifier suspended → [bump@18]', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. The modifier frame is ADDRESSABLE — scopes() resolves it.
-//    Params/locals are DEFERRED, so we only assert the frame resolves to a
-//    valid scope list (State + EVM present); we do NOT assert Locals contents.
-// ---------------------------------------------------------------------------
+// ## 3. The modifier frame is addressable — scopes() resolves it to a valid scope
+//    list (State + EVM present). Locals contents are not asserted.
 
 describe('Modifiers modifier frame is addressable via scopes()', () => {
   it('scopes(modifierFrame.id) returns a scope list including State and EVM', async () => {
@@ -136,16 +122,13 @@ describe('Modifiers modifier frame is addressable via scopes()', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Resume — the modifier reappears on top after the function body returns.
-//    This is the modifierDepth-DECREASE branch (1→0), a DISTINCT code path from
-//    the suspend (increase) branch that test 3 guards. The resume region (line
+// ## 4. Resume — the modifier reappears on top after the function body returns.
+//    This is the modifierDepth-decrease branch (1→0), a distinct code path from
+//    the suspend (increase) branch that test 2 guards. The resume region (line
 //    11, the modifier closing block, ~step 264) is not reachable via a source
 //    breakpoint (line 11 has no stoppable statement) nor via source-level next()
-//    (which skips it), but IS reachable deterministically from the line-19 stop
-//    (step 258) by 6 instruction steps — the trace is a frozen recording, so the
-//    count is stable (same as the suite's existing exact-step pins).
-// ---------------------------------------------------------------------------
+//    (which skips it), but is reachable deterministically from the line-19 stop
+//    (step 258) by 6 instruction steps.
 
 describe('Modifiers resume — onlyPositive reappears after the function body', () => {
   it('modifier frame is re-emitted on resume (step 264, line 11)', async () => {
@@ -164,14 +147,12 @@ describe('Modifiers resume — onlyPositive reappears after the function body', 
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. Unmapped-helper region inside the modifier body (regression guard).
-//    The modifier computes `x * 2` via a jump into an UNMAPPED compiler
+// ## 5. Unmapped-helper region inside the modifier body.
+//    The modifier computes `x * 2` via a jump into an unmapped compiler
 //    checked-mul helper (steps ~118-187 — 70 steps, the bulk of the body).
 //    Those steps have no source mapping, so a naive "is cur's def a modifier?"
-//    check (evaluated only at cur) would drop BOTH frames and show a single
+//    check (evaluated only at cur) would drop both frames and show a single
 //    contract-named frame. The stack must stay [onlyPositive, bump] there.
-// ---------------------------------------------------------------------------
 
 describe('Modifiers — stack holds across the modifier’s unmapped helper region', () => {
   it('mid checked-mul helper (step 150) still shows [onlyPositive@12, bump@17]', async () => {

@@ -1,8 +1,8 @@
 /**
- * Regressions distilled from the viaIR-vs-legacy differential campaign over
- * uniswap-v4-core (every test stepped on both pipelines; the two sessions run the
- * same inputs, so they must agree with the ground truth). `CampaignRegress.run(3, 5)`
- * (test/fixtures/counter/src/CampaignRegress.sol) packs one construct per bug class:
+ * Regressions for constructs where viaIR and legacy sessions over the same
+ * inputs disagreed with the ground truth. `CampaignRegress.run(3, 5)`
+ * (test/fixtures/counter/src/CampaignRegress.sol) packs one construct per bug
+ * class:
  *
  *   40  (uint256 lo, uint256 hi) = pair(n);   // tuple locals   → lo = 3, hi = 4
  *   41  bool z = isZero(lo);                  // one-statement helper (line 19)
@@ -12,12 +12,13 @@
  *   48  uint256 d = f(hi);                    // function-pointer call → 8
  *   49  guarded(d);                           // modifier (13) + body (35)
  *
- * Bugs pinned: viaIR tuple-destructured locals never located; viaIR step-into
- * skipping a function's first statement; viaIR step-over from a modifier
- * skipping the modified function's body; a stale copy of a reassigned variable's
- * old value (the initializer 0) shown as its value; an indirect internal call
- * skewing legacy frame heights. The invariant checked everywhere: a value the
- * debugger SHOWS is the variable's true value (absent is acceptable, wrong is not).
+ * Pinned: viaIR tuple-destructured locals are located; viaIR step-into stops on
+ * a function's first statement; viaIR step-over from a modifier enters the
+ * modified function's body; a stale copy of a reassigned variable's old value
+ * (the initializer 0) is never shown as its value; an indirect internal call
+ * does not skew legacy frame heights. The invariant checked everywhere: a value
+ * the debugger shows is the variable's true value (absent is acceptable, wrong
+ * is not).
  */
 import {describe, expect, it} from 'vitest';
 
@@ -43,7 +44,7 @@ const bare = (v: string): string => v.replace(/ \(last known\)$/, '');
 const topName = (s: Awaited<ReturnType<typeof launch>>): string =>
   s.stackTrace().stackFrames[0]?.name ?? '';
 
-describe('campaign regressions — CampaignRegress.run(3, 5)', () => {
+describe('viaIR/legacy regressions — CampaignRegress.run(3, 5)', () => {
   eachMode({viair: spec('viair'), legacy: spec('legacy')}, (_mode, sp) => {
     it('locates tuple-destructured locals (lo = 3, hi = 4)', async () => {
       const s = await launch(sp);

@@ -1,11 +1,8 @@
 /**
  * Typed AST accessors on `@simbolik/solc`.
  *
- * These pay down the layering debt where the debugger walked raw build-info JSON
- * for enum member names and function parameters; it goes through the typed
- * accessors here instead. Ground-truth values are taken from the REAL
- * `vars-build-info.json` fixture (unoptimized Vars, solc 0.8.35) and were
- * cross-checked against the raw AST:
+ * Expected values come from the `vars-build-info.json` fixture (unoptimized
+ * Vars, solc 0.8.35):
  *   - EnumDefinition `Color` has AST id 5, members [Red, Green, Blue].
  *   - FunctionDefinition `setAll` (id 67) has 7 parameters; the first is
  *     `_a` of type `uint8`; the last (`_color`) is the enum `Color`.
@@ -120,9 +117,8 @@ describe('CompilationUnit.functionDefinition + AstNode.parameters/name/typeStrin
     expect(setAll.returnParameters()).toHaveLength(0);
     expect(vars().sourceById(0)!.ast().returnParameters()).toEqual([]);
 
-    // `Locals.compute` declares `returns (uint256)` — one reserved return slot.
-    // This is the shape whose reserved stack slot the variable producer accounts
-    // for so parameters rank past it (see ethdebug-gen variables.ts).
+    // `Locals.compute` declares `returns (uint256)`, which reserves one stack
+    // slot that parameters rank past (see ethdebug-gen variables.ts).
     const locals = loadBuildInfo(loadFixture('locals-build-info.json'));
     const compute = locals.functionDefinition('src/Locals.sol', 'Locals', 'compute')!;
     const returns = compute.returnParameters();
@@ -131,21 +127,13 @@ describe('CompilationUnit.functionDefinition + AstNode.parameters/name/typeStrin
   });
 });
 
-// ---------------------------------------------------------------------------
-// Contract.events() event inventory + selectors.
+// ## Contract.events() event inventory + selectors.
 //
-// The StorageRefs Contract declares `event Updated(uint256 indexed key,
-// uint256 value)`. `events()` lists it with an ABI selector and typed params.
-// Ground truth (re-derived from the raw trace's LOG2 topic0 and confirmed
-// against keccak256): the selector is '0x' + keccak256(utf8-bytes of the
-// CANONICAL signature "Updated(uint256,uint256)") — over ALL params, indexed +
-// non-indexed, in declaration order, using ABI canonical type names.
-//
-// Loose accessor: `events()` does not exist on `Contract` yet, so it is reached
-// through a runtime cast that returns `undefined` when absent — the RED is the
-// "must be defined" assertion, NOT a type error (mirrors the storage-refs
-// loose-accessor style).
-// ---------------------------------------------------------------------------
+// The StorageRefs contract declares `event Updated(uint256 indexed key,
+// uint256 value)`. Its selector is '0x' + keccak256 of the canonical signature
+// "Updated(uint256,uint256)": all params, indexed and non-indexed, in
+// declaration order, using ABI canonical type names. This equals the LOG2
+// topic0 in the recorded trace.
 
 interface EventParamShape {
   name: string;
@@ -209,15 +197,13 @@ describe('Contract.events() event inventory + selectors', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Contract.errors() custom-error inventory + selectors.
+// ## Contract.errors() custom-error inventory + selectors.
 //
 // Exceptions.sol's `Thrower` declares `error TooSmall(uint256 got, uint256
 // min)`; the `Exceptions` contract calls `Thrower.check`, which can raise it.
 // Ground truth: the recorded kontrol trace of `Exceptions.mixed()` reverts with
 // revert data starting `0xe94fe3af` — the 4-byte selector of the canonical
 // signature `TooSmall(uint256,uint256)`.
-// ---------------------------------------------------------------------------
 
 describe('Contract.errors() custom-error inventory + selectors', () => {
   const exceptions = (): CompilationUnit =>

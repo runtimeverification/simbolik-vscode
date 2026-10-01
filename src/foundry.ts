@@ -5,7 +5,7 @@ import {LcovRecord, parseLcov} from './lcov';
 import {executeInTerminal} from './terminal';
 
 /**
- * List all source files (excludings libs/tests/scripts) of the given Foundry project
+ * List all source files (excluding libs/tests/scripts) of the given Foundry project
  *
  * @param root The root URI of the Foundry project.
  * @returns An array of URIs of source files.
@@ -75,7 +75,6 @@ export async function forgeBuild(
  * @returns The URI of the root directory of the Foundry project.
  */
 export async function foundryRoot(file: vscode.Uri): Promise<vscode.Uri> {
-  // Find the root of the project, which is the directory containing the foundry.toml file
   const base = file.with({path: '/', query: '', authority: ''});
   const pathSegments = file.path.split('/');
   let stat;
@@ -339,11 +338,12 @@ function relativePath(base: vscode.Uri, absolute: vscode.Uri): string {
   return absolute.with({path: relative}).path.slice(1);
 }
 
-export type ForgeTestSuiteReport = Record<string, ForgeTestReport>; // keyed by filename.sol
+/** Keyed by `<path>.sol:<ContractName>`. */
+export type ForgeTestSuiteReport = Record<string, ForgeTestReport>;
 
 export interface ForgeTestReport {
   duration: string; // e.g. "9ms 823µs 544ns"
-  test_results: Record<string, ForgeTestCaseResult>; // keyed by filename.sol:ContractName
+  test_results: Record<string, ForgeTestCaseResult>; // keyed by test signature
   warnings: unknown[];
 }
 
@@ -364,7 +364,7 @@ export interface ForgeTestCaseResult {
 export type ForgeTestKind =
   | {Fuzz: ForgeFuzzKind}
   | {Unit: ForgeUnitKind}
-  // allow forwards-compat for other kinds
+  // Other kinds that future forge versions may report.
   | Record<string, unknown>;
 
 export interface ForgeFuzzKind {
@@ -510,9 +510,8 @@ export async function forgeLintFile(
     FOUNDRY_CACHE_PATH: cacheDir.path,
   };
   const lintOutPath = relativePath(cwd, out);
-  // `forge lint` will build the file if needed and write the artifacts to the out folder.
-  // The build is not suitable for debugging because it uses different compiler settings.
-  // Hence, we use a different out folder for linting.
+  // `forge lint` builds the file if needed, with compiler settings unsuitable
+  // for debugging, so its artifacts go to a separate out folder.
   const output = await executeInTerminal(
     `${forgePath} lint --json ${file.fsPath} --out='${lintOutPath}'`,
     {cwd, env}

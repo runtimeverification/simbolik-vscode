@@ -1,154 +1,118 @@
-# Simbolik TypeScript Debug Server (monorepo packages)
+# Simbolik debug server packages
 
-A ground-up TypeScript rewrite of the Simbolik Solidity/EVM debug server, shipped
-inside the VSCode extension. Replaces the remote Python DAP server
-(`runtimeverification/simbolik`). Strict test-driven development: each feature goes
-through a four-agent cycle (test author → validator → implementer → reviewer).
-
-See the design plan for full architecture, decisions, and the milestone roadmap.
+The Solidity/EVM debug server that ships inside the VSCode extension. It runs a
+transaction on `kontrol-node` (or replays one from an anvil/geth node), records the
+whole execution trace, and then answers Debug Adapter Protocol (DAP) requests over
+that trace. Stepping, breakpoints and reverse execution all happen client-side.
 
 ## Packages
 
-| Package | Status | Purpose |
-|---|---|---|
-| `@simbolik/protocol` | ✅ | Shared wire types: JSON-RPC 2.0, kontrol/anvil trace dialects. |
-| `@simbolik/engine` | ✅ | kontrol-node process lifecycle, JSON-RPC client, **lossless** trace fetch. |
-| `@simbolik/lifting` | ✅ (M2) | Trace normalization → `Step[]`; `StateCursor` reconstructs full machine state at any step by folding deltas. |
-| `@simbolik/solc` | ✅ (M3) | solc standard-json artifact model: source maps, PC↔instruction, AST navigation, storage layout, CBOR contract identification. |
-| `@simbolik/ethdebug-gen` | ✅ (M4, M7b-1) | Unoptimized solc standard-json → ethdebug program (instruction↔source) + storage-variable pointers + **function parameter descriptors** (`functionParameters`); conforms to `@ethdebug/pointers`. |
-| `@simbolik/sources` | ◐ (M9b-1, M9b-2) | Source repositories for remote replay: `SourcifyRepository` fetches verified sources + settings (Sourcify v2) → standard-json; `recompile()` compiles that via solc-js (bundled 0.8.36 offline, `loadRemoteVersion` otherwise) → a `loadBuildInfo`-consumable build-info (byte-for-byte deployed-bytecode parity, live-verified). Local repo + session wiring (M9b-3) pending. |
-| `@simbolik/debugger` | ◐ (M5–M10, M7b-1) | `SolidityDebugSession` (DAP requests, stepping, value-type state + parameter variables, multi-frame/mixed-CU/optimized), the **`DapDispatcher`** (raw DAP message protocol: seq, events, error handling), and a **TCP server** (`startDapServer`, DAP `Content-Length` framing). Reads value-type **input parameters** — external via calldata, internal via dynamic stack-depth. Return params + locals + reference types (M7b-2/3) pending; VSCode `src/` host wiring (M10b) pending. |
+| Package | Purpose |
+|---|---|
+| `@simbolik/protocol` | Shared wire types: JSON-RPC 2.0 and the kontrol/anvil trace formats. |
+| `@simbolik/engine` | kontrol-node process lifecycle, JSON-RPC client, lossless (bigint-preserving) trace fetch, and the attach flow for remote transactions. |
+| `@simbolik/lifting` | Normalizes either trace format into `Step[]`. `StateCursor` reconstructs the full machine state at any step by folding the per-step deltas. |
+| `@simbolik/solc` | Model of solc standard-JSON output: source maps, PC↔instruction mapping, AST navigation, storage layout, events, and CBOR-based contract identification. |
+| `@simbolik/ethdebug-gen` | Generates [ethdebug](https://ethdebug.github.io/format/) data from solc output: the instruction↔source program and, for every pc, the live variables with pointers to where their values are. Supports both the legacy and the `--via-ir` pipeline. |
+| `@simbolik/sources` | Source acquisition for replaying remote transactions: fetches verified sources from Sourcify and recompiles them with solc-js. |
+| `@simbolik/debugger` | `SolidityDebugSession` (the DAP requests), the `DapDispatcher` (DAP message protocol) and a TCP server (`startDapServer`). |
 
-### Module layout (after the 2026-09-29 cleanup refactor)
+## How it fits together
 
-- **`debugger`**: `session.ts` is a thin DAP facade. The launch-time model lives in `trace.ts`
-  (`loadTrace`: steps, cursor, stepping model) and `registry.ts` (`CodeRegistry`: address →
-  contract/CU, or foreign). The static per-contract caches (pc → source, positions,
-  disassembly, ethdebug program, `variablesAt`) live in `contractAnalysis.ts`, shared with
-  `stepping.ts`. Also: `frames.ts` (call-stack reconstruction), `breakpoints.ts` (line,
-  instruction and exception-filter breakpoints plus run-to-stop), `exceptions.ts` (where
-  each exception originates — REVERT, INVALID, exceptional halt or a failed atomic call
-  such as a cheatcode — and whether it was caught, re-thrown or expected; backs the
-  "Uncaught Reverts"/"All Reverts" filters and the DAP `exceptionInfo` request),
-  `revertData.ts` (decodes `Error(string)`, `Panic` codes and custom errors), `sources.ts` (DAP
-  `Source` and `sourceReference`), `handles.ts` (typed `variablesReference` handles).
-  Per-scope renderers: `solidityVariables.ts` (State, Locals and nested values),
-  `localsHistory.ts` (last-known values, stale copies, model offset), `writes.ts`
-  (statement-write AST analysis), `evmScope.ts`, `globalsScope.ts`, `eventsScope.ts` and
-  `disassemblyView.ts`.
-- **`ethdebug-gen`**: `index.ts` only re-exports. `cfg.ts` holds the shared control-flow
-  core of the two stack analyzers (`stackHeights.ts` and `stackProvenance.ts`). The other
-  modules are `opcodes.ts`, `ast.ts`, `valueTypes.ts`, `layouts.ts` (memory) and
-  `storageLayouts.ts`, and `program.ts` holds `generateEthdebugProgram`.
-- **Extension host**: `src/server.ts` is only the entry point. The production resolver is
-  under `src/resolver/`: `launch`, `attach`, `contracts`, `preState`, `rpc` and
-  `launchArgs`.
+1. The extension host (`src/resolver/`) builds `LaunchInputs`. For `launch` it reads
+   the Foundry build-infos, deploys and calls the contract on kontrol-node, and fetches
+   the trace. For `attach` it fetches an existing transaction's trace and gets each
+   touched contract's sources from Sourcify.
+2. `@simbolik/lifting` turns the trace into steps and a `StateCursor`.
+3. The debugger resolves each step's code address to a compilation unit. It uses the
+   CBOR metadata hash, or an explicit address → build-info map for geth traces, which
+   don't record the executing code. Steps whose code can't be identified are shown as
+   foreign frames (disassembly only).
+4. `@simbolik/ethdebug-gen` statically answers "which variables are live at this pc and
+   where are they?". The session only dereferences the pointers against the
+   reconstructed machine state and decodes the values. It does no layout math of its
+   own.
 
-## Milestone progress
+A single transaction may span compilation units with different optimizer and viaIR
+settings. Every frame is resolved against its own CU.
 
-- **M0 — Monorepo bootstrap** ✅ npm workspaces, Vitest, shared tsconfig + project refs, CI (Node 22, `typecheck` + `test`).
-- **M1 — protocol types + engine skeleton** ✅ Trace dialect types; kontrol-node client/lifecycle; lossless bigint-preserving JSON parse. Validated by a live integration test against the real engine.
-- **M2 — Trace model + StateCursor** ✅ Delta accumulation with checkpoint/replay for random-access state; asserted against a real recorded Counter-deploy trace + synthetic storage/account cases.
-- **M3 — PC↔source mapping + CU resolution** ✅ Source-map parsing (`s:l:f:j:m` inheritance), PC↔instruction (PUSH-data skipping), AST navigation, storage layout, CBOR contract identification; asserted against a real unoptimized Counter build-info (solc 0.8.35).
-- **M4 — ethdebug-gen (unoptimized)** ✅ Instruction stream aligned 1:1 with the source map (metadata trailer excluded); storage-variable pointers that dereference correctly through the real `@ethdebug/pointers` reference (producer/consumer agreement).
-- **M5 — Minimal end-to-end DAP skeleton** ✅ `SolidityDebugSession` answers `initialize→launch→threads→stackTrace→scopes→variables` in-memory against a recorded `Counter.setNumber(42)` trace; reads `number = 42` (storage) and `newNumber = 42` (calldata local) through the real ethdebug pointer path via a `StateCursor`→`Machine.State` adapter.
-- **M6 — Stepping engine + breakpoints** ✅ next/stepIn/stepOut/stepBack, continue/reverseContinue, source + opcode breakpoints, all client-side over the known trace. Statement stepping uses **combined depth = EVM depth + source-map jump depth**, so Solidity internal calls (JUMPs at constant EVM depth) are entered by stepIn, skipped by stepOver, left by stepOut. `launch` now stops at the first statement (entry).
-- **M7 — Variables (value types)** ✅ Decodes all VALUE types — uintN, intN (signed two's-complement), bool, address, bytesN, enum (member name), contract, UDVT — from **packed storage** (slot/offset/length extraction) and **calldata locals** (ABI head-slot indexing, narrow-type normalization); adds the raw **EVM scope**; adds typed AST accessors to `@simbolik/solc` (removing the debugger's raw-AST walk). Dynamic/reference types deferred to M7b.
-- **M8 — Mixed compilation units + optimized fallback + multi-frame** ✅ A single tx spanning CUs with **different optimization levels** (the mandatory scenario): each frame is resolved to its own CU by **CBOR metadata** (settings-aware, so the same contract compiled opt vs unopt disambiguates), source-mapped through its own CU's fileIds, given per-frame scopes (optimized frames drop Locals → storage-only), and shown in a multi-frame call stack folded by EVM depth. Verified against a live `Caller(unopt).go → Callee(opt).compute` trace.
-- **M9 — Remote replay: trace-dialect support** ✅ A geth/anvil **trace factory** (`normalizeGethTrace`) + **dialect detection** (kontrol vs geth by the presence of `codeAddress`/`isInitCode`) + an **attach fetch flow** (`fetchAttachContext`: `eth_getTransactionByHash` + `debug_traceTransaction`). Both dialects feed one pipeline — a real recorded **anvil** trace reads `number=42`/`newNumber=42` identically to the kontrol path. `launch` dispatches on `dialect` (default `kontrol`, back-compat).
-- **M10 — DAP protocol layer + TCP server** ✅ (server side) `DapDispatcher` turns raw DAP `ProtocolMessage`s into the correct response+event stream (monotonic `seq`, `initialized`/`stopped`/`terminated` events, drain cursor, error responses, no-session guard) over the typed `SolidityDebugSession`, via an injectable `SessionResolver`. `startDapServer` hosts it over TCP with `Content-Length` framing (handles multi-frame packets + split frames). Full DAP handshake transcript tested (`initialize→launch→stackTrace→scopes→variables→continue→disconnect`, reading `number` 0→42). The `simbolik.adapterMode` setting (`inline`|`tcp`) is added to `package.json`.
-- **M10b — VSCode host wiring** ◐ (host glue; compile/bundle-verified, live session = manual):
-  - **Blocker RESOLVED** (M10b-1): the `@ethdebug/pointers` top-level-await can't live in a `--format=cjs` bundle. Fix = a SEPARATE **ESM** bundle `build/server.mjs` (`esbuild --format=esm`, TLA legal) containing the debug server; `src/server.ts` exposes `createDispatcher(resolve?)`/`startServer({port})` + re-exports. The CJS extension reaches it via a **computed-specifier dynamic import** (`src/serverBridge.ts` `loadServer()` → `import('./server.mjs')`) that tsc/esbuild leave un-inlined and Node resolves at runtime. Both bundles build clean; both seam modes verified at runtime.
-  - **Adapter + resolver** (M10b-2): `src/DebugAdapter.ts` rewritten — per `simbolik.adapterMode` it either (inline, default) `loadServer()`→`createDispatcher()` wrapped in a `vscode.DebugAdapter` over `DebugAdapterInlineImplementation` (with a `#queue` serializing dispatch, mirroring the TCP server so responses/events never interleave), or (tcp) spawns `node build/server.mjs --port 0` and returns `DebugAdapterServer(port)`. `productionResolver` (in `src/server.ts`, vscode-free) builds `LaunchInputs` for `request:'launch'`: read build-info files → find contract + creation bytecode + selector (from `methodIdentifiers`) → deploy+call+trace via `@simbolik/engine` `JsonRpcClient` (+ raw `debug_traceTransaction` string) → `dialect`/`txContext` per node type → `new SolidityDebugSession().launch(inputs)`. The `simbolik:upload:*` WebSocket bridge + path-trimming are removed. Verified: typecheck/compile/esbuild clean; a node import proves the real resolver is wired (bogus launch → real error, not placeholder); the `LaunchInputs` contract matches `launch()` field-by-field (reviewed).
-  - **Attach / remote-replay resolver** (M10b-3) ✅ `productionResolver`'s attach branch is wired: `fetchAttachContext` (tx + trace + dialect) → precision-safe RAW trace string (not `JSON.stringify(envelope)`, which would lose kontrol decimal-bigints) → reconstruct steps (`normalizeGethTrace`/`normalizeKontrolTrace`) → distinct codeAddresses → per-address `SourcifyRepository.resolve(chainId, addr)` + `recompile` (concurrent, unverified addresses skipped non-fatally) → `contractsByAddress` → `LaunchInputs` → launched session. Entry = `txContext.to` (clear error if unverified). **Both modes now wired through the host.** Node smoke (real network) proved every component: enumeration over the anvil trace, Sourcify resolve→recompile→CU for Multicall3, and an assembled-inputs `launch()` yielding a 2-frame stack with callee `x`=7. `build/server.mjs` grew to ~9.3mb (bundles `@simbolik/sources`+`@simbolik/lifting`; solc-js stays lazy `import()`).
-  - ▫ **Remaining (MANUAL only):** live smoke in a real Extension-Development-Host + running anvil/kontrol-node (both launch modes) and a live attach against a Sourcify-verified tx; `.vsix` packaging (server.mjs at `extensionPath/build/`); the tcp config-injection over the wire. Minor deferred: constructor-arg deployment; `contractsByAddress` for geth external-call LAUNCH targets (attach already handles multi-contract).
-- **M7b-1 — Function input parameters (value types)** ✅ `ethdebug-gen.functionParameters` produces the static parameter inventory; the debugger reads value-type input params for **external** frames (calldata `4+32·index`) and **internal** frames (stack, via dynamic frame-entry tracking: `absOffset = entryStackHeight − paramCount + i`, `depth = currentStackLength − 1 − absOffset`, dereferenced with the machine state so ethdebug's stack-length adjustment is a no-op). Verified reading `v=11` inside `Stepper.double` at multiple steps + all external param sigs.
-  - *Documented limitations (stage 2/3):* direct recursion (`f`→`f`) mis-detects the inner frame (gated on caller.id ≠ landed.id); mixed value/reference internal params use 1-slot-per-param offset (dynamic reference params occupy 2 slots — use `stack_size()` per param); overloaded functions resolve to the first declaration by name (pass the resolved `fnNode` instead of `methodName`); frame fold runs per `variables()`/`scopes()` call — memoize at launch.
-- **M9b — remote-replay source acquisition** (`@simbolik/sources`, staged):
-  - **M9b-1 — Sourcify fetch/parse** ✅ `SourcifyRepository.resolve(chainId, address)` GETs the Sourcify v2 API (`/v2/contract/{chainId}/{address}?fields=sources,compilation`, injectable `fetch` for tests) and parses it into a `ResolvedContract` `{compilerVersion, name, match, standardJsonInput:{language, sources, settings}}` — settings from `compilation.compilerSettings` (a validator guard catches the wrong `metadata.settings` path). Not-found (404/`match` null/missing compilation|sources) → `undefined`; a network error PROPAGATES (offline ≠ not-verified). Case-insensitive address. Tested against a recorded Multicall3 fixture (no network); live-verified real-fetch works. *Deferred:* malformed-200 / urls-only (omitted inline content) narrowing.
-  - **M9b-2 — local solc-js recompile** ✅ `recompile(resolved, opts?)` compiles the `standardJsonInput` via solc-js and wraps it into a build-info `@simbolik/solc.loadBuildInfo` consumes. Compiler selection: bundled solc (`import('solc')`, lazy) when the version's short form matches (offline), else `loadRemoteVersion('v'+compilerVersion)` (needs Sourcify's full `+commit`); injectable `opts.loadCompiler` for tests. Adds the proven `outputSelection` (ast/storageLayout/evm.bytecode+deployedBytecode.{object,sourceMap}); feeds sources/settings VERBATIM (only adds outputSelection) for CBOR/sourceMap parity; compilation errors throw. `solc` is a lazy-imported runtime dep. Hermetic test compiles a sample at the bundled version + round-trips (storageLayout/sourceMap/AST/events); a gated `SIMBOLIK_LIVE` test proved the real Sourcify→loadRemoteVersion(0.8.12)→round-trip AND byte-for-byte deployed-bytecode parity for StorageRefs@0.8.35. *Caveats:* a same-short-different-commit version falls back to bundled (structure fine, exact replay wants the full commit — Sourcify's remote path gets it right); bare-version→full-commit resolution out of scope.
-  - **M9b-3b — geth/anvil multi-frame reconstruction** ✅ `normalizeGethTrace` now reconstructs per-step frame context from CALL-family ops + `depth` (geth has no per-step codeAddress). A frame stack seeded `{code:to, storage:to, sender:from}`; on a depth increase the previous step's CALL op supplies the callee (`stack[len-2]`) and pushes a frame per call type (CALL/STATICCALL → callee storage; DELEGATECALL → caller storage+sender; CALLCODE → caller storage); on a depth decrease it pops. Each step gets `codeAddress/targetAddress/msgSender` from the top frame, and `storageChanges` is keyed under the executing frame's storage account (not always `to`). Verified against the recorded anvil `Caller.go→Callee` fixture (677 steps, depth-2 = callee, storage isolated per account); single-frame output byte-identical. Reviewer fix: CREATE/CREATE2 reuse the creator's context (their `stack[-2]` is a memory offset, not an address). *Reasoned-not-tested:* DELEGATECALL/CALLCODE/STATICCALL (no fixture); CREATE'd address backfill + constructor-storage isolation → M8; per-frame msgValue deferred.
-  - **M9b-3c — session multi-frame geth lift (address→CU registry)** ✅ `LaunchInputs.contractsByAddress` (`Record<addr, {buildInfoJson, contractName?}>`) lets the session resolve each frame's CU BY ADDRESS — required for geth, whose trace carries no per-step code (the CBOR-from-trace registry is empty, so callee frames used to fall back to the entry CU). `launch()` consumes it with precedence over CBOR (gated on presence → kontrol/single-CU unchanged); `#pickContract` picks by name, else the sole non-empty-`runtimeBytecode` contract (skips interfaces like `ICallee`), else CBOR; map CUs added to `state.cus`; `optimized` per resolved CU. Verified: the anvil `Caller.go→Callee` trace lifts to a real 2-frame stack (top `Callee.compute`@`Callee.sol`, parent `Caller.go`@`Caller.sol`), callee `x`=7 + `stored`=14 read against the callee account, caller `result` 0→15. **Remote-replay is now end-to-end** (fetch→recompile→reconstruct→multi-frame lift). *Benign edges:* entry build-info supplied twice double-parses (perf only); ambiguous multi-deployable CU + no name → entry fallback (no mis-pick).
-  - **M9b-3d** ▫ remaining: a `LocalRepository` + a Sourcify-backed `SessionResolver` that POPULATES `contractsByAddress` from disk/network (host wiring — M10b); nodes that omit the `storage` field (SSTORE-arg reconstruction); contract-creation (`to:null`) txs.
-- **M7b-2 — Local variables (value types, incl. nested/loop/`unchecked` scopes)** ✅ `ethdebug-gen.functionLocals` (static inventory + lexical live-range); the debugger appends live value-type locals to the `Locals` scope. Model: locals occupy contiguous stack slots above a **per-frame-anchored** `frameBase`, in declaration order; inner-block locals **reuse** freed slots; `slot = frameBase + rank` (rank among currently-live locals), `depth = currentStackLength − 1 − slot` recomputed per step (correct mid-expression). `frameBase` is anchored once per frame (internal = M7b-1 `entryStackHeight`; external = forward-scan to the first body statement boundary, cached), not re-derived per step.
-  - *Process note:* M7b-2 was first implemented **out-of-process** (one agent did tests+impl); retrofitted independent validation + review caught **two real bugs it had shipped green** — the for-header frame-base shift and unrecognized `unchecked{}` scopes — both since fixed.
-  - *Documented limitations (M7b-2 remainder / M7b-3):* internal-frame locals when the function has **return values** (`entryStackHeight` sits below the callee's return slots → base too low); **calldata-dynamic** locals occupy 2 stack slots (breaks the 1-slot `rank` — add a `stackSize` field); frame/local folds run per `variables()` call (memoize; ~O(N²) today).
-- **M7d — Return parameters (value types) + internal-return-slot fix** ✅ `variablesAt` now enumerates **return parameters** (kind `'return'`) at their correct stack slots in the `[params][returns][locals]` layout, for external AND internal functions; fixed the internal-return-slot gap (an internal fn with a return + locals — `helper`'s `local` now reads 6, not the reserved `out` slot). Unnamed returns reserve a slot but aren't emitted. Session change was a one-line `kind` filter. Cross-checked against all 8 traced functions.
-- **M7b-2 remainder**: modifier-body params (rare); calldata-dynamic-2-slot + public-called-internally carry forward.
-- **M7b-3 — dynamic/reference-type decoding** (staged, via ethdebug collection/expression pointers): establishes nested DAP variables through the format's `Group`/`List`/`$read`/`$sum`/`$keccak256` pointers.
-  - **M7b-3a — memory value-type structs** ✅ `variablesAt` emits a memory struct (`Point pt`) as a nested variable: per-member `Group` pointers (`{group:[{name:'base',stack…},{memory,offset:{$sum:[{$read:'base'}, k*32+inWord]}}]}`) built from a new `@simbolik/solc` `structMembers` accessor; `readPointerValue` now reads the **last** region (safe — only Groups are multi-region); the session renders `pt` → `{x:11, y:7}` via a `Complex` handle. Reviewer fix: storage/calldata structs gated to memory-only (else silent mis-decode). Established the reference-type pipeline.
-  - **M7b-3b — memory dynamic arrays + strings/bytes** ✅ `variablesAt` emits `nums` (`uint256[]`) via an ethdebug `Group`(`base`/`len`)+`List` pointer (`count:{$read:'len'}`, `each:'i'`, element region named `'element'` at `{$sum:[{$read:'base'},32,{$product:['i',32]}]}`) and `label` (`string`) via a `Group` ending in a dynamic-length raw-byte region (`length:{$read:'len'}`). New `machineState` readers: `readPointerRegions` (all `named('element')` regions, in order) + `readPointerBytes` (final region → hex); `readPointerValue` untouched. Session renders `nums`→`[11,0]` (nested, index-named children) and `label`→`"hi"` (scalar UTF-8). `structTypeId`→`referenceTypeId` (carries real type ids for all reference locals); emission gated on `_memory` + `t_array`/`t_string`/`t_bytes_`. Reviewer fix: element words routed through `fieldFromAbiWord` so `intN`/`bytesN`/narrow elements decode correctly (no-op for `uint256[]`). *Out of scope (→ M7b-3c/notes):* fixed-size memory arrays, reference-type/nested-array elements (listed bare, no crash), storage/calldata/mapping reference types; only `uint256[]` element type exercised.
-  - **M7b-3c-1 — storage dynamic array + storage value-struct** ✅ `generateEthdebugProgram` emits reference LAYOUT on storage vars mirroring the memory shapes: `arr` (`uint256[]`) as an `array` (`Group`[`len`]+`List`, element slot `{$sum:[{$keccak256:[<slot as padded 32-byte word>]}, 'i']}`, region named `'element'`) and `pt` (`struct{uint256 x;uint256 y}`) as `members` at consecutive absolute slots (`base+member.slot`). New `@simbolik/solc` `StorageType` fields (`base`/`members`/`key`/`value`). The session's memory + storage nested rendering is FACTORED into shared `#renderComplex`/`#complexVariables` (a `complexKind:'local'|'state'`); value-type storage keeps its unchanged packed-word extraction. Session renders `arr`→[11,22,33] and `pt`→{x:5,y:6} through the real `@ethdebug/pointers` storage path. Reviewer fix: both emitters are FAIL-CLOSED — layout is emitted only for value elements/members that occupy their OWN full slot; see the deferred cases below.
-    - *Reviewer-guarded deferrals (silently-wrong without support → now a clean scalar-slot gap):* **sub-word-PACKED storage arrays** (`uint8[]`/`uint128[]`/`bool[]`, element ≤16 bytes → several per slot; the `keccak(p)+i` layout assumes one-per-slot) and **reference-element arrays** (`uint256[][]`, `struct[]`) are not emitted (`storageArrayLayout` returns `undefined`); **PACKED value-member structs** (any member with `offset≠0` or two members sharing a slot), **`bytesN` (N<32) members** (left-aligned; a full-word read decodes into the high bytes), and **reference-type members** are not emitted (`unpackedValueStruct` guard). Root cause for packed members: the `machineStateFor` storage adapter returns the FULL slot word and IGNORES the pointer's `offset`/`length` slice (confirmed), and solc's LSB member `offset` is the reverse of ethdebug's MSB byte-index — so proper packed support needs (a) a slice-honoring storage adapter and (b) `offset → 32-offset-length` translation, plus per-slot packing math for arrays. Only `uint256[]` and an all-`uint256` struct are exercised by the fixture.
-  - **M7b-3c-2 — storage string/bytes (short inline + long keccak)** ✅ `generateEthdebugProgram` emits a `bytesStorage` descriptor (`{flagPointer, longBaseSlot, isString}`) for `encoding:'bytes'` storage vars; `longBaseSlot` = `keccak256(pad32(slot))` computed STATICALLY (added `ethereum-cryptography` as a direct dep of `@simbolik/ethdebug-gen`). The session parity-selects on the flag word's low byte (EVEN→short: high `len` bytes of the padded 32-byte word; ODD→long: `ceil(len/32)` words from `longBaseSlot` via a new `readStorageWords` helper, trimmed to `len` bytes), decoding string→`"…"` UTF-8 / bytes→`0x…`, scalar (ref 0). LAYOUT/keccak in the producer; the session owns only the encoding rules (parity, high-byte slice, multi-word trim) — like packed-field extraction. Verified: `shortStr`→"hello", `longStr`→36-byte string, `blob`→0xdeadbeef; the 31/32-byte boundary, leading-zero `bytes`, UTF-8 word-straddle, and len-0 confirmed by reasoning+scratch (no fixture). *Deferred:* mappings (M7b-3c-3); storage string/bytes as struct/array members or mapping values.
-  - **M7b-3c-3 — storage mappings (keccak-preimage enumeration)** ✅ Producer marks `encoding:'mapping'` vars with a `mapping` descriptor (`{baseSlot, keyType, valueType}`). A new trace-scan helper `enumerateMappingKeys(steps, cursor, baseSlot, uptoStep)` (`packages/debugger/src/mappings.ts`) recovers observed keys: scan `op∈{SHA3,KECCAK256}` with size `0x40`, fold memory (`StateCursor.at(idx)`), read the 64-byte preimage `key(word0)‖slot(word1)`, keep `word0` where `word1===baseSlot` (de-dup, first-seen, bounded by the current step). `mappingValueSlot(key,base)=keccak256(pad32(key)‖pad32(base))` gives each value slot, read through the storage path + decoded by `valueType`. Session renders `balances`→`{7:100, 9:250}` nested via the shared `#renderComplex`/`#complexVariables`. `ethereum-cryptography` added as a direct dep of `@simbolik/debugger`. Reviewer fix: key *names* normalized via `fieldFromAbiWord` (bytesN/negative-intN keys). *Deferred/limitations:* enumeration is GLOBAL (not scoped to the frame's own `codeAddress`/init) → phantom-key risk in multi-contract M8 traces (scope to codeAddress when mappings meet mixed-CU); a coincidental `keccak256(abi.encode(x, baseSlot))` could inject a phantom key (untightened by design, so legitimately-zero observed keys still show); `string`/`bytes` keys silently not enumerated (fail-closed); `bytesN`/`intN`/`address`/`bool` keys correct but untested (only `uint256` exercised); struct/array/string/nested-mapping VALUES out of scope.
-  - **M7b-3c done** (storage reference types: arrays, value-structs, strings/bytes, mappings).
-  - **M7b-3d — event/LOG decoding (read-only `Events` scope)** ✅ solc `Contract.events()` builds each event's `{name, selector=keccak(canonicalSig), params:[{name,solcType,typeLabel,indexed}]}` from the build-info ABI (`ethereum-cryptography` added as a direct dep of `@simbolik/solc`). New helper `enumerateEvents(steps, cursor, codeAddress, uptoStep, eventDefs)` (`packages/debugger/src/events.ts`): scans `LOG0-4` ops emitted by the frame's `codeAddress` up to its step, reads `offset=stack[n-1]`/`size=stack[n-2]`/`topic_j=stack[n-3-j]` + folded-memory data, matches `topic0` to a def by selector, and decodes args in DECLARATION order (indexed→`topics[1..]`, non-indexed→data words, independent cursors) via `fieldFromAbiWord`/`decodeValue`. Session adds an `Events` scope (LAST, on every frame incl. optimized) rendering each event nested (`Updated(key:7, value:100)` → children `key=7`,`value=100`). Reviewer fix: non-indexed reference args show a `<type>` placeholder (not a mis-decoded offset). *Limitations:* value-type args only — indexed ref args show `<indexed 0x…hash>`, non-indexed dynamic args show `<type>`, enums appear as `uint8`; attribution by `codeAddress`+step bound (cross-frame same-code attribution → M8); anonymous events skipped.
-  - ▫ **Next reference-type polish (deferred):** the packed/narrow/reference storage members+elements guarded in M7b-3c-1; fixed-size + reference-element memory arrays.
+### Module map
 
-- **Step-into enters at most one frame** ✅ (2026-09-29, from a uniswap-v4-core sweep: 149 tests × both pipelines, then all tests). (1) Every EVM frame is expanded into its internal-function frames, not only the innermost — the caller's chain no longer collapses during an external call (fixture `Forwarder`). (2) Step-into a modified function stops first on the function header **at each modifier invocation**, then in the modifier, then the body (`Stop {step, beforeModifier}` in `stepping.ts`; fixture `MultiMod`). (3) A modifier that calls a function stays on the stack beneath the callee (`ModCall`). (4) viaIR calls a never-returning function with a plain JUMP or inlines it (no `jump:'i'`) — still a call frame (`NoReturn`). (5) viaIR maps a body's code up to its first call to the header ("call-first" bodies): that entry step is a stop shown at the first statement, also as the call site (`CallFirst`). Remaining by design: a step-in that RETURNS can pop several frames at once when the intermediate frames have no statement left (tail calls; legacy has no step for a modifier's `_;` before the body).
-### M7c — architecture: move ALL variable-location logic into ethdebug-gen (single source of truth)
-The param/local location logic currently lives (wrongly) in `session.ts` as ad-hoc stack layouting. **M7c makes `ethdebug-gen` the single source of truth** (chosen approach: *pure static producer* — ethdebug-gen emits per-pc variable contexts with static pointers; the session just dereferences + decodes, exactly like it already does for storage).
-- **M7c-1 — static per-pc stack-height analyzer** ✅ `ethdebug-gen.stackHeights(cu, sourcePath, contractName).frameRelHeightAt(pc)` computes, purely statically from bytecode + source map + AST, the frame-relative stack height at each pc (depth-from-top is caller-invariant: `= frameRelHeight − 1 − frameRelSlot`). Opcode-delta table (validated 0-mismatch over 964 trace transitions) + intra-function CFG worklist with constant-tracked jump targets + internal calls as net effects (never propagates into the callee). **Validated against every recorded trace**: matches observed frame-relative heights at every attributed body pc across 6 functions / ~800 pcs (incl. Vars.setAll 150, Locals.compute 438 with for-loop merges, Caller.go across an external CALL). Degrades to `undefined` (never throws) on optimized block-sharing / modifiers / try-catch / computed jumps.
-- **M7c-2 — static variable-context producer** ✅ `ethdebug-gen.variablesAt(cu, sourcePath, contractName, pc)` returns the live variables (storage + params + locals) with **concrete ethdebug pointers**, pure-static (pc only, zero runtime facts). Uniform model: params+locals are stack vars at `frameBase + rank`, `frameBase` anchored once via the Cycle-1 analyzer at a clean statement boundary; **params ARE on the stack in the body** (confirmed — external params too), so no calldata path. Entry kind is derived from static function **visibility** (not a runtime flag). Verified by dereferencing the emitted pointers against **every** recorded trace (Counter/Vars/Stepper/Locals + mixed Caller.go: x=10, v=11, a=11, all setAll params, Locals loop/block scopes, seed=10 past the reserved return slot). Independent review caught two fixture-masked bugs (visibility-anchor + reserved return-slot).
-  - *Limitations (M7c-3/later):* public function called INTERNALLY (visibility→external anchor mismatch); calldata-dynamic (2-slot) + multi-return (2-slot) rank accounting; `variablesAt` recomputes per call (memoize per function in the session refactor); prologue/epilogue pcs read temporaries (session queries at statement boundaries).
-- **M7c-3 — session gutted; single source of truth achieved** ✅ `session.ts` is now THIN: its Locals scope routes params + locals entirely through `ethdebug-gen.variablesAt` → `readPointerValue`/`machineStateFor` → decode. **Deleted** `#frameBaseHeight`, `#currentInternalFrame`, `#localScopeVariables`, `#offsetAt`, `#jumpAt`, module-level `isLive`, and all `4+32*i` / `entryStackHeight−paramCount+i` / `frameBase+rank` / alignment math — the session holds NO variable-location logic (only trace/frame reconstruction + dereference + decode), matching how storage already worked. **Part A** fixed the shared dereference path (`machineStateFor`): pad EVM words to a full 32-byte word before `Data.fromHex` (fixes odd-length minimal-hex misparse `0x3e8`→1000) and `stack.peek` now honors the pointer slice; storage read stays full-word (session extracts packed). Verified across every fixture through the unified path; `#varCache` keyed by `Contract` identity (mixed-CU safe). **ethdebug-gen is now the single source of truth for reading storage, params, AND locals.**
-  - *Residual (out of scope):* `#stateVariables` still does its own packed-storage extraction (a minor inconsistency — storage was already correct); the M7c-2 limitations carry forward (public-called-internally, calldata-2-slot/multi-return rank, reference/dynamic-type decoding = M7b-3).
+- **`debugger`**: `session.ts` is a thin DAP facade over the launch-time model in
+  `trace.ts` (steps, cursor, stepping model) and `registry.ts` (address → contract/CU,
+  or foreign). `contractAnalysis.ts` holds the per-contract static caches (pc → source,
+  disassembly, ethdebug program, `variablesAt`). Supporting modules:
+  - `stepping.ts`: statement and instruction stepping.
+  - `frames.ts`: call-stack reconstruction, with internal-function and modifier
+    frames.
+  - `breakpoints.ts`: line, instruction and exception-filter breakpoints.
+  - `exceptions.ts`: where each revert originates and whether it was caught.
+  - `revertData.ts`: decodes `Error(string)`, `Panic` and custom errors.
+  - `cheatcodes.ts`: Foundry cheatcode calls.
+  - `sources.ts` and `handles.ts`: DAP `Source` objects and `variablesReference`
+    handles.
 
-### Known deferred limitations (from M8 review — mostly out of scope, tracked for a follow-up)
-- Unknown/foreign callee frames (not in any CU) currently fall back to the entry contract's source map rather than rendering as an "unknown frame".
-- CREATE / init-code frames and same-address-two-codes (CREATE then CALL) aren't resolved (registry uses runtime-CBOR, first-seen per address). Python splits init vs runtime.
-- Constructor (init-code) params/locals resolve against the init image (`variablesAt(…, pc, 'init')`; fixture `ctor-*`, both pipelines). Legacy INLINES a base constructor into the derived one: `Program` attributes the inlined body to the derived frame (`frameFnId`/`frameEntries`) and the provenance analyzer claims its params from the pushed argument slots. Remaining: the first stop in a constructor (its header, before the args are ABI-decoded) shows no params.
-- DELEGATECALL storage context: reads use `codeAddress`; a delegatecall runs foreign code against the caller's storage (should use the storage-context address; `Step` carries both `codeAddress` and `targetAddress`).
-- Breakpoints and cross-CU source paths are keyed by path string only (path collision across CUs possible; inherent to path-based DAP).
-- Scope `variablesReference` handles bind to EVM depth, not a durable per-call identity (benign under normal fetch-after-stop DAP usage).
-- Internal-function (jump-depth) frames are not separate DAP stack frames (EVM-depth frames only).
-- Geth-trace ingestion (M9) is single-frame only: every step is attributed to the tx's `to` (no CALL/CREATE call-context reconstruction), relies on the node emitting `storage` in structLogs (no SSTORE-arg reconstruction), and doesn't handle contract-creation (`to:null`) txs. Storage-write visibility is off-by-one between dialects (anvil shows the write at the SSTORE step; kontrol at the following step) — irrelevant to terminal reads.
+  Each scope has its own renderer: `solidityVariables.ts`, `localsHistory.ts`,
+  `evmScope.ts`, `globalsScope.ts`, `eventsScope.ts` and `disassemblyView.ts`.
+- **`ethdebug-gen`**: `program.ts` generates the program and `variables.ts` the per-pc
+  variable contexts. The stack analyses are `stackHeights.ts` (per-pc frame-relative
+  height) and `stackProvenance.ts` (which stack slot holds which variable, needed for
+  viaIR's reordered stacks). Both share the control-flow core in `cfg.ts`.
+- **Extension host**: `src/server.ts` is the entry point of the separately bundled ESM
+  server (`build/server.mjs`). The extension loads it through `src/serverBridge.ts`.
+  `src/DebugAdapter.ts` runs the server inline (default) or over TCP, depending on
+  `simbolik.adapterMode`.
 
-The `Counter.setNumber(42)`, `Stepper.run(10)`, `Vars.setAll(...)`, and `Caller.go→Callee.compute` trace fixtures were recorded live from the real kontrol-node; the `anvil-setNumber` fixture (geth format) was recorded from anvil 1.7.1 (all in `packages/debugger/test/fixtures/`).
+## Known limitations
 
-## Test fixtures
-
-Real compiler/engine output, committed so the core suite needs no toolchain:
-- `test/fixtures/counter/` — a Foundry project. `forge build` output is gitignored; the build-info + artifact are copied into `packages/solc/test/fixtures/`. Contracts are compiled **legacy** (`forge build`) or **viaIR** (`forge build --via-ir`); the debugger must support both.
-- `packages/engine/test/fixtures/` — a recorded kontrol-node `debug_traceTransaction` (Counter deploy).
-
-The debugger suite shares one harness (`packages/debugger/test/support/harness.ts`;
-`launch`/`stepToLine`/`locals`/`children`, and `eachMode` for viaIR×legacy) and its
-**viaIR × legacy coverage matrix** is documented in
-[`packages/debugger/test/COVERAGE.md`](debugger/test/COVERAGE.md). New fixtures are
-recorded live on kontrol-node via `scratchpad/record-dualmode.mjs` (see the
-`kontrol-node-live` memory for the procedure).
+- Storage reads use the frame's code address. Under `DELEGATECALL` they should use the
+  caller's storage instead.
+- Mapping keys are recovered from `KECCAK256` preimages observed in the trace, so only
+  keys the transaction actually touched are shown. Keys of type `string`/`bytes` are
+  not enumerated.
+- Storage arrays with sub-word (packed) elements, structs with packed members, and
+  arrays whose elements are reference types are not expanded.
+- Reference-type locals fall back to a frame-relative slot model when the
+  stack-provenance analysis finds no evidence. viaIR needs this fallback for
+  late-materialized memory structs and fixed-size memory arrays. It is best-effort,
+  because a reused slot could hold an unrelated word.
+- The first stop in a constructor (its header, before the arguments are decoded) shows
+  no parameters.
+- Breakpoints are keyed by source path, so two CUs that use the same path collide.
 
 ## Development
 
 ```bash
 npm install
-npm run typecheck    # tsc -b over all workspace packages (project references)
-npm test             # vitest run (core suite; no K runtime needed — uses recorded fixtures)
+npm run typecheck    # all workspace packages + the extension host
+npm test             # vitest; uses recorded fixtures, no kontrol-node needed
 ```
 
-### Live integration tests (need the real kontrol-node)
+The tests run on recorded compiler output and traces, committed under each package's
+`test/fixtures/`. The debugger tests share a harness (`debugger/test/support/harness.ts`)
+that runs each scenario against both the legacy and the viaIR pipeline where the code
+paths differ. [`debugger/test/COVERAGE.md`](debugger/test/COVERAGE.md) shows which
+scenario is covered on which pipeline.
 
-The core suite runs on **recorded fixtures** and never needs the K runtime. Tests
-that drive a real `kontrol-node` are gated behind `SIMBOLIK_LIVE=1`:
+### Live tests
+
+Tests that drive a real `kontrol-node` are gated behind `SIMBOLIK_LIVE=1`:
 
 ```bash
-SIMBOLIK_LIVE=1 npx vitest run packages/engine/test/live.integration.test.ts
+npm run test:live
 ```
 
-The engine is provisioned by `.devcontainer/setup-kontrol-node.sh` into a persistent
-volume at `/home/node/kontrol-node`. It is launched via the nix dev shell + the
-package venv, with `KDIST_DIR` pointing at the pre-built KEVM semantics — see
-`@simbolik/engine`'s `devcontainerLaunch`. Startup to first RPC is ~2s.
+The devcontainer provisions kontrol-node with `.devcontainer/setup-kontrol-node.sh`.
+`@simbolik/engine`'s `devcontainerLaunch` starts it from there.
 
-### Notable engine facts (baked into types/tests)
+### Engine behavior the code relies on
 
-- kontrol-node emits addresses and 256-bit values as **decimal integers that overflow
-  `Number.MAX_SAFE_INTEGER`** → parsed as `bigint` (never plain `JSON.parse`).
-- kontrol-node is an **eager whole-trace tracer**: `eth_sendTransaction` runs + traces
-  the tx; `kontrol_traceTransaction` streams back the precomputed trace. There is **no
-  interactive stepping in the node** — all stepping/breakpoints/reverse are implemented
-  client-side over the trace.
-- Trace change-fields are **delta-encoded** (populated only on the step they change).
-- `eth_chainId` returns the decimal number `31337`, not the standard hex string.
+- kontrol-node emits addresses and 256-bit values as decimal integers beyond
+  `Number.MAX_SAFE_INTEGER`, so traces are parsed into `bigint`s, never with plain
+  `JSON.parse`.
+- kontrol-node traces a whole transaction eagerly: `eth_sendTransaction` executes and
+  traces it, and `kontrol_traceTransaction` returns the precomputed trace. The node has
+  no interactive stepping.
+- Trace change fields are delta-encoded: they appear only on the step where the value
+  changes.
+- `eth_chainId` returns the decimal number `31337` instead of a hex string.

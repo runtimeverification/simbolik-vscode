@@ -7,9 +7,9 @@
  *   17  constructor(uint256 x) Base(x + 1) {}     // Derived: invocation only
  *   24      d = new Derived(4);
  *
- * The new frame's first statement is Base's, nested in Derived's constructor, so
- * step-into used to push both at once — each named `Derived.constructor`. It must
- * enter Derived.constructor (at the `Base(x + 1)` invocation), then
+ * The new frame's first statement is Base's, nested in Derived's constructor,
+ * so a naive step-into pushes both at once (each named `Derived.constructor`).
+ * It must enter Derived.constructor (at the `Base(x + 1)` invocation), then
  * Base.constructor, one frame at a time.
  */
 import {describe, expect, it} from 'vitest';

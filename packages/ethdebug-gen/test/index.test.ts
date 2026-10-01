@@ -5,8 +5,7 @@ import {Data, dereference, isPointer, Pointer} from '@ethdebug/pointers';
 import type {Machine} from '@ethdebug/pointers';
 import {generateEthdebugProgram} from '../src/index.js';
 
-// Real, unoptimized Counter build-info (solc 0.8.35). Path is relative to this
-// spec file inside packages/ethdebug-gen/src -> packages/solc/test/fixtures.
+// Unoptimized Counter build-info (solc 0.8.35), shared with packages/solc.
 const fixtureUrl = new URL(
   '../../solc/test/fixtures/counter-build-info.json',
   import.meta.url,
@@ -61,16 +60,14 @@ describe('generateEthdebugProgram (runtime)', () => {
     const sourceMap = contract.runtimeSourceMap();
     const {instructionToPc} = buildInstructionIndex(contract.runtimeBytecode());
 
-    // Sanity: the raw disassembly runs PAST the source map, because the CBOR
-    // metadata trailer decodes as bogus instruction starts (302 raw starts vs
-    // 271 source-map entries for this fixture). The ethdebug program must
-    // exclude the trailer, so it is strictly shorter than the raw walk.
+    // The raw disassembly runs past the source map, because the CBOR metadata
+    // trailer decodes as bogus instruction starts (302 raw starts vs 271
+    // source-map entries for this fixture). The program must exclude it.
     expect(sourceMap.length).toBeLessThan(instructionToPc.length);
 
-    // Every ethdebug instruction has a context: the stream aligns 1:1 with the
-    // source map, NOT with the full disassembly. This is THE contract for the
-    // instruction count — a naive impl that walks buildInstructionIndex would
-    // emit the ~31 trailer instructions and fail here.
+    // The stream aligns 1:1 with the source map, not with the full
+    // disassembly; walking buildInstructionIndex would emit the ~31 trailer
+    // instructions.
     expect(program.instructions.length).toBe(sourceMap.length);
 
     // The last emitted instruction is the last source-mapped instruction, at
@@ -78,11 +75,9 @@ describe('generateEthdebugProgram (runtime)', () => {
     const last = program.instructions.at(-1)!;
     expect(last.instructionIndex).toBe(sourceMap.length - 1);
     expect(last.pc).toBe(instructionToPc[sourceMap.length - 1]!);
-    // NOTE: we deliberately do NOT assert `last.source` is defined. For this
-    // fixture the last source-map entry has fileId 1 (a solc-internal source
-    // absent from output.sources), so `last.source` is legitimately undefined.
-    // The trailer-exclusion rule is about the instruction *count* / alignment,
-    // not about the final instruction carrying a resolvable source.
+    // `last.source` is not asserted: here the last source-map entry has
+    // fileId 1 (a solc-internal source absent from output.sources), so it is
+    // undefined.
   });
 
   it('maps the first runtime instruction to its source range', () => {
@@ -151,9 +146,8 @@ describe('generateEthdebugProgram (init)', () => {
     const {instructionToPc} = buildInstructionIndex(contract.initBytecode());
 
     // Init code embeds the runtime code + metadata as data (CODECOPY), so the
-    // raw disassembly is FAR longer than the creation source map; the ethdebug
-    // stream must align 1:1 with the source map, same trailer-exclusion rule as
-    // runtime.
+    // raw disassembly is far longer than the creation source map; the stream
+    // must still align 1:1 with the source map.
     expect(initSourceMap.length).toBeLessThan(instructionToPc.length);
     expect(program.instructions.length).toBe(initSourceMap.length);
     expect(program.instructions[0]!.pc).toBe(0);

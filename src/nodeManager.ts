@@ -31,7 +31,7 @@ interface Running {
  * fresh node per session, started automatically so the "Debug" code lens stays
  * one click. Follows VSCode conventions for third-party programs — the binary
  * path is configurable and defaults to the command on `PATH`, a missing or
- * broken install is detected BEFORE the session starts with an actionable
+ * broken install is detected before the session starts with an actionable
  * message (see `nodeSetup.ts`), and the node's output is streamed to a
  * dedicated OutputChannel.
  *
@@ -45,7 +45,7 @@ export class DebugNodeManager {
   readonly #nodes = new Map<string, Running>();
 
   /**
-   * Check that `rpcNodeType` can be started, BEFORE a debug session exists. On
+   * Check that `rpcNodeType` can be started, before a debug session exists. On
    * a problem, show it with buttons that fix it and return false; the caller
    * then cancels the launch, so this notification is the only one the user
    * sees. Always true when the user runs their own node (`auto-start-node` off).

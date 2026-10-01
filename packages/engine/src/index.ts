@@ -15,7 +15,7 @@ export {
 } from './jsonRpcClient.js';
 export {
   KontrolNode,
-  // `KontrolNode` manages ANY launch spec (it just spawns + polls eth_chainId),
+  // `KontrolNode` manages any launch spec (it just spawns + polls eth_chainId),
   // so it drives anvil too; `ManagedNode` is the dialect-neutral alias.
   KontrolNode as ManagedNode,
   kontrolNodeLaunch,

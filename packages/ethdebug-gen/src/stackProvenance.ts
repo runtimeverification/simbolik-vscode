@@ -1,63 +1,60 @@
 /**
- * Static per-pc stack-PROVENANCE analyzer (codegen-agnostic: legacy AND viaIR).
+ * Static per-pc stack-provenance analyzer, for both legacy and viaIR codegen.
  *
  * {@link stackProvenance} answers, for a value-type stack variable (a function
- * parameter, named return, or local — identified by its AST declaration id) and
- * a runtime pc: at what DEPTH-FROM-TOP does a stack slot HOLDING that variable's
- * value sit on arrival at `pc`? — or `undefined` when no slot is known to hold it
- * there (the variable is then OMITTED by the consumer, which is always sound).
+ * parameter, named return, or local, identified by its AST declaration id) and
+ * a runtime pc: at what depth-from-top does a stack slot holding that
+ * variable's value sit on arrival at `pc`? It returns `undefined` when no slot
+ * is known to hold it there; the consumer then omits the variable.
  *
- * ── Why not "height − declarationRank" ───────────────────────────────────────
- * The legacy model assumed every local lived at one fixed frame slot in
- * declaration order. Contracts compiled with `viaIR:true` (the Yul pipeline) have
- * their stack REORDERED and REUSED per instruction by the Yul stack scheduler, so
- * a variable's real depth is a PER-PC property. This analyzer computes that per-pc
- * location by SIMULATING the stack, so it is correct for both pipelines. (It also
- * repairs value-PARAMETER locations on legacy code, which the fixed-rank model got
- * wrong at some pcs.)
+ * ## Why not "height − declarationRank"
+ * Under `viaIR:true` (the Yul pipeline) the Yul stack scheduler reorders and
+ * reuses stack slots per instruction, so a variable has no fixed frame slot and
+ * its depth is a per-pc property. This analyzer computes that location by
+ * simulating the stack, so it works for both pipelines. On legacy code it is
+ * also more precise than a fixed-rank model for value parameters.
  *
- * ── Value numbering ──────────────────────────────────────────────────────────
+ * ## Value numbering
  * A per-function CFG worklist (sharing {@link StackFlow} with
  * {@link stackHeights}) propagates an abstract stack whose every slot carries an
- * optional known PUSH CONSTANT (to resolve JUMP targets, exactly as the height
- * analyzer does) and a deterministic ORIGIN id — a value number identifying WHICH
- * runtime value occupies the slot:
- *   - a value CREATED by an instruction at pc `p` (a PUSH, or any opcode result)
- *     gets origin derived from `p` — stable across worklist revisits;
+ * optional known PUSH constant (to resolve JUMP targets, as the height analyzer
+ * does) and a deterministic origin id: a value number identifying which runtime
+ * value occupies the slot.
+ *   - a value created by an instruction at pc `p` (a PUSH, or any opcode
+ *     result) gets an origin derived from `p`, stable across worklist revisits;
  *   - the frame's below-entry (caller) slots get distinct per-function origins;
- *   - `DUPn` COPIES a slot's origin (a duplicate is the SAME value);
+ *   - `DUPn` copies a slot's origin (a duplicate is the same value);
  *   - `SWAPn` moves slots (origins follow their values);
- *   - every other opcode pops its inputs and pushes freshly-originated results, so
- *     a slot an op overwrites gets a NEW value number (its old identity is gone).
- * Two slots share an origin iff they hold the same value; an overwrite always
- * changes the origin. Internal calls are folded into a net stack effect (never
- * followed into), keeping the caller's slots — hence origins and depths — intact.
+ *   - every other opcode pops its inputs and pushes freshly-originated results,
+ *     so a slot an op overwrites gets a new value number.
+ * Two slots share an origin iff they hold the same value. Internal calls are
+ * folded into a net stack effect (never followed into), keeping the caller's
+ * slots, and hence their origins and depths, intact.
  *
- * ── How a value gets identified as a variable (the anchor) ───────────────────
- * A variable READ is the anchor: when an instruction's source-map node is an
+ * ## How a value gets identified as a variable (the anchor)
+ * A variable read is the anchor: when an instruction's source-map node is an
  * `Identifier` whose `referencedDeclaration` is a function param/local, the slot
- * at depth `n` holds that variable's value — for `DUPn` (a COPY read) provably
- * (solc emits exactly this to read a value-type stack variable, verified against
- * recorded traces at 100% of anchor pcs); for `SWAPn` (a MOVE read — a local's
- * LAST use, the common viaIR pattern for a local passed as a call's final
- * argument) usually, but SWAP attribution is coarse, so SWAP anchors are treated
- * as SUBORDINATE to DUP ones (see {@link Analyzer.recordRead}). We map that slot's
- * ORIGIN to the variable. The variable is then
- * reported at EVERY pc where a slot with that origin is live — before the read
- * (same value, e.g. a parameter from function entry) and after — because it is
- * the very value the read observed.
+ * at depth `n` holds that variable's value. For `DUPn` (a copy read) this is
+ * reliable: solc emits exactly this to read a value-type stack variable. For
+ * `SWAPn` (a move read: a local's last use, the common viaIR pattern for a
+ * local passed as a call's final argument) it usually holds, but SWAP
+ * attribution is coarse, so SWAP anchors are subordinate to DUP ones (see
+ * {@link Analyzer.recordRead}). The slot's origin is mapped to the variable,
+ * which is then reported at every pc where a slot with that origin is live,
+ * both before the read (e.g. a parameter from function entry) and after.
  *
- * ── Merges ───────────────────────────────────────────────────────────────────
- * At a pc reachable from multiple predecessors the incoming stacks are MERGED,
+ * ## Merges
+ * At a pc reachable from multiple predecessors the incoming stacks are merged,
  * reaching a least fixpoint. A slot whose origin agrees on every path keeps it;
- * where paths disagree (e.g. a variable assigned in both branches of an if/else,
- * or a loop variable at the loop head) the slot gets a φ value number for that
- * join — it holds one runtime value from the join on, which a LATER read can
- * name. A φ never inherits a pre-join variable claim, so this stays sound. A pc
- * reached at two conflicting heights (optimizer block-sharing, inline assembly,
- * …) is marked ambiguous and reports `undefined`, never a guess.
+ * where paths disagree (e.g. a variable assigned in both branches of an
+ * if/else, or a loop variable at the loop head) the slot gets a φ value number
+ * for that join: it holds one runtime value from the join on, which a later
+ * read can name. A φ never inherits a pre-join variable claim, so this stays
+ * sound. A pc reached at two conflicting heights (optimizer block-sharing,
+ * inline assembly, …) is marked ambiguous and reports `undefined`.
  *
- * PURE-STATIC: solc artifacts only, no trace. Never throws for a single pc query.
+ * Purely static: uses solc artifacts only, no trace. A single pc query never
+ * throws.
  */
 import {
   closestFunction,
@@ -106,15 +103,13 @@ export interface StackProvenance {
   stackLengthAt(pc: number): number | undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Value-numbered abstract stack
-// ---------------------------------------------------------------------------
+// ## Value-numbered abstract stack
 
-/** One abstract stack slot: an optional known constant + a value-number origin. */
+/** One abstract stack slot: an optional known constant and value number. */
 interface Slot {
-  /** Known PUSH constant value (for JUMP-target resolution), else `undefined`. */
+  /** Known PUSH constant value (for JUMP-target resolution). */
   const?: number;
-  /** Value number: which runtime value occupies this slot, else `undefined`. */
+  /** Value number: which runtime value occupies this slot. */
   origin?: number;
 }
 
@@ -124,7 +119,6 @@ function cloneStack(s: Stack): Stack {
   return s.map(slot => ({...slot}));
 }
 
-/** Whether two stacks are identical in both constants and origins. */
 function stacksEqual(a: Stack, b: Stack): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -138,10 +132,9 @@ function stacksEqual(a: Stack, b: Stack): boolean {
 /**
  * Merge two incoming stacks of equal length at `pc`: a constant survives only
  * where both agree. An origin survives where both agree; where the paths bring
- * DIFFERENT values the slot gets a φ value number unique to `(pc, slot)` — the
- * slot still holds ONE runtime value from the join onward, so a later read can
- * name it (e.g. a local assigned in both branches of an if/else, or a loop
- * variable at the loop head). Stable across revisits ⇒ the fixpoint terminates.
+ * different values the slot gets a φ value number unique to `(pc, slot)`. The
+ * slot still holds one runtime value from the join onward, so a later read can
+ * name it. φ numbers are stable across revisits, so the fixpoint terminates.
  */
 function mergeStack(a: Stack, b: Stack, pc: number): Stack {
   const out: Stack = new Array<Slot>(a.length);
@@ -180,24 +173,25 @@ function phiOrigin(pc: number, index: number): number {
 }
 
 /**
- * The value number of result `k` of an internal call resuming at `returnPc` — a
- * range of its own: a call can return more than 8 values, and `freshOrigin`'s
- * `pc * 8 + k` would then collide with the NEXT pc's origins (observed: a return
- * label pushed right after a call was tagged as the call's returned variable).
+ * The value number of result `k` of an internal call resuming at `returnPc`.
+ * This has a range of its own: a call can return more than 8 values, and
+ * `freshOrigin`'s `pc * 8 + k` would then collide with the next pc's origins
+ * (e.g. tagging a return label pushed right after the call as a returned
+ * variable).
  */
 function callReturnOrigin(returnPc: number, k: number): number {
   return CALL_RETURN_BASE - (returnPc * 4096 + k);
 }
 
 /**
- * The value number of the argument slot at `depth` on arrival at an INLINED
+ * The value number of the argument slot at `depth` on arrival at an inlined
  * function's entry `pc` (see {@link Analyzer.inlinedEntryParams}).
  */
 function inlinedArgOrigin(pc: number, depth: number): number {
   return INLINED_ARG_BASE - (pc * 64 + depth);
 }
 
-/** The pc at which a value number was created (fresh, φ, call-return or inlined arg), if any. */
+/** The pc at which a value number was created, if any (not for caller slots). */
 function originBirthPc(origin: number): number | undefined {
   if (origin >= 0) return Math.floor(origin / 8);
   if (origin <= CALL_RETURN_BASE) {
@@ -217,17 +211,17 @@ function originBirthPc(origin: number): number | undefined {
  */
 function baseStack(entryPc: number): Stack {
   const s: Stack = new Array<Slot>(64);
-  // Distinct, negative, function-unique origins (128 spacing > 64 slots ⇒ no
-  // overlap between functions; never collides with a pc-derived origin ≥ 0).
+  // Negative, function-unique origins: 128 spacing > 64 slots, so functions
+  // never overlap, and they never collide with a pc-derived origin ≥ 0.
   const base = -(entryPc * 128) - 1;
   for (let i = 0; i < s.length; i++) s[i] = {origin: base - i};
   return s;
 }
 
 /**
- * Apply a straight-line (non-JUMP/JUMPI) opcode to the stack, tracking PUSH/DUP/
- * SWAP constants+origins exactly and modelling every other opcode as popping its
- * inputs and pushing freshly value-numbered results.
+ * Apply a straight-line (non-JUMP/JUMPI) opcode to the stack, tracking
+ * PUSH/DUP/SWAP constants and origins exactly and modelling every other opcode
+ * as popping its inputs and pushing freshly value-numbered results.
  */
 function applyToStack(s: Stack, insn: Insn): void {
   const {op, pc} = insn;
@@ -240,7 +234,7 @@ function applyToStack(s: Stack, insn: Insn): void {
     return;
   }
   if (isDup(op)) {
-    // DUPn duplicates the slot at depth n (DUP1 → the top): copy const AND origin.
+    // DUPn duplicates the slot at depth n (DUP1 → the top): copy const and origin.
     const n = op - 0x80;
     const src = s[s.length - 1 - n];
     s.push(src ? {...src} : {origin: freshOrigin(pc, 0)});
@@ -296,19 +290,17 @@ const provenanceDomain: StackDomain<Stack> = {
   apply: applyToStack,
 };
 
-// ---------------------------------------------------------------------------
-// The analyzer
-// ---------------------------------------------------------------------------
+// ## The analyzer
 
 /**
- * A variable-READ anchor: a `DUPn`/`SWAPn` whose source-map node is an
+ * A variable-read anchor: a `DUPn`/`SWAPn` whose source-map node is an
  * `Identifier` referring to the param/local with `declId`; `depth` (= n) is the
- * depth-from-top of the slot it reads, which holds that variable's value. `kind`
- * is `'dup'` (a copy read — reliable) or `'swap'` (a last-use move — subordinate:
- * viaIR's coarse attribution can tag a stack-shuffle SWAP with an unrelated
- * variable's Identifier, so a SWAP anchor never overrides or invalidates a DUP
- * one; see {@link Analyzer.recordRead}). `at` is the identifier occurrence's
- * source offset.
+ * depth-from-top of the slot it reads, which holds that variable's value.
+ * `kind` is `'dup'` (a copy read, reliable) or `'swap'` (a last-use move,
+ * subordinate: viaIR's coarse attribution can tag a stack-shuffle SWAP with an
+ * unrelated variable's Identifier, so a SWAP anchor never overrides or
+ * invalidates a DUP one; see {@link Analyzer.recordRead}). `at` is the
+ * identifier occurrence's source offset.
  */
 interface ReadAnchor {
   declId: number;
@@ -335,12 +327,12 @@ class Analyzer {
   /** Value number (origin) → the variable declId a DUP read proved it to hold. */
   private readonly originToDecl = new Map<number, number>();
   /**
-   * Value number (origin) → declId claimed by a SUBORDINATE `SWAPn` last-use read,
-   * for origins no `DUPn` anchor claims. SWAP attribution is coarse under viaIR (a
-   * stack-shuffle SWAP can carry an unrelated Identifier), so these are consulted
-   * only AFTER {@link originToDecl} and never mark a DUP-claimed origin ambiguous —
-   * they add value-type locals whose ONLY read is a move (e.g. a local passed as a
-   * call's final argument) without corrupting DUP-proved variables.
+   * Value number (origin) → declId claimed by a subordinate `SWAPn` last-use
+   * read, for origins no `DUPn` anchor claims. SWAP attribution is coarse under
+   * viaIR (a stack-shuffle SWAP can carry an unrelated Identifier), so these are
+   * consulted only after {@link originToDecl} and never mark a DUP-claimed
+   * origin ambiguous. They locate value-type locals whose only read is a move
+   * (e.g. a local passed as a call's final argument).
    */
   private readonly swapOriginToDecl = new Map<number, number>();
   /** Origins a read tied to two different variables (ambiguous ⇒ never reported). */
@@ -351,10 +343,10 @@ class Analyzer {
   // viaIR-only anchors (empty on legacy code).
 
   /**
-   * Internal-call ENTRY pcs of a function → its parameters' entry depths. The
+   * Internal-call entry pcs of a function → its parameters' entry depths. The
    * Yul code transform enters a function with `…, returnLabel, paramN, …,
    * param1` (param 1 on top), so at the call target the slot at depth
-   * Σ(slots of params before i) provably holds param i. This is the only anchor a
+   * Σ(slots of params before i) holds param i. This is the only anchor a
    * single-use parameter gets under viaIR (it is consumed in place, never
    * DUP-read by an Identifier-tagged instruction).
    */
@@ -363,14 +355,15 @@ class Analyzer {
     {declId: number; depth: number}[]
   >();
   /**
-   * Entry pc of each INLINED function (a base constructor legacy codegen inlines
-   * into the derived constructor — see `Program.frameEntries`) → its parameters'
-   * depths and total slot count. The derived code pushes the arguments in order
-   * and falls through, so on arrival param i sits at depth Σ(slots of params
-   * after i). An argument is typically a DUP copy of a derived-constructor
-   * variable — the SAME value number, which a read of both variables would mark
-   * ambiguous — so the argument slots are given value numbers of their own on
-   * arrival ({@link inlinedArgOrigin}) and claimed by the calling convention.
+   * Entry pc of each inlined function (a base constructor legacy codegen
+   * inlines into the derived constructor; see `Program.frameEntries`) → its
+   * parameters' depths and total slot count. The derived code pushes the
+   * arguments in order and falls through, so on arrival param i sits at depth
+   * Σ(slots of params after i). An argument is typically a DUP copy of a
+   * derived-constructor variable, i.e. the same value number, which a read of
+   * both variables would mark ambiguous. So the argument slots get value
+   * numbers of their own on arrival ({@link inlinedArgOrigin}) and are claimed
+   * by the calling convention.
    */
   private readonly inlinedEntryParams = new Map<
     number,
@@ -381,16 +374,15 @@ class Analyzer {
    * (with an initializer) whose code falls through to that pc. On arrival the
    * initializer's value — the new local — is on top of the stack. The only anchor
    * a single-use local gets under viaIR (it is consumed where it sits). Recorded
-   * as a SUBORDINATE (swap-level) claim, so any DUP read wins and conflicting
+   * as a subordinate (swap-level) claim, so any DUP read wins and conflicting
    * claims cancel.
    */
   private readonly declEndClaims = new Map<number, number>();
   /**
-   * AST id of a declaration statement's initializer CALL → the variables it
+   * AST id of a declaration statement's initializer call → the variables it
    * declares, in order. At that call's return landing the top n slots are the
-   * returned values, the LAST one on top (verified on uniswap `_accountDelta`:
-   * `(previous, next) = currency.applyDelta(…)` ⇒ top = next, then previous) —
-   * the only anchor for tuple-destructured locals used once.
+   * returned values, the last one on top (`(a, b) = f()` ⇒ top = b, then a).
+   * This is the only anchor for tuple-destructured locals used once.
    */
   private readonly initCallDecls = new Map<
     number,
@@ -419,9 +411,7 @@ class Analyzer {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Queries
-  // -------------------------------------------------------------------------
+  // ## Queries
 
   stackLengthAt(pc: number): number | undefined {
     if (this.conflicted.has(pc)) return undefined;
@@ -432,7 +422,7 @@ class Analyzer {
     if (this.conflicted.has(pc)) return undefined;
     const stack = this.recorded.get(pc);
     if (stack === undefined) return undefined;
-    // viaIR: inside a statement that ASSIGNS the variable, a value computed by
+    // viaIR: inside a statement that assigns the variable, a value computed by
     // that statement is not the variable's value until the write executes (a
     // stop at `x = c ? a : b`'s join sees the new value on top already). Skip
     // origins born inside the current statement when it writes this variable.
@@ -453,11 +443,11 @@ class Analyzer {
       return undefined;
     };
     // Shallowest slot (closest to top) whose value was proved to be this
-    // variable. A DUP-proved (authoritative) slot ALWAYS wins over a SWAP-claimed
-    // one anywhere on the stack: a variable has one current value, and when the
-    // Yul scheduler has already DUP'd it to the top, an Identifier-tagged SWAP that
-    // merely moves it down would otherwise claim the UNRELATED slot it swapped
-    // with (observed on real viaIR code: `absTick`, `zeroForOne`, `target`).
+    // variable. A DUP-proved slot always wins over a SWAP-claimed one anywhere
+    // on the stack: a variable has one current value, and when the Yul
+    // scheduler has already DUP'd it to the top, an Identifier-tagged SWAP that
+    // merely moves it down would otherwise claim the unrelated slot it swapped
+    // with.
     return (
       shallowest(o => this.originToDecl.get(o) === declId) ??
       shallowest(
@@ -467,9 +457,7 @@ class Analyzer {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Static anchor collection
-  // -------------------------------------------------------------------------
+  // ## Static anchor collection
 
   /** All function param/local `VariableDeclaration` ids across the unit. */
   private collectVarDeclIds(): void {
@@ -477,8 +465,8 @@ class Analyzer {
       if (
         node.nodeType === 'VariableDeclaration' &&
         node.id >= 0 &&
-        // A param/local sits inside a FunctionDefinition; a state variable does
-        // not (it is a direct child of the ContractDefinition).
+        // A param/local sits inside a FunctionDefinition; a state variable is a
+        // direct child of the ContractDefinition.
         closestFunction(node) !== undefined
       ) {
         this.varDeclIds.add(node.id);
@@ -503,27 +491,25 @@ class Analyzer {
   }
 
   /**
-   * If `node` is an `Identifier` reading a known param/local, a read anchor for a
-   * `DUPn` OR `SWAPn` (`op`): the slot at depth `n` holds that variable in the
-   * INCOMING stack. For `DUPn` (`n = op − 0x80`) the value is COPIED to the top (a
-   * non-consuming read); for `SWAPn` (`n = op − 0x8f`) it is moved to the top to
-   * be consumed — solc emits this for a value-type local's LAST use under viaIR,
-   * which the DUP-only anchor missed. Either way the slot at depth `n` provably
-   * holds the variable at this pc, so anchoring its value number is sound (the
-   * value number identifies the value throughout its life, so the variable is
-   * then reported at every pc where that value is still live — including BEFORE
-   * this read).
+   * If `node` is an `Identifier` reading a known param/local, a read anchor for
+   * a `DUPn` or `SWAPn` (`op`): the slot at depth `n` holds that variable in the
+   * incoming stack. For `DUPn` (`n = op − 0x80`) the value is copied to the top
+   * (a non-consuming read); for `SWAPn` (`n = op − 0x8f`) it is moved to the top
+   * to be consumed, which solc emits for a value-type local's last use under
+   * viaIR. Either way the slot at depth `n` holds the variable at this pc, so
+   * its value number identifies the variable wherever that value is live,
+   * including before this read.
    */
   private readAnchor(node: AstNode, op: number): ReadAnchor | undefined {
     if (node.nodeType !== 'Identifier') return undefined;
     const declId = node.referencedDeclaration;
     if (declId === undefined || !this.varDeclIds.has(declId)) return undefined;
     const swap = isSwap(op);
-    // An identifier on the LEFT of an assignment is a WRITE, not a read: under
-    // viaIR `x = e` is a SWAPn moving e's value (the top) INTO x's position, so the
-    // slot at depth n is x's OLD position (a stale value, or an unrelated slot such
-    // as the return label when x is an unassigned return variable) — claiming it
-    // named the wrong value. The value moved there IS x's new value: claim the top.
+    // An identifier on the left of an assignment is a write, not a read: under
+    // viaIR `x = e` is a SWAPn moving e's value (the top) into x's position, so
+    // the slot at depth n is x's old position (a stale value, or an unrelated
+    // slot such as the return label when x is an unassigned return variable).
+    // The value moved there is x's new value, so claim the top instead.
     const parent = node.parent();
     if (parent?.nodeType === 'TupleExpression') {
       const grand = parent.parent();
@@ -549,15 +535,13 @@ class Analyzer {
   }
 
   /**
-   * A SWAP anchor ADJACENT to a DUP anchor on the same identifier occurrence is a
-   * stack shuffle around the real read (the DUP): e.g. viaIR reads `y` in
-   * `y < 0` as `SWAP1; DUP2`, where the SWAP only brings an unrelated slot (a
-   * return label) up. Its depth-n slot is not the variable — drop the anchor.
+   * A SWAP anchor in the same basic block as a DUP anchor on the same
+   * identifier occurrence is a stack shuffle around the real read (the DUP):
+   * e.g. viaIR reads `y` in `y < 0` as `SWAP1; DUP2`, and `x.f()` as
+   * `SWAPn; PUSH2 <ret>; DUP(n+2)`, where the SWAP only brings an unrelated slot
+   * (a return label) up. Its depth-n slot is not the variable, so drop it.
    */
   private dropShuffleSwaps(): void {
-    // One identifier OCCURRENCE is one read; when a DUP anchor for it exists in
-    // the same basic block (viaIR emits e.g. `SWAPn; PUSH2 <ret>; DUP(n+2)` for
-    // `x.f()`), that DUP is the read and the SWAP only shuffles.
     const {pcs, insns} = this.program;
     const opAt = (k: number): number => insns.get(pcs[k]!)!.op;
     for (let i = 0; i < pcs.length; i++) {
@@ -593,7 +577,7 @@ class Analyzer {
 
   /** See {@link paramEntryClaims}. */
   private collectParamEntryClaims(): void {
-    // An internal call is `PUSH <target>; JUMP [in]` into ANOTHER function.
+    // An internal call is `PUSH <target>; JUMP [in]` into another function.
     let prev: Insn | undefined;
     for (const pc of this.program.pcs) {
       const insn = this.program.insns.get(pc)!;
@@ -671,13 +655,13 @@ class Analyzer {
       if (stmt?.nodeType !== 'VariableDeclarationStatement') continue;
       const children = stmt.children();
       const decls = children.filter(c => c.nodeType === 'VariableDeclaration');
-      // Exactly one declared variable AND an initializer (a tuple destructuring
+      // Exactly one declared variable and an initializer (a tuple destructuring
       // leaves several values; a bare declaration may be materialised lazily).
       if (decls.length !== 1 || children.length !== 2) continue;
       const declId = decls[0]!.id;
       if (!this.varDeclIds.has(declId)) continue;
       const insn = this.program.insns.get(pc)!;
-      // Only a FALL-THROUGH end: a jump/terminator ends elsewhere.
+      // Only a fall-through end: a jump/terminator continues elsewhere.
       if (endsBlock(insn.op)) continue;
       const next = pc + insn.size;
       const nextInsn = this.program.insns.get(next);
@@ -692,12 +676,11 @@ class Analyzer {
     walkAllSources(this.cu, n => {
       if (n.nodeType !== 'VariableDeclarationStatement') return;
       const init = n.children().find(c => c.nodeType === 'FunctionCall');
-      // `assignments` lists the tuple components IN ORDER, `null` for a
-      // skipped one (`(a, b, , ) = f()`) — every returned value occupies a
-      // slot, so gaps must be counted (a gap-blind mapping shifted names by
-      // one onto the skipped values: uniswap `(sqrtPriceX96, tick, , ) = getSlot0`).
+      // `assignments` lists the tuple components in order, `null` for a
+      // skipped one (`(a, b, , ) = f()`). Every returned value occupies a slot,
+      // so gaps must be counted or names shift onto the skipped values.
       const slots = n.assignments();
-      // The called function (`f(…)` / `x.f(…)`): only a jump INTO that very
+      // The called function (`f(…)` / `x.f(…)`): only a jump into that very
       // function returns the initializer's values. Other internal jumps
       // attributed to the call node (the ABI encode/decode helpers of an
       // external call) return pointers, not the declared values.
@@ -719,7 +702,7 @@ class Analyzer {
   }
 
   /**
-   * Declarations a statement WRITES: an assignment's LHS identifiers, or the
+   * Declarations a statement writes: an assignment's LHS identifiers, or the
    * variables a declaration statement declares.
    */
   private statementWrites(stmtId: number): Set<number> {
@@ -753,7 +736,7 @@ class Analyzer {
           for (const k of kids) if (k !== rhs) lhs(k);
         }
         for (const c of n.children()) {
-          // Only the statement's OWN expressions, not nested statements (bodies).
+          // Only the statement's own expressions, not nested statement bodies.
           if (!isNestedBody(c.nodeType)) visit(c);
         }
       };
@@ -764,9 +747,7 @@ class Analyzer {
     return w;
   }
 
-  // -------------------------------------------------------------------------
-  // Intra-function CFG worklist (least-fixpoint with origin intersection)
-  // -------------------------------------------------------------------------
+  // ## Intra-function CFG worklist (least-fixpoint with origin intersection)
 
   private propagateFunction(entryPc: number): void {
     const fnId = this.program.insns.get(entryPc)?.frameFnId;
@@ -829,12 +810,12 @@ class Analyzer {
     if (prev === undefined) {
       cur = cloneStack(incoming);
     } else if (prev.length !== incoming.length) {
-      // Two conflicting heights reach this pc — the frame-relative model can't
-      // assign a single depth; report unknown rather than guess.
+      // Two conflicting heights reach this pc: no single depth can be assigned,
+      // so report unknown rather than guess.
       this.conflicted.add(pc);
       return undefined;
     } else if (preds.size <= 1) {
-      // A single-predecessor pc is NOT a join: its state is exactly its
+      // A single-predecessor pc is not a join: its state is exactly its
       // predecessor's (refined on a revisit), so take it over. Merging here
       // would mint a fresh φ at every instruction downstream of a revisited
       // join, changing a value's identity per instruction and confining a read's
@@ -855,8 +836,8 @@ class Analyzer {
     const originAt = (depth: number): number | undefined =>
       cur[cur.length - 1 - depth]?.origin;
 
-    // viaIR function entry: the parameter slots are proved by the calling
-    // convention — authoritative, like a DUP read.
+    // Function entry: the parameter slots are fixed by the calling convention,
+    // so they are as authoritative as a DUP read.
     for (const {declId, depth} of [
       ...(this.paramEntryClaims.get(insn.pc) ?? []),
       ...(this.inlinedEntryParams.get(insn.pc)?.claims ?? []),
@@ -871,14 +852,14 @@ class Analyzer {
       if (origin !== undefined) this.recordRead(origin, declared, 'swap');
     }
 
-    // Read anchor: the read slot's VALUE is proved to be `declId` — record that
-    // value number so the variable is reported wherever this value lives.
+    // Read anchor: the read slot's value is `declId`; record its value number
+    // so the variable is reported wherever this value lives.
     const anchor = this.anchors.get(insn.pc);
     if (anchor !== undefined) {
       const {declId, depth, kind} = anchor;
       const idx = cur.length - 1 - depth;
       const origin = idx >= 0 ? cur[idx]!.origin : undefined;
-      // A SWAP read is only believable when the variable's value is not ALREADY
+      // A SWAP read is only believable when the variable's value is not already
       // known to sit elsewhere on this stack (then the SWAP just moves it).
       const liveElsewhere =
         kind === 'swap' &&
@@ -895,8 +876,8 @@ class Analyzer {
   }
 
   /**
-   * A declaration's initializer call: its returned values ARE the declared
-   * variables (last one on top) — see {@link initCallDecls}.
+   * A declaration's initializer call: its returned values are the declared
+   * variables (last one on top); see {@link initCallDecls}.
    */
   private readonly claimInitializerResults: OnCallResume<Stack> = (
     insn,
@@ -922,12 +903,12 @@ class Analyzer {
 
   /**
    * Tie a value number to the variable a read proved it to hold, guarding
-   * conflicts. `DUPn` reads (`kind: 'dup'`) are AUTHORITATIVE: they populate
-   * {@link originToDecl} and, on setting an origin, drop any subordinate SWAP claim
-   * for it. `SWAPn` reads (`kind: 'swap'`) are SUBORDINATE: they fill only origins
-   * no DUP has claimed (a DUP-claimed origin's mismatched SWAP is ignored, NOT
-   * marked ambiguous — viaIR mis-attributes stack-shuffle SWAPs), and two SWAP
-   * reads disagreeing on one origin drop it from the SWAP map.
+   * conflicts. `DUPn` reads (`kind: 'dup'`) are authoritative: they populate
+   * {@link originToDecl} and drop any subordinate SWAP claim for the origin.
+   * `SWAPn` reads (`kind: 'swap'`) are subordinate: they fill only origins no
+   * DUP has claimed (a mismatched SWAP on a DUP-claimed origin is ignored, not
+   * marked ambiguous, since viaIR mis-attributes stack-shuffle SWAPs), and two
+   * SWAP reads disagreeing on one origin drop it from the SWAP map.
    */
   private recordRead(origin: number, declId: number, kind: ReadKind): void {
     if (kind === 'dup') {
@@ -942,7 +923,7 @@ class Analyzer {
       }
       return;
     }
-    // SWAP: subordinate. Defer entirely to an existing DUP claim.
+    // SWAP: defer entirely to an existing DUP claim.
     if (this.originToDecl.has(origin) || this.swapOriginAmbiguous.has(origin)) {
       return;
     }
@@ -956,7 +937,7 @@ class Analyzer {
   }
 }
 
-/** Child node types that are nested statement bodies, not a statement's own expressions. */
+/** Whether a child node is a nested statement body, not an own expression. */
 function isNestedBody(nodeType: string): boolean {
   return (
     nodeType === 'Block' ||

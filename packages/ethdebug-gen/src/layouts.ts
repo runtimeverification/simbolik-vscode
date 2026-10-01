@@ -1,10 +1,9 @@
 /**
- * Reference-type LAYOUTS: the shapes the producer attaches to a variable whose
- * value is not a single stack/storage word, plus the builders for the MEMORY
+ * Reference-type layouts: the shapes the producer attaches to a variable whose
+ * value is not a single stack/storage word, plus the builders for the memory
  * layouts reached through a stack slot. Every layout carries concrete ethdebug
- * pointers; the producer supplies only the LAYOUT and `@ethdebug/pointers`
- * resolves the `$read`/`$sum`/`$product` expressions against the machine state
- * at dereference.
+ * pointers; `@ethdebug/pointers` resolves their `$read`/`$sum`/`$product`
+ * expressions against the machine state at dereference.
  */
 import type {Pointer} from '@ethdebug/pointers';
 import type {CompilationUnit} from '@simbolik/solc';
@@ -13,7 +12,7 @@ import {describeValueTypeString} from './valueTypes.js';
 
 /**
  * One value-type member of a reference-type variable (a memory struct),
- * with a CONCRETE ethdebug pointer that resolves the member's bytes at
+ * with a concrete ethdebug pointer that resolves the member's bytes at
  * dereference time (a `Group` whose value region reads the struct's runtime
  * memory offset out of the parent's stack slot).
  */
@@ -21,7 +20,7 @@ export interface StructMember {
   name: string;
   /** Solidity type string for display, e.g. `uint256`. */
   typeLabel: string;
-  /** solc storage-style type id, e.g. `t_uint256` (empty for reference members). */
+  /** solc storage-style type id, e.g. `t_uint256` (empty for references). */
   solcType: string;
   numberOfBytes: number;
   /** Concrete member pointer, ready to dereference (value-type members only). */
@@ -29,16 +28,16 @@ export interface StructMember {
 }
 
 /**
- * For a DYNAMIC MEMORY ARRAY variable, its element layout. The array's
- * stack slot holds the array's memory offset; `pointer` is a dereferenceable
- * `List` (wrapped in a `Group` that first names `base` = the stack slot and
- * `len` = the memory word at `base` = the element count) whose per-element
- * regions are NAMED `'element'` (index order). The consumer collects the values
- * via `regions.named('element')`. The variable itself stays `isValueType:false`
- * with no top-level pointer and no `members`.
+ * For a memory array variable, its element layout. The array's stack slot
+ * holds the array's memory offset; `pointer` is a dereferenceable `List`
+ * (wrapped in a `Group` that first names `base` = the stack slot and, for a
+ * dynamic array, `len` = the memory word at `base` = the element count) whose
+ * per-element regions are named `'element'` (index order). The consumer
+ * collects the values via `regions.named('element')`. The variable itself stays
+ * `isValueType:false` with no top-level pointer and no `members`.
  */
 export interface ArrayLayout {
-  /** Concrete `List` pointer, ready to dereference (element regions = `'element'`). */
+  /** Concrete pointer, ready to dereference (element regions = `'element'`). */
   pointer: Pointer;
   /** solc storage-style element type id, e.g. `t_uint256`. */
   elementSolcType: string;
@@ -47,22 +46,22 @@ export interface ArrayLayout {
   /** Element size in bytes (1..32). */
   elementNumberOfBytes: number;
   /**
-   * For an array of DYNAMIC-BYTES elements (`bytes[]` / `string[]`), each
-   * `'element'` region is NOT a value word but the element's MEMORY OFFSET; the
+   * For an array of dynamic-bytes elements (`bytes[]` / `string[]`), each
+   * `'element'` region is not a value word but the element's memory offset; the
    * consumer dereferences it as a raw byte string via
    * {@link bytesLayoutAtMemoryOffset} (`isString` selects UTF-8 vs `0x…`).
-   * Absent for value-type element arrays (the `'element'` word IS the value).
+   * Absent for value-type element arrays (the `'element'` word is the value).
    */
   elementBytes?: {isString: boolean};
 }
 
 /**
- * For a MEMORY STRING / BYTES variable, its raw-byte layout. The stack
- * slot holds the memory offset; `pointer` is a `Group` (named `base` = the stack
- * slot, `len` = the memory word at `base` = the byte length) whose FINAL region
+ * For a memory string / bytes variable, its raw-byte layout. The stack slot
+ * holds the memory offset; `pointer` is a `Group` (named `base` = the stack
+ * slot, `len` = the memory word at `base` = the byte length) whose final region
  * is the raw byte string (dynamic `length: {$read:'len'}` at `base+32`). The
- * consumer reads the final region as bytes and decodes (string → UTF-8, bytes →
- * hex). `isString` is true for `string`, false for `bytes`.
+ * consumer reads the final region as bytes and decodes it (string → UTF-8,
+ * bytes → hex).
  */
 export interface BytesLayout {
   /** Concrete `Group` pointer whose final region is the raw bytes. */
@@ -72,53 +71,50 @@ export interface BytesLayout {
 }
 
 /**
- * For a dynamic-`bytes`-encoded STORAGE `string`/`bytes` var, the layout
- * facts the session parity-selects on. `flagPointer` addresses the inline/flag word
- * (the base slot's full 32-byte word: HIGH bytes = inline short data, LOW byte =
- * length*2 with the parity bit); `longBaseSlot` is the CONCRETE `keccak256(pad32(
- * slot))` base for the long-form consecutive data words (static → computed at gen
- * time, no runtime `$keccak256`); `isString` selects UTF-8 vs `0x…` rendering.
+ * For a storage `string`/`bytes` variable, the layout facts a consumer needs to
+ * pick the short or long encoding by parity. `flagPointer` addresses the base
+ * slot's full 32-byte word (high bytes = inline short data, low byte =
+ * length*2 with the parity bit); `longBaseSlot` is the `keccak256(pad32(slot))`
+ * base of the long-form data words, computed statically (no runtime
+ * `$keccak256`); `isString` selects UTF-8 vs `0x…` rendering.
  */
 export interface BytesStorageLayout {
-  /** Storage pointer at the inline/flag word (the base slot's full 32-byte word). */
+  /** Storage pointer at the base slot's full 32-byte word. */
   flagPointer: Pointer;
-  /** CONCRETE keccak256(pad32(slot)) base slot for the long-form data words. */
+  /** keccak256(pad32(slot)): the base slot of the long-form data words. */
   longBaseSlot: string;
   /** True for `string` (UTF-8 decode); false for `bytes` (hex). */
   isString: boolean;
 }
 
-/** For a `mapping` storage var, its STATIC layout facts (see `EthdebugStorageVariable`). */
+/** For a `mapping` storage variable, its static layout facts. */
 export interface MappingLayout {
   baseSlot: number;
   keyType: string;
   valueType: string;
 }
 
-// ---------------------------------------------------------------------------
-// Memory layouts behind a stack slot
-// ---------------------------------------------------------------------------
+// ## Memory layouts behind a stack slot
 
-/** The stack slot at `depth` NAMED `base`: its 32-byte value is a memory offset. */
+/** The stack slot at `depth`, named `base`; its value is a memory offset. */
 function stackBase(depth: number): Pointer.Region {
   return {name: 'base', location: 'stack', slot: depth, offset: 0, length: 32};
 }
 
-/** The memory word NAMED `len` at `base` (a length / element count). */
+/** The memory word at `base`, named `len` (a length / element count). */
 function lenAtBase(): Pointer.Region {
   return {name: 'len', location: 'memory', offset: {$read: 'base'}, length: 32};
 }
 
 /**
- * The reference-type layout of a MEMORY variable of structural type `solcType`
+ * The reference-type layout of a memory variable of structural type `solcType`
  * whose memory offset sits in the stack slot at `depth` (a memory struct →
  * `members`; a memory array → `array`; a memory string/bytes → `bytes`), or
- * `{}` when the type has no supported layout. Only MEMORY types (the solc
+ * `{}` when the type has no supported layout. Only memory types (the solc
  * typeIdentifier carries the data location, e.g.
- * `t_struct$_Point_$10_memory_ptr`) are expanded: a STORAGE or CALLDATA
- * reference holds a storage-slot / calldata offset in its stack slot — NOT a
- * memory offset — so memory pointers would decode WRONG values from it. Those
- * are left bare (listed, no layout) rather than mis-decoded.
+ * `t_struct$_Point_$10_memory_ptr`) are expanded: a storage or calldata
+ * reference holds a storage slot / calldata offset in its stack slot, not a
+ * memory offset, so it is left without a layout rather than mis-decoded.
  */
 export function memoryReferenceLayout(
   cu: CompilationUnit,
@@ -142,17 +138,16 @@ export function memoryReferenceLayout(
 }
 
 /**
- * The value-type members of a MEMORY struct, each with a concrete ethdebug
- * pointer. The struct's memory offset lives in the local's stack slot at `depth`;
- * member k (a value type of `N` bytes) sits at memory word k of the struct. Each
- * member pointer is a `Group`:
- *   - a NAMED base region over the stack slot (`{name:'base', slot: depth, …}`),
- *     whose 32-byte value IS the struct's runtime memory offset;
- *   - a memory value region at `{$sum:[{$read:'base'}, k*32 + inWord]}` of length
- *     `N`, where `inWord` right-aligns non-`bytesN` value types within the word
- *     (`32 − N`; `bytesN` are left-aligned so `inWord = 0`).
- * Reference-type members (out of scope) are listed without a pointer rather than
- * crashing.
+ * The value-type members of a memory struct, each with a concrete ethdebug
+ * pointer. The struct's memory offset lives in the local's stack slot at
+ * `depth`; member k (a value type of `N` bytes) sits at memory word k of the
+ * struct. Each member pointer is a `Group`:
+ *   - a `base` region over the stack slot, whose value is the struct's memory
+ *     offset;
+ *   - a memory value region at `{$sum:[{$read:'base'}, k*32 + inWord]}` of
+ *     length `N`, where `inWord` right-aligns non-`bytesN` value types within
+ *     the word (`32 − N`; `bytesN` are left-aligned so `inWord = 0`).
+ * Reference-type members are listed without a pointer.
  */
 function structMemberPointers(
   cu: CompilationUnit,
@@ -162,7 +157,7 @@ function structMemberPointers(
   return cu.structMembers(structSolcType).map((m, k) => {
     const desc = describeValueTypeString(m.typeString);
     if (desc === undefined) {
-      // Reference-type member (nested struct / array / string): out of scope.
+      // Reference-type member (nested struct / array / string): unsupported.
       return {
         name: m.name,
         typeLabel: m.typeString,
@@ -192,29 +187,29 @@ function structMemberPointers(
 }
 
 /**
- * The `List` layout of a DYNAMIC memory array of VALUE-TYPE elements.
- * The array's memory offset lives in the local's stack slot at `depth`; the
- * element count is the memory word at that offset, and element `i` (a value type
- * of one word) sits at `offset + 32 + i*32`. The pointer is a `Group`:
- *   - `base` — the stack slot (its 32-byte value IS the array's memory offset);
- *   - `len` — the memory word at `base` (the element count);
- *   - a `List` of `count:{$read:'len'}` regions NAMED `'element'`, each a 32-byte
- *     memory word at `{$sum:[{$read:'base'}, 32, {$product:['i', 32]}]}`.
- * Returns `undefined` for a non-value-type element (out of scope), except
- * dynamic-bytes elements (`bytes[]`/`string[]`), whose element words are memory
- * offsets (see {@link ArrayLayout.elementBytes}).
+ * The `List` layout of a memory array of value-type elements. The array's
+ * memory offset lives in the local's stack slot at `depth`. For a dynamic
+ * array the element count is the memory word at that offset, and element `i`
+ * sits at `offset + 32 + i*32`. The pointer is a `Group`:
+ *   - `base`: the stack slot (its value is the array's memory offset);
+ *   - `len`: the memory word at `base` (the element count);
+ *   - a `List` of `count:{$read:'len'}` regions named `'element'`, each a
+ *     32-byte memory word at `{$sum:[{$read:'base'}, 32, {$product:['i', 32]}]}`.
+ * Returns `undefined` for a non-value-type element, except dynamic-bytes
+ * elements (`bytes[]`/`string[]`), whose element words are memory offsets (see
+ * {@link ArrayLayout.elementBytes}).
  *
- * FIXED-size arrays (`t_array$_…_$<N>_memory_ptr`) are also handled here: a fixed
- * memory `T[N]` is inline with NO length word — the stack slot points DIRECTLY at
- * element 0, so element `i` sits at `base + i*32` and the count is the static `N`.
- * The pointer drops the `len` region and the leading `+32` of the dynamic form.
+ * A fixed-size memory `T[N]` (`t_array$_…_$<N>_memory_ptr`) has no length
+ * word: the stack slot points directly at element 0, so element `i` sits at
+ * `base + i*32` and the count is the static `N`. Its pointer drops the `len`
+ * region and the leading `+32`.
  */
 function arrayLayout(
   arraySolcType: string,
   arrayTypeLabel: string,
   depth: number
 ): ArrayLayout | undefined {
-  // Dynamic OR fixed memory arrays: `t_array$_<elemId>_$(dyn|<N>)_memory_ptr`.
+  // Dynamic or fixed memory arrays: `t_array$_<elemId>_$(dyn|<N>)_memory_ptr`.
   const m = /^t_array\$_(.+)_\$(dyn|\d+)_memory_ptr$/.exec(arraySolcType);
   if (m === null) return undefined;
   const elementId = m[1]!;
@@ -226,14 +221,15 @@ function arrayLayout(
     .replace(/\[\d*\]\s*(memory|calldata|storage)?\s*$/, '')
     .trim();
   const desc = describeValueTypeString(elementTypeLabel);
-  // A DYNAMIC-BYTES element (`bytes[]` / `string[]`): each element slot holds a
-  // memory OFFSET to the element's bytes, so the value describer returns nothing.
-  // Other reference-type elements (nested structs/arrays) stay out of scope.
+  // A dynamic-bytes element (`bytes[]` / `string[]`): each element slot holds a
+  // memory offset to the element's bytes, so the value describer returns
+  // nothing. Other reference-type elements (nested structs/arrays) are
+  // unsupported.
   const bytesElement = /^t_(bytes|string)_memory_ptr$/.exec(elementId);
   if (desc === undefined && bytesElement === null) return undefined;
 
   // The element `List` reads each element's 32-byte word. For value-type
-  // elements that word IS the value; for bytes/string elements it is the memory
+  // elements that word is the value; for bytes/string elements it is the memory
   // offset the consumer dereferences.
   const elements = (
     count: Pointer.Expression,
@@ -289,10 +285,10 @@ function arrayLayout(
  * in the local's stack slot at `depth`; the byte length is the memory word at
  * that offset, and the raw bytes follow at `offset + 32`. The pointer is a
  * `Group`:
- *   - `base` — the stack slot (the memory offset);
- *   - `len` — the memory word at `base` (the byte length);
+ *   - `base`: the stack slot (the memory offset);
+ *   - `len`: the memory word at `base` (the byte length);
  *   - a raw byte region of dynamic `length:{$read:'len'}` at `{$sum:[{$read:
- *     'base'}, 32]}` — the FINAL region, which the consumer reads as bytes.
+ *     'base'}, 32]}`: the final region, which the consumer reads as bytes.
  */
 function bytesLayout(isString: boolean, depth: number): BytesLayout {
   const pointer: Pointer = {
@@ -310,12 +306,12 @@ function bytesLayout(isString: boolean, depth: number): BytesLayout {
 }
 
 /**
- * The raw-byte layout of a memory string/bytes whose data lives at a KNOWN
- * absolute memory offset (rather than behind a stack slot). Used for each element
- * of a `bytes[]`/`string[]`: the array's element word IS the element's memory
- * offset, resolved at render time, so this takes the concrete offset directly.
- * The byte length is the memory word at `memOffset`; the raw bytes follow at
- * `memOffset + 32` (the FINAL region, read as bytes by the consumer).
+ * The raw-byte layout of a memory string/bytes whose data lives at a known
+ * absolute memory offset (rather than behind a stack slot). Used for each
+ * element of a `bytes[]`/`string[]`: the array's element word is the element's
+ * memory offset, resolved at render time, so this takes the concrete offset
+ * directly. The byte length is the memory word at `memOffset`; the raw bytes
+ * follow at `memOffset + 32` (the final region, read as bytes).
  */
 export function bytesLayoutAtMemoryOffset(
   memOffset: number,

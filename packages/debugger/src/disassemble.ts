@@ -20,14 +20,14 @@ export interface EvmInstruction {
 
 /**
  * DAP addresses/memoryReferences are single hex numbers, but an EVM `pc` is only
- * unique WITHIN one contract — AND a contract has TWO distinct code images with
- * independent pc spaces: init (constructor) code and runtime code. We pack all
- * three into one address: an init-code flag in the high bit, the code address in
- * the middle, the pc in the low 32 (bytecode ≤ 24KB ≪ 2^32). This lets the
- * `disassemble` handler recover WHICH image to disassemble (init vs runtime) and
- * where to anchor from the reference VSCode echoes back, and keeps instruction
- * addresses globally ordered. A legacy reference without the init bit decodes as
- * runtime, so old encodings stay valid.
+ * unique within one contract — and a contract has two distinct code images
+ * with independent pc spaces: init (constructor) code and runtime code. All
+ * three are packed into one address: an init-code flag in the high bit, the
+ * code address in the middle, the pc in the low 32 (bytecode ≤ 24KB ≪ 2^32).
+ * This lets the `disassemble` handler recover which image to disassemble (init
+ * vs runtime) and where to anchor from the reference VSCode echoes back, and
+ * keeps instruction addresses globally ordered. A reference without the init
+ * bit decodes as runtime.
  */
 const PC_BITS = 32n;
 const PC_MASK = (1n << PC_BITS) - 1n;

@@ -7,11 +7,11 @@
  *    (source-map entry → innermost node → `closestFunction`), giving each
  *    function's body-entry instruction (lowest attributed pc).
  *  - {@link StackFlow}: the successor relation of one instruction over an
- *    ABSTRACT stack (resolving JUMP/JUMPI targets from known PUSH constants —
- *    solc emits `PUSH2 <tag> … JUMP`), with internal calls modelled as a NET
- *    stack effect (never followed into): a JUMP whose resolved target is another
- *    function/helper is a call, so the caller resumes at its return tag with the
- *    callee's analyzed net effect.
+ *    abstract stack (resolving JUMP/JUMPI targets from known PUSH constants,
+ *    since solc emits `PUSH2 <tag> … JUMP`), with internal calls modelled as a
+ *    net stack effect (never followed into): a JUMP whose resolved target is
+ *    another function/helper is a call, so the caller resumes at its return
+ *    tag with the callee's analyzed net effect.
  *
  * The analyzers differ only in what an abstract stack slot carries (a known
  * constant; or a constant plus a value number), captured by {@link StackDomain},
@@ -55,25 +55,25 @@ export interface Insn {
   /** Enclosing `FunctionDefinition` AST id, or `undefined` (helper/dispatcher). */
   fnId: number | undefined;
   /**
-   * The function whose stack FRAME the instruction executes in: `fnId`, except
-   * in a base-constructor body that legacy codegen INLINED into the derived
+   * The function whose stack frame the instruction executes in: `fnId`, except
+   * in a base-constructor body that legacy codegen inlined into the derived
    * constructor's init code (see {@link Program.frameEntries}).
    */
   frameFnId: number | undefined;
   /**
    * For a `JUMP [in]`: how many values the call returns (from the call's AST
-   * type) — used when the target is DYNAMIC (a call through a function pointer).
+   * type). Used when the target is dynamic (a call through a function pointer).
    */
   callRets?: number;
 }
 
 /**
- * Which of a contract's two code images: RUNTIME (deployed) code, or INIT
+ * Which of a contract's two code images: runtime (deployed) code, or init
  * (creation/constructor) code, which has its own bytecode and source map.
  */
 export type CodeKind = 'runtime' | 'init';
 
-/** The bytecode + source map of one of a contract's code images. */
+/** The bytecode and source map of one of a contract's code images. */
 export function codeImage(
   contract: Contract,
   kind: CodeKind
@@ -86,7 +86,7 @@ export function codeImage(
       };
 }
 
-/** The decoded code (one image — see {@link CodeKind}) of one contract. */
+/** The decoded code of one contract's code image (see {@link CodeKind}). */
 export class Program {
   readonly insns = new Map<number, Insn>();
   /** Every instruction-start pc, in increasing order. */
@@ -95,9 +95,9 @@ export class Program {
   /** Function id → its body-entry pc (lowest attributed pc). */
   readonly entryByFn = new Map<number, number>();
   /**
-   * The body-entry pc of each function that owns its own stack frame — every
-   * function but an INLINED one. Legacy codegen inlines a base constructor into
-   * the derived constructor's init code: its body is entered by FALLING THROUGH
+   * The body-entry pc of each function that owns its own stack frame: every
+   * function but an inlined one. Legacy codegen inlines a base constructor into
+   * the derived constructor's init code: its body is entered by falling through
    * from the derived prologue (viaIR calls it by JUMP instead), so it shares the
    * derived frame and heights continue across it. Analyzing it as a separate
    * frame from height 0 would conflict with the fall-through flow at every pc
@@ -193,9 +193,9 @@ export class Program {
   /**
    * Is this JUMP a call into another subroutine (vs an intra-function jump)?
    * A call is a solc `PUSH <returnTag> … PUSH <funcTag> JUMP` marked `jump: 'i'`
-   * whose target is NOT the current function's frame. The extra frame guard is
-   * needed because an external function's ABI wrapper enters its OWN body via a
-   * `jump: 'i'` (same function id) — that must stay an internal jump.
+   * whose target is not the current function's frame. The frame guard is
+   * needed because an external function's ABI wrapper enters its own body via
+   * a `jump: 'i'` (same function id), which must stay an internal jump.
    */
   isCall(insn: Insn, fnId: number | undefined, target: number): boolean {
     if (insn.jump !== 'i') return false;
@@ -207,23 +207,21 @@ export class Program {
 
   /**
    * Depth (0-based from the top) of the return-tag constant on an abstract
-   * stack of `length` slots at a call: the topmost known constant BELOW the
+   * stack of `length` slots at a call: the topmost known constant below the
    * funcTag whose value is a JUMPDEST. solc pushes the return tag before the
-   * args, so it sits just below `argSlots` argument slots; scanning down from the
-   * top finds it.
+   * args, so it sits just below the argument slots.
    *
-   * When the call site is inside a `FunctionDefinition` (`ownerFnId` defined:
-   * its frame's function id), the return tag MUST be a JUMPDEST of that same
-   * frame (including a base constructor inlined into it) — the point control
-   * resumes at is, by construction, the caller's own code. This guard is
-   * essential: an argument value can coincide with an unrelated JUMPDEST pc
-   * (e.g. `0x40`), and only the same-function filter distinguishes it from the
-   * genuine return tag. For helper subroutines (`ownerFnId` undefined, no AST
-   * function) we fall back to the topmost JUMPDEST-valued constant.
+   * When the call site is inside a `FunctionDefinition` (`ownerFnId` is its
+   * frame's function id), the return tag must be a JUMPDEST of that same frame
+   * (including a base constructor inlined into it), since control resumes in
+   * the caller's own code. An argument value can coincide with an unrelated
+   * JUMPDEST pc (e.g. `0x40`), and only this filter distinguishes it from the
+   * real return tag. For helper subroutines (`ownerFnId` undefined) the topmost
+   * JUMPDEST-valued constant is used.
    *
    * The filter alone is not enough once a frame spans several functions (an
    * inlined base constructor): a data constant can then equal a JUMPDEST of
-   * the same frame and sit ABOVE the real tag. solc places the return tag right
+   * the same frame and sit above the real tag. solc places the return tag right
    * after the call, so a candidate equal to the call's fall-through pc
    * (`fallthroughPc`) wins over the topmost one.
    */
@@ -287,13 +285,13 @@ export interface StackDomain<S> {
   constAt(stack: S, depth: number): number | undefined;
   /** Pop `n` slots in place. */
   pop(stack: S, n: number): void;
-  /** Push, in place, the `count` results of an internal call resuming at `returnPc`. */
+  /** Push the `count` results of an internal call resuming at `returnPc`. */
   pushCallResults(stack: S, returnPc: number, count: number): void;
   /** Apply a straight-line (non-JUMP/JUMPI) instruction in place. */
   apply(stack: S, insn: Insn): void;
 }
 
-/** One successor state of an instruction: next pc, its arrival stack, height change. */
+/** One successor of an instruction: next pc, arrival stack, height change. */
 export interface Successor<S> {
   pc: number;
   stack: S;
@@ -311,7 +309,7 @@ export type OnCallResume<S> = (
   returnSlots: number
 ) => void;
 
-/** The successor relation + memoized subroutine net effects over one domain. */
+/** The successor relation and memoized subroutine net effects over a domain. */
 export class StackFlow<S> {
   private readonly netCache = new Map<number, number | undefined>();
   private readonly netInProgress = new Set<number>();
@@ -346,9 +344,9 @@ export class StackFlow<S> {
     if (insn.op === JUMP) {
       const target = d.constAt(stack, 0);
       if (target === undefined || !this.program.jumpdests.has(target)) {
-        // Dynamic target: the caller-supplied return address ⇒ frame return —
-        // unless it is an INDIRECT CALL (`[in]`, through a function pointer):
-        // then resume at its return tag with the call's return values.
+        // Dynamic target: the caller-supplied return address, i.e. a frame
+        // return, unless it is an indirect call (`[in]`, through a function
+        // pointer): then resume at its return tag with the call's results.
         const resume = this.indirectResume(stack, insn, fnId);
         return resume === undefined ? [] : [resume];
       }
@@ -417,7 +415,7 @@ export class StackFlow<S> {
     };
   }
 
-  /** The return tag of the call `insn` on `stack`: its depth and the pc it resumes at. */
+  /** The return tag of the call `insn` on `stack`: its depth and resume pc. */
   private returnSite(
     stack: S,
     insn: Insn,
@@ -436,7 +434,7 @@ export class StackFlow<S> {
   }
 
   /**
-   * Net stack effect a CALL to the subroutine at `entryPc` has on its caller
+   * Net stack effect a call to the subroutine at `entryPc` has on its caller
    * (`returnSlots − argSlots − 2`, the −2 covering the funcTag popped by the
    * jump-in and the returnTag popped by the jump-out).
    *
@@ -465,16 +463,16 @@ export class StackFlow<S> {
       const {pc, height, stack} = work.pop()!;
       const insn = this.program.insns.get(pc);
       if (insn === undefined) continue; // into push data / past the end.
-      if (visited.has(pc)) continue; // heights agree in valid solc output; first visit wins.
+      // Heights agree in valid solc output, so the first visit wins.
+      if (visited.has(pc)) continue;
       visited.add(pc);
 
       if (this.isDynamicJump(insn, stack) && insn.jump !== 'i') {
         // Terminal return to the caller-supplied address. An `[out]` jump is
-        // authoritative; an untagged one is a weaker candidate. (A dynamic `[in]`
-        // jump is an INDIRECT CALL — through a function pointer, e.g. forge-std's
-        // console `_sendLogPayload` — whose height is not the frame's return
-        // height: taking it skewed every caller by +4 per `bound()` on real
-        // uniswap tests. `successors` resumes it at its return tag instead.)
+        // authoritative; an untagged one is a weaker candidate. A dynamic `[in]`
+        // jump is an indirect call through a function pointer (e.g. forge-std's
+        // console `_sendLogPayload`), whose height is not the frame's return
+        // height; `successors` resumes it at its return tag instead.
         if (insn.jump === 'o') hretOut ??= height;
         else hret ??= height;
         continue;

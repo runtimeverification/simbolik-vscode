@@ -1,41 +1,29 @@
 /**
- * Sub-feature 4a — Cheatcode call DETECTION + DECODING (pure module).
+ * Cheatcode call detection and decoding (pure module `../src/cheatcodes.ts`).
  *
  * kontrol-node runs a Foundry/kontrol cheatcode (`vm.startPrank`, `vm.stopPrank`)
  * as a plain EVM CALL to the well-known cheatcode address
- * `0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`. This suite pins the behaviour of
- * the (not-yet-existing) pure module `../src/cheatcodes.ts`:
+ * `0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`.
  *   - `isCheatcodeCall(step)` — true iff `step.op ∈ {CALL,CALLCODE,DELEGATECALL,
- *     STATICCALL}` AND the CALL target (`stack[len-2]`, low 160 bits) is the
+ *     STATICCALL}` and the CALL target (`stack[len-2]`, low 160 bits) is the
  *     cheatcode address.
  *   - `decodeCheatcodeCall(step, machine)` — reads the CALL's calldata from EVM
  *     memory `[argsOff, argsOff+argsLen)`, pulls the 4-byte selector, maps it to a
- *     known cheatcode signature, and decodes value-type args.
+ *     known cheatcode signature, and decodes the args.
  *
- * These tests MUST FAIL today: `../src/cheatcodes.ts` does not exist yet, so the
- * import cannot resolve — the whole file fails at load (the RIGHT reason: feature
- * absent, not a typo/wrong API).
- *
- * ── CONFIRMED GROUND TRUTH (observed by running the fixture through the real
- *    lifting API — NOT copied blindly from the spec) ─────────────────────────
- *   Fixture: prank-run-trace.raw.json (kontrol, 933 steps), Prank.run(deadbeef…).
+ * Ground truth (prank-run-trace.raw.json, kontrol, 933 steps,
+ * Prank.run(deadbeef…)):
  *   - startPrank cheatcode CALL  → step 574: op=CALL, depth 1, argsOff=0xa0=160,
  *     argsLen=0x24=36. calldata = <selector><32-byte address>. next op ISZERO@1.
  *   - stopPrank  cheatcode CALL  → step 917: op=CALL, depth 1, argsOff=0xc0=192,
  *     argsLen=0x4=4. calldata = <selector> only. next op ISZERO@1.
- *   - Ordinary (NON-cheatcode) external CALLs at steps 205 and 610 (target
+ *   - Ordinary (non-cheatcode) external CALLs at steps 205 and 610 (target
  *     0xa16e02e8… = the deployed Target contract) → isCheatcodeCall false.
  *   - Plain non-CALL steps: step 573 = GAS, step 916 = GAS → false.
- *   - SELECTORS: the spec's `0xca669fa7` for startPrank is WRONG for this
- *     signature. solc's own methodIdentifiers AND an independent
- *     keccak256("startPrank(address)")[:4] BOTH give `0x06447d56`; the on-wire
- *     calldata in the trace's EVM memory begins with `06447d56` too. stopPrank()
- *     is `0x90c5013b` (matches spec). The startPrank address arg decodes to
- *     0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef.
- *
- * IMPLEMENTER NOTE: the selector→signature map MUST key startPrank(address) on
- * `0x06447d56` (canonical keccak selector), not `0xca669fa7`, or it will not
- * match this fixture.
+ *   - Selectors: startPrank(address) is `0x06447d56` (keccak256 of the
+ *     signature, solc's methodIdentifiers, and the on-wire calldata all agree),
+ *     not `0xca669fa7`. stopPrank() is `0x90c5013b`. The startPrank address arg
+ *     decodes to 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef.
  */
 import {describe, expect, it} from 'vitest';
 import {keccak256} from 'ethereum-cryptography/keccak';
@@ -43,21 +31,6 @@ import {bytesToHex, utf8ToBytes} from 'ethereum-cryptography/utils';
 
 import {StateCursor, type Step} from '@simbolik/lifting';
 
-// The proposed pure module — does NOT exist yet (this import is why the suite
-// fails today). API surface the implementer should build to:
-//   export const CHEATCODE_ADDRESS: string;            // lowercased 0x form
-//   export function isCheatcodeCall(step: Step): boolean;
-//   export interface DecodedCheatcode {
-//     selector: string;      // '0x' + 8 hex, e.g. '0x06447d56'
-//     name: string;          // 'startPrank'
-//     signature: string;     // 'startPrank(address)'
-//     args: string[];        // full decoded value-type args (address → 0x+40 hex)
-//     display: string;       // human string, e.g. 'startPrank(0xdead…beef)'
-//   }
-//   export function decodeCheatcodeCall(
-//     step: Step,
-//     machine: {memory: string[]},   // a StateCursor.at(i) MachineState
-//   ): DecodedCheatcode | undefined;
 import {
   CHEATCODE_ADDRESS,
   isCheatcodeCall,
@@ -66,9 +39,9 @@ import {
 
 import {loadSteps} from './support/harness.js';
 
-// The kontrol trace carries DECIMAL bigints for some fields, so it MUST be
-// loaded through the lossless parser + normalizer (never JSON.parse); the
-// harness `loadSteps` does exactly that.
+// The kontrol trace carries decimal bigints for some fields, so it must be
+// loaded through the lossless parser + normalizer (`loadSteps`), never
+// `JSON.parse`.
 const PRANK_TRACE = 'prank-run-trace.raw.json';
 
 const START_PRANK_STEP = 574;
@@ -121,7 +94,7 @@ describe('cheatcodes — decodeCheatcodeCall', () => {
     expect(decoded!.args[0]!.toLowerCase()).toBe(
       '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
     );
-    // Display string is the implementer's to finalize — assert a robust substring.
+    // Assert only a robust substring of the display string.
     expect(decoded!.display).toContain('startPrank');
   });
 
@@ -141,13 +114,12 @@ describe('cheatcodes — decodeCheatcodeCall', () => {
   });
 });
 
-// ── REGRESSION (reviewer, 4a): value-type decoders + op offset branches the
-// prank fixture never exercises. Built as SYNTHETIC cheatcode CALL steps +
-// memory (memory is a full-32-byte-word `Hex[]` WITHOUT `0x`, as the node emits),
-// driven through the real `decodeCheatcodeCall`. These pin the classic
-// fixture-masked hazards: byte alignment (address low-20, bytesN high bytes),
-// bool truthiness, the STATICCALL (view-cheatcode) offset branch, and safety on
-// malformed/short input. They must not weaken the fixture-based tests above.
+// Value-type decoders and op offset branches the prank fixture never
+// exercises, built as synthetic cheatcode CALL steps + memory (memory is a
+// full-32-byte-word `Hex[]` without `0x`, as the node emits) and driven through
+// the real `decodeCheatcodeCall`. They pin byte alignment (address low-20,
+// bytesN high bytes), bool truthiness, the STATICCALL (view-cheatcode) offset
+// branch, and safety on malformed/short input.
 const CHEAT = '0x7109709ecfa91a80626ff3989d68f67f5b1dd12d';
 function selectorOf(sig: string): string {
   return '0x' + bytesToHex(keccak256(utf8ToBytes(sig))).slice(0, 8);
@@ -175,8 +147,8 @@ function word(hex: string): string {
   return hex.replace(/^0x/, '').padStart(64, '0');
 }
 
-describe('cheatcodes — value decoders (synthetic, regression)', () => {
-  it('address takes the LOW 20 bytes, masking dirty high bits', () => {
+describe('cheatcodes — value decoders (synthetic)', () => {
+  it('address takes the low 20 bytes, masking dirty high bits', () => {
     const arg =
       'ffffffffffffffffffffffff' + 'dead000000000000000000000000000000000001';
     const cd = selectorOf('prank(address)').slice(2) + arg;
@@ -203,7 +175,7 @@ describe('cheatcodes — value decoders (synthetic, regression)', () => {
     expect(d!.args[1]).toBe('0x' + val);
   });
 
-  it('bytesN takes the HIGH bytes, not the low bytes', () => {
+  it('bytesN takes the high bytes, not the low bytes', () => {
     const cd = selectorOf('expectRevert(bytes4)').slice(2) + '11223344' + '00'.repeat(28);
     const d = decodeCheatcodeCall(
       synthStep('CALL', callStack(cd.length / 2)),
@@ -243,7 +215,7 @@ describe('cheatcodes — value decoders (synthetic, regression)', () => {
   it('is safe on a short/empty stack and on a non-CALL op', () => {
     expect(isCheatcodeCall(synthStep('CALL', ['0x1']))).toBe(false);
     expect(isCheatcodeCall(synthStep('CALL', []))).toBe(false);
-    // A non-CALL op that merely has the cheatcode address on its stack is NOT a call.
+    // A non-CALL op that merely has the cheatcode address on its stack is not a call.
     expect(isCheatcodeCall(synthStep('PUSH20', ['0x0', CHEAT]))).toBe(false);
   });
 
@@ -254,18 +226,13 @@ describe('cheatcodes — value decoders (synthetic, regression)', () => {
   });
 });
 
-// ── Sub-feature 4c — DYNAMIC arg decoding (bytes / string) ───────────────────
+// ## Dynamic arg decoding (bytes / string)
 //
-// 4a decodes value-type args only and renders a dynamic/reference arg (`bytes`,
-// `string`) as a `<type>` PLACEHOLDER (confirmed: at step 191 of etchraw and step
-// 274 of etch, `decodeCheatcodeCall(...).args[1]` is the literal string
-// `'<bytes>'`). 4c must ABI-decode the dynamic arg: the arg's head word is an
-// OFFSET (relative to the arg-data region, i.e. the bytes AFTER the 4-byte
-// selector); at that offset sits a 32-byte length, then `length` data bytes
-// (right-padded to a word).
+// A dynamic arg's head word is an offset (relative to the arg-data region, i.e.
+// the bytes after the 4-byte selector); at that offset sits a 32-byte length,
+// then `length` data bytes (right-padded to a word).
 //
-// ── CONFIRMED GROUND TRUTH (re-derived by hand-decoding the fixtures' EVM memory
-//    through StateCursor — NOT copied blindly) ────────────────────────────────
+// Ground truth (hand-decoded from the fixtures' EVM memory via StateCursor):
 //   etch selector = keccak256('etch(address,bytes)')[:4] = 0xb4d6c782 (matches
 //   the on-wire calldata in both fixtures).
 //   • etchraw-run-trace.raw.json (420 steps): the vm.etch CALL is step 191
@@ -277,22 +244,20 @@ describe('cheatcodes — value decoders (synthetic, regression)', () => {
 //     Impl's runtime code, 469 bytes (938 hex chars), starting 0x60806040 and
 //     ending …0033 (dynamic offset 0x40=64, length 469).
 //   • No fixture exercises a `string` cheatcode arg, so string decoding is covered
-//     by a SYNTHETIC label(address,string) call — selector
+//     by a synthetic label(address,string) call — selector
 //     keccak256('label(address,string)')[:4] = 0xc657c718; "Alice" UTF-8 =
-//     0x416c696365 (5 bytes). Verified all three selectors + the Alice bytes.
+//     0x416c696365 (5 bytes).
 //
-// ── PROPOSED DECODER BEHAVIOR the implementer must build to (asserted below) ──
-//   • `bytes` arg → `args[i]` is the FULL decoded value as lowercase `'0x'`+hex
+// Decoder contract:
+//   • `bytes` arg → `args[i]` is the full decoded value as lowercase `'0x'`+hex
 //     (all bytes, exact), regardless of length.
-//   • `string` arg → `args[i]` is the raw decoded string, UNQUOTED (e.g. `Alice`).
-//   • `display`: a SHORT bytes value is shown in full (etchraw → the full
-//     `0x600160005260206000f3`); a LONG bytes value is truncated/summarized (the
-//     tests below accept either a byte-count `469` or the `0x6080…` prefix, so the
-//     exact truncation format stays the implementer's choice). A `string` value is
-//     QUOTED in `display` (e.g. `"Alice"`).
-//
-// These MUST FAIL today: `args[1]` is the `<bytes>`/`<string>` placeholder.
-describe('cheatcodes — dynamic arg decoding (4c: bytes / string)', () => {
+//   • `string` arg → `args[i]` is the raw decoded string, unquoted (e.g. `Alice`).
+//   • `display`: a short bytes value is shown in full (etchraw → the full
+//     `0x600160005260206000f3`); a long bytes value is truncated/summarized (the
+//     tests accept either a byte-count `469` or the `0x6080…` prefix, so the
+//     exact truncation format is not pinned). A `string` value is quoted in
+//     `display` (e.g. `"Alice"`).
+describe('cheatcodes — dynamic arg decoding (bytes / string)', () => {
   const ADDR_BEEF = '0x000000000000000000000000000000000000beef';
 
   it('bytes decode — etchraw step 191: short bytes decoded in full', () => {
@@ -306,7 +271,7 @@ describe('cheatcodes — dynamic arg decoding (4c: bytes / string)', () => {
     // arg[0] = the full etch target address (lowercased, 42 chars).
     expect(decoded!.args[0]!.toLowerCase()).toBe(ADDR_BEEF);
     expect(decoded!.args[0]!.length).toBe(42);
-    // arg[1] = the FULL 10-byte value, exact (today: the '<bytes>' placeholder).
+    // arg[1] = the full 10-byte value, exact (not a '<bytes>' placeholder).
     expect(decoded!.args[1]).toBe('0x600160005260206000f3');
     // A short bytes value is shown in full in the display.
     expect(decoded!.display).toContain('etch(');
@@ -322,13 +287,13 @@ describe('cheatcodes — dynamic arg decoding (4c: bytes / string)', () => {
     expect(decoded!.selector).toBe('0xb4d6c782');
     expect(decoded!.name).toBe('etch');
     expect(decoded!.args[0]!.toLowerCase()).toBe(ADDR_BEEF);
-    // arg[1] carries the REAL decoded value (full hex), not a placeholder or a
+    // arg[1] carries the real decoded value (full hex), not a placeholder or a
     // truncated string: 469 bytes → '0x' + 938 hex chars = 940 chars, starting
     // 0x60806040 and ending in the CBOR tail …0033.
     expect(decoded!.args[1]!.startsWith('0x60806040')).toBe(true);
     expect(decoded!.args[1]!.endsWith('0033')).toBe(true);
     expect(decoded!.args[1]!.length).toBe(940);
-    // A LONG bytes value is truncated/summarized in the display — accept either a
+    // A long bytes value is truncated/summarized in the display — accept either a
     // byte-count (469) or the 0x6080 prefix so the exact format stays open.
     expect(decoded!.display).toContain('etch(');
     expect(
@@ -357,19 +322,19 @@ describe('cheatcodes — dynamic arg decoding (4c: bytes / string)', () => {
     expect(decoded!.selector).toBe('0xc657c718');
     expect(decoded!.name).toBe('label');
     expect(decoded!.args[0]!.toLowerCase()).toBe('0x' + addr);
-    // args carry the RAW (unquoted) string; display QUOTES it.
+    // args carry the raw (unquoted) string; display quotes it.
     expect(decoded!.args[1]).toBe('Alice');
     expect(decoded!.display).toContain('label(');
     expect(decoded!.display).toContain('"Alice"');
   });
 });
 
-// ── REGRESSION (4c): dynamic-arg edge cases flagged by the validator — an EMPTY
-// bytes value (zero length) and MULTIPLE dynamic args in one signature (each head
-// word an INDEPENDENT offset). Both are hand-encoded with offsets measured from
-// the post-selector arg-data region, the same way the `label` case above was.
-describe('cheatcodes — dynamic arg decoding (4c regression)', () => {
-  it('EMPTY bytes decodes to 0x without crashing', () => {
+// Dynamic-arg edge cases: an empty bytes value (zero length), a hostile
+// length word, and multiple dynamic args in one signature (each head word an
+// independent offset). All are hand-encoded with offsets measured from the
+// post-selector arg-data region, like the `label` case above.
+describe('cheatcodes — dynamic arg decoding (edge cases)', () => {
+  it('empty bytes decodes to 0x without crashing', () => {
     // etch(address,bytes) with a zero-length bytes payload.
     const addr = 'cd'.repeat(20);
     const cd =
@@ -389,8 +354,8 @@ describe('cheatcodes — dynamic arg decoding (4c regression)', () => {
     expect(decoded!.args[1]).toBe('0x');
   });
 
-  it('a HUGE/hostile length word cannot hang or crash the decoder (bounded to argData)', () => {
-    // etch(address,bytes) whose dynamic LENGTH word is 2^256-1. Without a cap
+  it('a huge/hostile length word cannot hang or crash the decoder (bounded to argData)', () => {
+    // etch(address,bytes) whose dynamic length word is 2^256-1. Without a cap
     // the decoder slices+zero-pads `length*2` chars → a multi-GB string or a
     // RangeError ("Invalid string length"), wedging the debugger. The read must
     // be bounded to the bytes actually available after the length word.
@@ -417,8 +382,8 @@ describe('cheatcodes — dynamic arg decoding (4c regression)', () => {
     expect(decoded!.args[1]!.length).toBeLessThan(100);
   });
 
-  it('MULTIPLE dynamic args decode independently (mockCall(address,bytes,bytes))', () => {
-    // Two distinct byte payloads, each reached via its OWN head offset:
+  it('multiple dynamic args decode independently (mockCall(address,bytes,bytes))', () => {
+    // Two distinct byte payloads, each reached via its own head offset:
     //   head[0]=address, head[1]=offset to bytes#1 (0x60=96),
     //   head[2]=offset to bytes#2 (0xa0=160 = 96 + 32 len + 32 padded data#1).
     //   at 96: len 2, then aabb (padded);  at 160: len 3, then ccddee (padded).

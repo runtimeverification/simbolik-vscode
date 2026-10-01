@@ -1,8 +1,8 @@
 /**
- * Regression: a DYNAMIC MEMORY ARRAY OF DYNAMIC BYTES (`bytes[] memory`) must
- * show its element values in the variables view — on BOTH pipelines.
+ * A dynamic memory array of dynamic bytes (`bytes[] memory`) shows its element
+ * values in the variables view, on both pipelines.
  *
- * `BytesArray.run()`, mirroring uniswap-v4-core `PoolManager.clear.t.sol`'s
+ * `BytesArray.run()`, modelled on uniswap-v4-core `PoolManager.clear.t.sol`'s
  * `bytes[] memory params`:
  *   line 26  bytes[] memory params = new bytes[](2);
  *   line 27  params[0] = abi.encode(uint256(0x1234)); // 32 bytes
@@ -10,11 +10,10 @@
  *   line 29  return consume(params, 1);               // params read (last use)
  *
  * Each element of a `bytes[]` is itself a reference type: the array's element
- * slot holds a MEMORY OFFSET to the element's bytes, not a value-type word. The
- * value-type array path could not render these, so `params` showed NO value even
- * while live and in scope. The per-pc analyzer locates the array's stack slot;
- * the element-bytes layout dereferences each element as raw `bytes`. The SAME
- * source is recorded viaIR AND legacy so the rendering is proven on each.
+ * slot holds a memory offset to the element's bytes, not a value-type word, so
+ * the value-type array path cannot render it. The per-pc analyzer locates the
+ * array's stack slot; the element-bytes layout dereferences each element as raw
+ * `bytes`. The same source is recorded viaIR and legacy.
  *
  * Ground truth at line 29:
  *   params[0] = 0x0000…1234 (the 32-byte abi.encode of 0x1234)

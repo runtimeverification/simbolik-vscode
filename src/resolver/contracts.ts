@@ -31,7 +31,7 @@ export interface LoadedBuildInfo {
   cu: CompilationUnit;
 }
 
-// ─── method identifiers ──────────────────────────────────────────────────────
+// ## method identifiers
 
 /** The subset of a solc build-info we navigate for method selectors. */
 interface RawBuildInfo {
@@ -97,9 +97,9 @@ export function methodNameFromInput(
   return `0x${selector}`;
 }
 
-// ─── trace → executed contracts ──────────────────────────────────────────────
+// ## trace → executed contracts
 
-/** Parse a raw trace response STRING to its trace envelope. */
+/** Parse a raw trace response string to its trace envelope. */
 export function parseTraceEnvelope(traceJson: string): unknown {
   const parsed = parseJsonLossless(traceJson) as {result?: unknown};
   return parsed !== null && typeof parsed === 'object' && 'result' in parsed
@@ -129,12 +129,12 @@ export function executedAddresses(
 }
 
 /**
- * Resolve each executed address to its contract in the LOCAL build-info(s), by
+ * Resolve each executed address to its contract in the local build-info(s), by
  * matching the address's runtime code (see `identifyContractByRuntimeCode`).
  * The session resolves callee frames through this map — a geth trace carries no
  * per-step code, so this is the only way to identify external calls. Runtime
- * code comes from `preState` (the one state-dump snapshot) when
- * available, else per-address `eth_getCode`. Best-effort: an address whose code
+ * code comes from the `preState` dump when available, else per-address
+ * `eth_getCode`. Best-effort: an address whose code
  * can't be fetched or matched is skipped (that frame just won't map to source).
  */
 export async function identifyLocalContracts(
@@ -180,9 +180,8 @@ export async function identifyLocalContracts(
 
 /**
  * Find the contract named `contractName` and the build-info declaring it.
- * Contract names are NOT unique within a project (e.g. uniswap-v4 has both
- * `src/test/HooksTest.sol` and `test/libraries/Hooks.t.sol` declaring
- * `HooksTest`), so when several match, prefer the one declared in
+ * Contract names are not unique within a project (two files may each declare
+ * a contract with the same name), so when several match, prefer the one declared in
  * `launchedFile`; the first match is only the fallback.
  */
 export function findContract(

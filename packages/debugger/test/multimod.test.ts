@@ -6,7 +6,7 @@
  *   27  function guarded(uint256 x) public whenUnlocked atLeast(x, 1) returns …
  *
  * internally (line 22) and through `this.guarded` (line 23). Step-into from the
- * call stops on the function's header AT EACH MODIFIER INVOCATION before entering
+ * call stops on the function's header at each modifier invocation before entering
  * that modifier — `guarded` (at `whenUnlocked`) → `whenUnlocked` → `guarded` (at
  * `atLeast`) → `atLeast` → the body — instead of pushing the function and its
  * first modifier together.

@@ -48,7 +48,7 @@ describe('devcontainerLaunch', () => {
     expect(launch.command).toBe('nix');
     expect(launch.cwd).toBe('/home/node/kontrol-node');
     expect(launch.args.at(-1)).toContain('--port 8899');
-    // Removed upstream (tracing is always on); the node rejects the flag.
+    // kontrol-node always traces and rejects this flag.
     expect(launch.args.at(-1)).not.toContain('--steps-tracing');
   });
 

@@ -3,9 +3,10 @@
  *
  * `fetchAttachContext(client, txHash)`:
  *   1. `eth_getTransactionByHash(txHash)` → {to, from, input, value},
- *   2. `debug_traceTransaction(txHash, {})` → the trace envelope,
+ *   2. `debug_traceTransaction(txHash, {})` → the trace envelope (falling back
+ *      to `kontrol_traceTransaction` on "Method not found"),
  *   3. classify the envelope's dialect,
- * returning `{dialect, envelope, txContext}`.
+ * returning `{dialect, envelope, txContext, traceMethod}`.
  *
  * The client is driven with an injectable `fetch` that dispatches on the
  * JSON-RPC `method` in the POST body: the recorded anvil trace text for
@@ -20,9 +21,9 @@ import {describe, expect, it} from 'vitest';
 import {JsonRpcClient, type FetchLike} from '../src/jsonRpcClient.js';
 import {fetchAttachContext} from '../src/index.js';
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
+// ## Fixtures
 
-/** REAL recorded anvil `debug_traceTransaction` response TEXT (envelope at `.result`). */
+/** Recorded anvil `debug_traceTransaction` response text (envelope at `.result`). */
 const ANVIL_TRACE_RAW = readFileSync(
   new URL(
     '../../debugger/test/fixtures/anvil-setNumber-trace.raw.json',
@@ -68,7 +69,7 @@ const TX_RESPONSE = JSON.stringify({jsonrpc: '2.0', id: 0, result: TX_RESULT});
  * result for `eth_getTransactionByHash`, the raw trace text for `traceMethod`
  * (anvil's `debug_traceTransaction` by default). Any other method is a JSON-RPC
  * "Method not found". Every method seen is recorded in `calls` (with the params)
- * so a test can assert that BOTH RPCs were actually issued — not that the result
+ * so a test can assert that both RPCs were actually issued — not that the result
  * was fabricated from one call.
  */
 function fakeFetch(
@@ -94,7 +95,7 @@ function fakeFetch(
   }) as unknown as FetchLike;
 }
 
-// ── fetchAttachContext ────────────────────────────────────────────────────────
+// ## fetchAttachContext
 
 describe('fetchAttachContext', () => {
   it('fetches the tx + trace and returns {dialect, envelope, txContext}', async () => {
@@ -107,8 +108,8 @@ describe('fetchAttachContext', () => {
     const {dialect, envelope, txContext, traceMethod} =
       await fetchAttachContext(client, META.callTxHash);
 
-    // It must issue BOTH JSON-RPC calls — the tx lookup (for the context) AND
-    // the trace fetch (for the envelope). Neither may be skipped or fabricated.
+    // It must issue both JSON-RPC calls: the tx lookup (for the context) and
+    // the trace fetch (for the envelope).
     const methods = calls.map((c) => c.method);
     expect(methods).toContain('eth_getTransactionByHash');
     expect(methods).toContain('debug_traceTransaction');

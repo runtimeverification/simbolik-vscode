@@ -57,7 +57,7 @@ export function evmVariables(
 
 /**
  * The calldata as a 4-byte function selector plus one row per 32-byte ABI word
- * AFTER the selector, each named by its BYTE OFFSET: `0x00` (selector), then
+ * after the selector, each named by its byte offset: `0x00` (selector), then
  * `0x04`, `0x24`, `0x44`, …. Short calldata degrades gracefully — a
  * selector-only calldata yields just the `0x00` row, and calldata shorter than
  * 4 bytes yields whatever selector bytes are present.
@@ -144,7 +144,7 @@ export function accountStorageVariables(
 }
 
 /**
- * The memory as one row per 32-byte word, named by its BYTE offset zero-padded
+ * The memory as one row per 32-byte word, named by its byte offset zero-padded
  * to 4 hex digits for column alignment (`0x0000`, `0x0020`, …). Kontrol emits
  * bare (no-`0x`) words, so the prefix is normalized.
  */

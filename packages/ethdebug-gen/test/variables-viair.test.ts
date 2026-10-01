@@ -1,82 +1,42 @@
 /**
- * End-to-end SOUNDNESS of value-type LOCAL **and PARAMETER** stack pointers
- * under **viaIR** (plus a legacy no-regression / legacy-param guard).
+ * End-to-end soundness of value-type local and parameter stack pointers under
+ * viaIR, plus legacy guards.
  *
- * These specs pin the CORRECTNESS of the stack pointer that
- * `variablesAt(cu, sourcePath, contractName, pc)` emits for a value-type local
- * or parameter — validated the way the debugger actually consumes it: dereference
- * the pointer against the recorded runtime machine state at that step and assert
- * the value it DISPLAYS.
+ * Each spec dereferences the stack pointer `variablesAt` emits against the
+ * recorded machine state at each step, the way the debugger consumes it, and
+ * checks the value it would display.
  *
- * ── Scope ─────────────────────────────────────────────────────────────────────
- * The SAME "height − rank" fixed-frame-slot model (below) locates value-type
- * PARAMETERS too (params rank before locals in the uniform stack region), so the
- * viaIR reorder/reuse bug corrupts value-param reads exactly as it does locals.
- * This file covers BOTH:
+ * Under viaIR the Yul stack scheduler reorders and reuses stack slots per
+ * instruction, so a variable's depth is a per-pc property; a fixed
+ * "height − declarationRank" frame-slot model points at the wrong slot almost
+ * everywhere. The fixtures:
  *   - viaIR local:  VarMove.run, `amount == 7`.
- *   - viaIR params: VarMoveParams.probe(3, 5) — params `p == 3`, `q == 5`, and
+ *   - viaIR params: VarMoveParams.probe(3, 5): params `p == 3`, `q == 5`, and
  *     the derived local `s == 8`.
- *   - legacy local no-regression: Stepper.run, locals `a == 11`, `b == 22`.
- *   - legacy PARAM: Stepper.run(10), param `x == 10` — a pre-existing
- *     parameter-slot bug the fix must ALSO repair (currently misread at some
- *     steps), so this legacy-param spec FAILS now, unlike the legacy-local one.
+ *   - legacy locals: Stepper.run, `a == 11`, `b == 22`.
+ *   - legacy param: Stepper.run(10), `x == 10`. A fixed-rank slot misreads it
+ *     at some steps even on legacy bytecode.
  *
- * ── The bug (root cause) ──────────────────────────────────────────────────────
- * `variablesAt` models every value-type local as PERMANENTLY occupying a fixed
- * frame slot in declaration order: it emits a stack pointer whose depth-from-top
- * is `slot = frameRelHeightAt(pc) − 1 − (frameBase + declarationRank)` (see
- * variables.ts / `stackVariables`). That "height − rank" identity is a LEGACY
- * (viaIR:false) codegen assumption: with the classic pipeline a local really does
- * live at one stable frame depth for the life of its scope.
- *
- * Contracts compiled with **viaIR: true** (the Yul/IR pipeline — the default for
- * uniswap-v4-core and most modern Foundry projects) break that assumption. The
- * Yul stack scheduler aggressively REORDERS and REUSES stack slots per
- * instruction, so a local's real depth is a PER-PC property, not `height − rank`.
- * On viaIR bytecode the current model points at the wrong slot at essentially
- * every pc: the read returns a stray word (or an out-of-bounds slot), never the
- * local's value.
- *
- * ── The oracle (how correctness is defined here) ──────────────────────────────
- * Ground-truth fixture: `test/fixtures/counter/src/VarMove.sol`, contract
- * `VarMove`, function `run()`, first local `uint256 amount = 7;` (a value type),
- * compiled with viaIR (settings.viaIR === true) and executed on kontrol-node.
- * For the recorded trace we, exactly like stackHeights.test.ts:
- *   1. parse the raw `debug_traceTransaction` losslessly and normalize it to
+ * ## The oracle
+ * For each recorded kontrol-node trace:
+ *   1. parse the raw `debug_traceTransaction` losslessly, normalize it to
  *      `Step[]`, and build a `StateCursor` for per-step machine state;
- *   2. keep only steps executing VarMove's runtime code (`codeAddress` matches,
- *      non-init);
- *   3. at each such step ask `variablesAt(cu,'src/VarMove.sol','VarMove',pc)` for
- *      the local `amount`; if it carries a `.pointer`, DEREFERENCE it via
+ *   2. keep only steps executing the contract's runtime code (`codeAddress`
+ *      matches, non-init);
+ *   3. at each such step ask `variablesAt` for the variable; if it carries a
+ *      `.pointer`, dereference it via
  *      `readPointerValue(pointer, machineStateFor(cursor.at(step), address))`.
  *
- * The correctness contract encoded below:
- *   1. SOUNDNESS (currently FAILING): whenever `amount` is returned WITH a
- *      pointer, that pointer MUST read `7n`. A wrong value (or an OOB/throwing
- *      read) is a bug. An OMITTED `amount` (no pointer / not returned) at a step
- *      is ACCEPTABLE — the ethdebug per-instruction-context model legitimately
- *      reports a local as unavailable where its value is not on the stack.
- *      (Measured: the current buggy code emits a pointer at 120 steps and reads
- *      `7` at 0 of them — all 120 read `0`.)
- *   2. COMPLETENESS spot-check (currently FAILING): the fix must not "fix"
- *      soundness by simply never emitting `amount`. There must be a substantial
- *      number of steps (≥ 60; measured 97 steps where a correct answer exists on
- *      the stack) where `amount` reads `7`, AND the FIRST step at which `amount`
- *      becomes available must already read `7` (its value right after the
- *      `amount = 7` declaration).
- *   3. "WHEN to read" (unavailable): it is CORRECT for `amount` to be omitted /
- *      pointer-less where its value is not on the stack — this is the same
- *      statement as soundness (never a wrong value), asserted as such rather than
- *      via a brittle exact unavailable-count.
- *   4. LEGACY NO-REGRESSION (currently PASSING): the identical soundness property
- *      on an EXISTING legacy (viaIR:false) fixture with known value-type locals
- *      (`Stepper.run`: `a == 11`, `b == 22`) must keep holding, proving the fix
- *      does not disturb the classic pipeline.
+ * Properties:
+ *   - Soundness: whenever a variable is returned with a pointer, the pointer
+ *     reads the known value. Omitting the variable at a step is acceptable: a
+ *     local is unavailable where its value is not on the stack.
+ *   - Completeness: the variable reads correctly at a substantial number of
+ *     steps, so soundness is not achieved by never emitting it; for `amount`,
+ *     the first step at which it is available already reads 7.
  *
- * Evaluation of a stack pointer (`machineStateFor` + `readPointerValue`, the real
- * `@ethdebug/pointers` path) is itself CORRECT and is exercised in
- * debugger/session.test.ts — here it is used only as the trusted oracle that
- * turns a `variablesAt` pointer into the value the debugger would show.
+ * `machineStateFor` + `readPointerValue` (the `@ethdebug/pointers` path) are
+ * tested in debugger/session.test.ts; here they serve as the trusted oracle.
  */
 import {readFileSync} from 'node:fs';
 
@@ -88,13 +48,10 @@ import {normalizeKontrolTrace, StateCursor, type Step} from '@simbolik/lifting';
 
 import {variablesAt, type ResolvedVariable} from '../src/index.js';
 // ethdebug-gen does not depend on the debugger package; reach its evaluation
-// path (the trusted oracle) directly from source, as the cross-package fixtures
-// above are reached (matching stackHeights.test.ts's source-relative imports).
+// path (the trusted oracle) directly from source.
 import {machineStateFor, readPointerValue} from '../../debugger/src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 function loadCu(name: string): CompilationUnit {
   const url = new URL(`../../solc/test/fixtures/${name}`, import.meta.url);
@@ -118,9 +75,7 @@ function loadAddress(metaName: string): {str: string; big: bigint} {
   return {str: meta.contractAddress, big: BigInt(meta.contractAddress)};
 }
 
-// ---------------------------------------------------------------------------
-// Oracle: read every returned value-local pointer at every own-contract step
-// ---------------------------------------------------------------------------
+// ## Oracle: read every returned value-local pointer at every own-contract step
 
 interface LocalReading {
   step: number;
@@ -129,14 +84,14 @@ interface LocalReading {
 }
 
 /**
- * Walk the trace; at each step executing THIS contract's runtime code, resolve
- * `variablesAt` and dereference every returned value-type STACK variable (a
+ * Walk the trace; at each step executing this contract's runtime code, resolve
+ * `variablesAt` and dereference every returned value-type stack variable (a
  * parameter, return, or local — anything but a storage var) named in `names`
  * that carries a pointer. Returns, per name, the ordered list of readings.
  *
  * Names must be unique across kinds in the fixture (no local/param collision),
  * which holds for every fixture here, so matching by name + `kind !== 'storage'`
- * covers value-type params AND locals with one oracle.
+ * covers value-type params and locals with one oracle.
  */
 async function readStackVarsOverTrace(
   cu: CompilationUnit,
@@ -175,9 +130,7 @@ async function readStackVarsOverTrace(
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// 1-3. viaIR — VarMove.run, first local `uint256 amount = 7`
-// ---------------------------------------------------------------------------
+// ## viaIR: VarMove.run, first local `uint256 amount = 7`
 
 const VIAIR = {
   buildInfo: 'varmove-viair-build-info.json',
@@ -203,8 +156,8 @@ describe('variablesAt — viaIR value-local stack pointer (VarMove.amount)', () 
 
   it('SOUNDNESS: every returned `amount` pointer reads 7 (never a stray/OOB value)', async () => {
     const readings = await amountReadings();
-    // Sanity: the fixture actually reaches the function (amount is emitted with a
-    // pointer at many steps) — so this assertion is not vacuous.
+    // Not vacuous: the fixture reaches the function and emits `amount` with a
+    // pointer.
     expect(
       readings.length,
       'no step returned `amount` with a pointer — fixture/attribution broken',
@@ -227,8 +180,8 @@ describe('variablesAt — viaIR value-local stack pointer (VarMove.amount)', () 
   it('COMPLETENESS: `amount` reads 7 at a substantial number of steps (≥ 60)', async () => {
     const readings = await amountReadings();
     const correct = readings.filter((r) => r.value === 7n).length;
-    // Guards against a fix that "achieves" soundness by never emitting `amount`.
-    // Measured: 97 steps where 7 is genuinely on the stack; ≥ 60 is conservative.
+    // Guards against achieving soundness by never emitting `amount`. 7 is on
+    // the stack at 97 steps; 60 is a conservative floor.
     expect(
       correct,
       `only ${correct} steps read \`amount\` == 7 (expected ≥ 60); a fix must ` +
@@ -250,9 +203,7 @@ describe('variablesAt — viaIR value-local stack pointer (VarMove.amount)', () 
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4-5. viaIR — VarMoveParams.probe(3, 5): value PARAMETERS p, q + local s
-// ---------------------------------------------------------------------------
+// ## viaIR: VarMoveParams.probe(3, 5): value parameters p, q and local s
 
 const VIAIR_PARAMS = {
   buildInfo: 'varmoveparams-viair-build-info.json',
@@ -262,8 +213,8 @@ const VIAIR_PARAMS = {
   meta: 'varmoveparams-viair-run-meta.json',
   // probe(3, 5): params p==3, q==5; derived local `uint256 s = p + q` ⇒ 8.
   known: {p: 3n, q: 5n, s: 8n} as Record<string, bigint>,
-  // Conservative completeness floors. Measured steps where the true value is on
-  // the stack (a correct pointer CAN exist): p=94, q=94, s=76.
+  // Conservative completeness floors. Steps where the true value is on the
+  // stack: p=94, q=94, s=76.
   floor: {p: 60, q: 60, s: 45} as Record<string, number>,
 } as const;
 
@@ -309,7 +260,7 @@ describe('variablesAt — viaIR value-PARAMETER stack pointers (VarMoveParams)',
     it(`COMPLETENESS: \`${name}\` reads ${want} at ≥ ${VIAIR_PARAMS.floor[name]} steps`, async () => {
       const rs = (await readings()).get(name)!;
       const correct = rs.filter((r) => r.value === want).length;
-      // Guards against a fix that "achieves" soundness by never emitting `name`.
+      // Guards against achieving soundness by never emitting `name`.
       expect(
         correct,
         `only ${correct} steps read \`${name}\` == ${want} (expected ≥ ` +
@@ -320,9 +271,7 @@ describe('variablesAt — viaIR value-PARAMETER stack pointers (VarMoveParams)',
   }
 });
 
-// ---------------------------------------------------------------------------
-// 6. LEGACY (viaIR:false) NO-REGRESSION — Stepper.run value-locals a, b
-// ---------------------------------------------------------------------------
+// ## Legacy (viaIR:false): Stepper.run value locals a, b
 
 const LEGACY = {
   buildInfo: 'stepper-build-info.json',
@@ -331,7 +280,7 @@ const LEGACY = {
   trace: 'stepper-run-trace.raw.json',
   meta: 'stepper-run-meta.json',
   // Stepper.run(10): `uint256 a = x + 1` ⇒ 11; `uint256 b = double(a)` ⇒ 22.
-  // Both are value-type LOCALS with a stable known value once declared.
+  // Both are value-type locals with a stable known value once declared.
   known: {a: 11n, b: 22n} as Record<string, bigint>,
 } as const;
 
@@ -366,8 +315,8 @@ describe('variablesAt — legacy value-local stack pointers stay sound (Stepper)
       totalCorrect += rs.length;
     }
 
-    // Not vacuous: the legacy pipeline emits these locals with correct pointers
-    // at many steps, and the fix must keep doing so. (Measured: a=21, b=13.)
+    // Not vacuous: these locals are emitted with pointers at many steps
+    // (a=21, b=13).
     expect(
       totalCorrect,
       `expected legacy locals to be emitted with pointers at many steps, got ${totalCorrect}`,
@@ -375,15 +324,10 @@ describe('variablesAt — legacy value-local stack pointers stay sound (Stepper)
   });
 });
 
-// ---------------------------------------------------------------------------
-// 7. LEGACY (viaIR:false) PARAMETER soundness — Stepper.run(uint256 x), x == 10
-// ---------------------------------------------------------------------------
+// ## Legacy (viaIR:false) parameter soundness: Stepper.run(uint256 x), x == 10
 //
-// Unlike the legacy-LOCAL guard above (which passes today), the value-type
-// PARAMETER `x` is misread at some steps even on legacy bytecode — a pre-existing
-// parameter-slot bug now IN scope. This spec therefore FAILS now and the fix must
-// make it pass. (Measured: `x` emitted with a pointer at 50 steps, read 10 at 39,
-// WRONG at 11.)
+// A fixed-rank frame slot misreads the value parameter `x` at some steps even
+// on legacy bytecode; parameters must be located by stack provenance.
 
 describe('variablesAt — legacy value-PARAMETER soundness (Stepper.run x)', () => {
   it('SOUNDNESS: every returned `x` (parameter) pointer reads 10', async () => {

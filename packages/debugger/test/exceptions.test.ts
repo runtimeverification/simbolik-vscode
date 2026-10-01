@@ -9,13 +9,13 @@
  *   - 522 REVERT (depth 2) `Panic(0x11)` → flag 0 at 523, caught
  *   - 625 INVALID (depth 2) → flag 0 at 626, `EVMC_INVALID_INSTRUCTION`, caught
  *   - 1022 REVERT (depth 2) `TooSmall(3, 10)` → flag 0 at 1023; the caller
- *     re-throws the same 0x44 bytes at 1034, the final step → UNCAUGHT
+ *     re-throws the same 0x44 bytes at 1034, the final step → uncaught
  * - `direct(3)` (235 steps): the entry function's own `require` REVERTs at 234
  *   (the final step) with `Error("x too small")` → uncaught.
  * - `assertion()` (206 steps): the `vm.assertEq` STATICCALL at 193 runs no code
  *   (kontrol executes cheatcodes atomically) and pushes flag 0 at 194 with
  *   `EVMC_REVERT`; the caller bubbles the cheatcode's raw message "assertion
- *   failed: 1 != 2" (24 bytes, NOT ABI-encoded) with REVERT at 205 → uncaught.
+ *   failed: 1 != 2" (24 bytes, not ABI-encoded) with REVERT at 205 → uncaught.
  * - `expected()` (269 steps, tx succeeds): `vm.expectRevert()` (a successful
  *   cheatcode CALL at 65), then `boom()` REVERTs at 249 but the caller sees flag
  *   1 at 250 — an expected revert.
@@ -313,13 +313,11 @@ describe('decodeRevertData', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Session: exception filters, stops, `exceptionInfo`, and the launch notice.
+// ## Session: exception filters, stops, `exceptionInfo`, and the launch notice.
 // Source lines (src/Exceptions.sol): boom's revert 15, overflow 19, invalid()
 // 24, check's `revert TooSmall` 30; mixed(): try-boom 48, try-overflow 49,
 // try-invalidOp 50, `reached = 1` 51, `t.check(3)` 52; direct(): the
 // `require` 59; assertion(): `vm.assertEq` 65; expected(): `t.boom()` 71.
-// ---------------------------------------------------------------------------
 
 const spec = (fn: string): Spec => ({
   buildInfo: 'exceptions-legacy-build-info.json',
@@ -448,9 +446,9 @@ describe('session: exception filters', () => {
 });
 
 // viaIR reverts from shared Yul helpers (`revert_error_…`, `panic_error_…`)
-// that solc maps to the whole contract. Stopping at their REVERT showed the
-// contract header (and named the frame after the contract). The stop moves back
-// to the last step of the same frame that belongs to a statement. Ground truth
+// that solc maps to the whole contract. Stopping at their REVERT would show the
+// contract header (and name the frame after the contract), so the stop moves
+// back to the last step of the same frame that belongs to a statement. Ground truth
 // from the viaIR recordings: direct()'s REVERT at 307 maps to `contract
 // Exceptions` (line 35); the require's last own step is 227 (line 59). mixed()'s
 // Panic REVERT at 701 maps to `contract Thrower` (line 11); the overflowing

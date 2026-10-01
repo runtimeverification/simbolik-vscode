@@ -5,7 +5,7 @@
  * Addresses are identified by CBOR metadata of the code the trace executed
  * there; an explicit address → build-info map (the only workable path for geth,
  * whose trace carries no per-step code) wins over that. An address whose code
- * cannot be attributed to any compilation unit is FOREIGN.
+ * cannot be attributed to any compilation unit is foreign.
  */
 import type {StateCursor, Step} from '@simbolik/lifting';
 import type {Hex} from '@simbolik/protocol';
@@ -21,9 +21,9 @@ import type {LaunchInputs} from './launchInputs.js';
 import type {StepResolution} from './stepping.js';
 
 /**
- * A FOREIGN code resolution: an address running bytecode that could not be
+ * A foreign code resolution: an address running bytecode that could not be
  * attributed to any compilation unit (etched raw bytecode, an unknown callee).
- * It carries NO contract/cu — its frame is rendered EVM-only (no Solidity
+ * It carries no contract/cu — its frame is rendered EVM-only (no Solidity
  * source, an address-derived name, non-descendable) and its steps are left
  * unmapped by the stepping model (raw EVM depth, no jump fold), so a foreign
  * subcall neither mis-maps onto the entry contract nor corrupts parent stepping.
@@ -37,7 +37,7 @@ export interface ForeignResolution {
 /** A registry entry: a resolved contract CU, or a foreign (unidentifiable) code address. */
 export type RegistryResolution = StepResolution | ForeignResolution;
 
-/** Whether a registry resolution is a FOREIGN (unidentifiable) code address. */
+/** Whether a registry resolution is a foreign (unidentifiable) code address. */
 export function isForeign(r: RegistryResolution): r is ForeignResolution {
   return (r as ForeignResolution).kind === 'foreign';
 }
@@ -60,7 +60,7 @@ export class CodeRegistry {
   }
 
   /**
-   * Build the registry over the DISTINCT code addresses in the trace. CUs loaded
+   * Build the registry over the distinct code addresses in the trace. CUs loaded
    * from `inputs.contractsByAddress` are appended to `cus`.
    */
   static build(
@@ -73,11 +73,10 @@ export class CodeRegistry {
     const entry = resolveEntry(inputs, cus, steps, cursor);
 
     const firstSeen = new Map<string, number>();
-    // A separate index of the first RUNTIME-code step per address. A contract
-    // CREATE'd during THIS transaction first appears running its INIT (creation)
-    // code, which never matches the build-info deployedBytecode — identifying from
-    // it would mark the address foreign. Identify from a deployed-runtime step so
-    // an in-tx `new C()` resolves to its CU (and its frame is steppable).
+    // A contract created during this transaction first appears running its
+    // init (creation) code, which never matches the build-info
+    // deployedBytecode. Identify from its first runtime-code step instead, so
+    // an in-tx `new C()` resolves to its CU rather than being marked foreign.
     const firstRuntimeSeen = new Map<string, number>();
     for (let i = 0; i < steps.length; i++) {
       const addr = addressHex(steps[i]!.codeAddress);
@@ -92,10 +91,10 @@ export class CodeRegistry {
     const byAddress = new Map<string, RegistryResolution>();
     for (const addr of firstSeen.keys()) {
       const identified = identify(cus, cursor.at(sampleStep(addr)!).bytecode);
-      // The ENTRY address maps to the entry contract — that IS its own code,
-      // even when CBOR-identification fails (e.g. metadata stripped). Any OTHER
-      // address whose code does not identify is FOREIGN: falling back to the
-      // entry CU would mis-map its PCs onto the entry contract's source.
+      // The entry address maps to the entry contract even when CBOR
+      // identification fails (e.g. metadata stripped). Any other address whose
+      // code does not identify is foreign: falling back to the entry CU would
+      // mis-map its PCs onto the entry contract's source.
       byAddress.set(
         addr,
         identified ??
@@ -103,8 +102,8 @@ export class CodeRegistry {
       );
     }
 
-    // An explicit address→build-info map WINS over CBOR-from-trace; the CBOR
-    // path above stays the fallback for addresses absent here.
+    // An explicit address→build-info map takes precedence over CBOR
+    // identification, which stays the fallback for addresses absent here.
     for (const [rawAddr, spec] of Object.entries(
       inputs.contractsByAddress ?? {}
     )) {
@@ -123,7 +122,7 @@ export class CodeRegistry {
         byAddress.set(addr, resolutionOf(contract, cu));
     }
 
-    // Guarantee the entry address always resolves (single-CU back-compat).
+    // The entry address always resolves.
     if (!byAddress.has(entryAddr)) byAddress.set(entryAddr, entry);
     return new CodeRegistry(byAddress, entry);
   }
@@ -187,7 +186,7 @@ function resolveEntry(
 /**
  * Pick the contract within a single (address-mapped) CU. Prefer the
  * caller-supplied `contractName` (narrowed by `sourcePath`: names are not unique
- * within a build); else the SOLE contract with non-empty runtime bytecode
+ * within a build); else the sole contract with non-empty runtime bytecode
  * (interfaces/abstracts have empty bytecode → skipped); else CBOR-match the
  * trace's per-step code at `traceIdx` if one is available (kontrol).
  */
@@ -207,9 +206,9 @@ function pickContract(
           (sourcePath === undefined || c.sourcePath === sourcePath)
       );
     if (byName.length === 1) return byName[0];
-    // Ambiguous name (same-named contracts in different files): the running
-    // code decides — never an arbitrary first match, whose source map would
-    // silently mis-map every step of the frame.
+    // Ambiguous name (same-named contracts in different files): let the
+    // running code decide; an arbitrary pick's source map would silently
+    // mis-map every step of the frame, so the first match is a last resort.
     if (byName.length > 1 && traceIdx !== undefined) {
       const code = cursor.at(traceIdx).bytecode;
       const identified =

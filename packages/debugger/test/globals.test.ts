@@ -2,12 +2,7 @@
  * Read-only "Globals" scope — Solidity global variables (`msg`, `tx`, `block`,
  * `gasleft()`) surfaced per-frame.
  *
- * TDD (RED): these tests drive `SolidityDebugSession` against recorded fixtures
- * and assert the Globals scope + its nested groups. They FAIL until the scope is
- * implemented (`scopes()` does not yet push 'Globals', and `variables()` has no
- * 'Globals'/'GlobalGroup' cases).
- *
- * Ground-truth (read directly from the fixtures):
+ * Ground truth (read directly from the fixtures):
  *   - counter-setNumber (kontrol, single frame): msgSender = txOrigin =
  *     1390849295786071768276380950238675083608645509734
  *     (= 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266); msgValue = 0;
@@ -16,8 +11,8 @@
  *     0x3fb5c1cb…002a (setNumber(42)) → sig = 0x3fb5c1cb; gas ∈ [29956304,29978796].
  *   - mixed-go (kontrol, multi-frame Caller.go → Callee.compute): depth-1
  *     msg.sender = 0xf39f…92266 (acct0); depth-2 msg.sender = the Caller address
- *     0xe7f1725e7734ce288f8367e1bb143e90bb3f0512 → proves per-frame resolution.
- *   - anvil-setNumber (geth): NO block context → `block` group + `tx.gasprice`
+ *     0xe7f1725e7734ce288f8367e1bb143e90bb3f0512 → resolution is per-frame.
+ *   - anvil-setNumber (geth): no block context → `block` group + `tx.gasprice`
  *     omitted; `msg`(sender/value/data/sig), `tx.origin`, `gasleft()` present.
  */
 import {describe, expect, it} from 'vitest';
@@ -71,9 +66,7 @@ function child(children: DapVariable[], name: string): DapVariable {
   return c!;
 }
 
-// ===========================================================================
-// A) kontrol, single frame — counter-setNumber
-// ===========================================================================
+// # A) kontrol, single frame — counter-setNumber
 
 const ACCT0 = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
 const COUNTER_CALLDATA =
@@ -200,9 +193,7 @@ describe('Globals scope — kontrol single frame (counter-setNumber)', () => {
   });
 });
 
-// ===========================================================================
-// B) kontrol, multi-frame — mixed-go: Globals is PER-FRAME
-// ===========================================================================
+// # B) kontrol, multi-frame — mixed-go: Globals is per-frame
 
 const MIXED_META = metaOf('mixed-go-meta.json') as {
   callerAddress: string;
@@ -292,9 +283,7 @@ describe('Globals scope — kontrol multi-frame (mixed-go), per-frame msg.sender
   });
 });
 
-// ===========================================================================
-// C) geth/anvil — anvil-setNumber: block group + tx.gasprice OMITTED
-// ===========================================================================
+// # C) geth/anvil — anvil-setNumber: block group + tx.gasprice omitted
 
 const ANVIL_META = metaOf('anvil-setNumber-meta.json') as {
   contractAddress: string;
@@ -338,7 +327,7 @@ describe('Globals scope — geth/anvil (anvil-setNumber) omits unavailable data'
     expect(child(msg, 'data').value).toBe(ANVIL_META.txInput);
     expect(child(msg, 'sig').value).toBe(COUNTER_SIG);
 
-    // tx has origin but NO gasprice (unavailable in geth).
+    // tx has origin but no gasprice (unavailable in geth).
     const tx = await groupChildren(session, rows, 'tx');
     expect(tx.map((v) => v.name)).toEqual(['origin']);
     expect(child(tx, 'origin').value).toBe(ACCT0);

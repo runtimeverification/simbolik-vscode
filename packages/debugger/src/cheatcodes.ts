@@ -1,29 +1,25 @@
 /**
- * Detect + decode kontrol/Foundry CHEATCODE calls in an execution trace.
+ * Detect + decode kontrol/Foundry cheatcode calls in an execution trace.
  *
  * kontrol-node executes a cheatcode (`vm.startPrank`, `vm.stopPrank`, …) as an
- * ATOMIC, plain EVM CALL to the well-known cheatcode address
+ * atomic, plain EVM CALL to the well-known cheatcode address
  * `0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`: a single CALL step whose
  * calldata is the ABI encoding `<4-byte selector><32-byte-word args…>`, with the
- * effect applied inline (no observable sub-trace to descend into). That makes a
- * cheatcode a self-contained event of ONE step — we recognise it by its target
- * address, read its calldata straight out of EVM memory, map the selector to a
- * known cheatcode signature, and decode the value-type args.
+ * effect applied inline (no observable sub-trace to descend into). A cheatcode
+ * is therefore recognised by its target address, its calldata read straight
+ * out of EVM memory, and its selector mapped to a known signature.
  *
- * The selector→signature table is built AT MODULE LOAD by keccak256-hashing a
- * list of canonical signatures (never hand-typed hex), so the selectors are
- * correct by construction and new cheatcodes are added by listing their
- * signature. Decoding is table-driven off the parsed arg-type list.
+ * The selector→signature table is built at module load by keccak256-hashing a
+ * list of canonical signatures, so new cheatcodes are added by listing their
+ * signature.
  *
- * Scope covers value-type args (`address`, `uintN`, `intN`, `bool`, `bytesN`)
- * AND the dynamic scalars `bytes` / `string` (4c): a dynamic arg's head word is
- * an ABI OFFSET (relative to the post-selector arg-data region) pointing at a
- * 32-byte length followed by the data bytes, which are read + zero-extended and
- * decoded to their real value. Other reference types (`*[]`, tuples) are still
- * rendered as a `<type>` placeholder (out of scope). An unknown selector on a
+ * Value-type args (`address`, `uintN`, `intN`, `bool`, `bytesN`) and the
+ * dynamic scalars `bytes` / `string` are decoded: a dynamic arg's head word is
+ * an ABI offset (relative to the post-selector arg-data region) pointing at a
+ * 32-byte length followed by the data bytes. Other reference types (`*[]`,
+ * tuples) are rendered as a `<type>` placeholder. An unknown selector on a
  * genuine cheatcode CALL still decodes to a raw-selector `DecodedCheatcode`
- * (never `undefined`) so the frame stays useful for cheatcodes not yet in the
- * table.
+ * (never `undefined`).
  */
 import {keccak256} from 'ethereum-cryptography/keccak';
 import {
@@ -71,9 +67,8 @@ interface CheatcodeDef {
 }
 
 /**
- * Canonical cheatcode signatures. Selectors are COMPUTED from these at load via
- * keccak256 (see {@link buildSelectorTable}) — do NOT hand-type hex selectors.
- * A useful starter set of common Foundry/kontrol cheatcodes.
+ * Canonical signatures of common Foundry/kontrol cheatcodes. Selectors are
+ * computed from these at load via keccak256 (see {@link buildSelectorTable}).
  */
 const CHEATCODE_SIGNATURES = [
   'startPrank(address)',
@@ -123,14 +118,14 @@ function buildSelectorTable(): Map<string, CheatcodeDef> {
 /** selector (`'0x'`+8 hex) → parsed cheatcode def. Computed once at load. */
 const SELECTOR_TABLE = buildSelectorTable();
 
-/** Parse a machine WORD (hex, optionally `0x`-prefixed) to a number. */
+/** Parse a machine word (hex, optionally `0x`-prefixed) to a number. */
 function wordToNumber(word: string): number {
   return Number(wordToBigInt(word));
 }
 
 /**
  * Read exactly `lenChars` hex chars from `hex` starting at char `startChar`,
- * ZERO-EXTENDING (right-padding with `'0'`) when the source runs short. Real EVM
+ * zero-extending (right-padding with `'0'`) when the source runs short. EVM
  * memory is conceptually zero to infinity, so a dynamic offset/length that runs
  * past the available flattened memory reads zero bytes rather than crashing.
  */
@@ -140,7 +135,7 @@ function readHex(hex: string, startChar: number, lenChars: number): string {
 
 /**
  * Whether `step` is a CALL to the cheatcode address. True iff `step.op` is a
- * CALL-family op AND the target word (`stack[len-2]`, low 160 bits) equals the
+ * CALL-family op and the target word (`stack[len-2]`, low 160 bits) equals the
  * cheatcode address. Safe (false) when the stack is too short.
  */
 export function isCheatcodeCall(step: Step): boolean {
@@ -154,7 +149,7 @@ export function isCheatcodeCall(step: Step): boolean {
 /**
  * Decode a cheatcode CALL step into its selector, name, args, and display
  * string, reading the calldata from `machine.memory` (a `StateCursor.at(i)`
- * MachineState — an array of 32-byte hex WORDS). Returns `undefined` ONLY when
+ * MachineState — an array of 32-byte hex words). Returns `undefined` only when
  * `step` is not a cheatcode call; an unknown selector still decodes to a
  * raw-selector `DecodedCheatcode`.
  *
@@ -175,7 +170,7 @@ export function decodeCheatcodeCall(
   const argsLen = wordToNumber(st[len - (hasValue ? 5 : 4)]!);
 
   // calldata = folded memory byte-slice [argsOff, argsOff+argsLen). Memory is a
-  // 32-byte-WORD array: flatten (each word padded to a full word) then slice.
+  // 32-byte-word array: flatten (each word padded to a full word) then slice.
   const flat = machine.memory
     .map((w) => w.replace(/^0x/, '').padStart(64, '0'))
     .join('');
@@ -194,12 +189,12 @@ export function decodeCheatcodeCall(
     };
   }
 
-  // The arg-data region is everything AFTER the 4-byte (8-hex) selector; every
-  // ABI offset for a dynamic arg is measured from the START of this region.
+  // The arg-data region is everything after the 4-byte (8-hex) selector; every
+  // ABI offset for a dynamic arg is measured from the start of this region.
   const argData = calldata.slice(8);
 
-  // Each arg occupies one 32-byte HEAD word at position i. A value arg holds its
-  // value inline; a dynamic arg (`bytes`/`string`) holds an OFFSET into argData
+  // Each arg occupies one 32-byte head word at position i. A value arg holds its
+  // value inline; a dynamic arg (`bytes`/`string`) holds an offset into argData
   // where a 32-byte length then that many data bytes sit. Reads are zero-extended
   // past the available memory so malformed/short input never crashes or NaNs.
   const args: string[] = [];
@@ -210,12 +205,9 @@ export function decodeCheatcodeCall(
     if (argType === 'bytes' || argType === 'string') {
       const offset = Number(BigInt('0x' + headHex));
       const rawLength = Number(BigInt('0x' + readHex(argData, offset * 2, 64)));
-      // A dynamic arg's data lives WITHIN the arg-data region; a corrupt or
-      // hostile length word (up to 2^256-1) must never drive a giant slice or
-      // allocation that hangs/crashes the debugger. Bound the read to the bytes
-      // actually available after the length word — for well-formed calldata this
-      // is a no-op (real length ≤ available), and for garbage it degrades to a
-      // safe short/empty value instead of a multi-GB string or a RangeError.
+      // A dynamic arg's data lives within the arg-data region. Bound the read
+      // to the bytes available after the length word, so a corrupt length (up
+      // to 2^256-1) degrades to a short value instead of a giant allocation.
       const availBytes = Math.max(0, (argData.length - (offset * 2 + 64)) / 2);
       const length = Math.min(rawLength, availBytes);
       const dataHex = readHex(argData, offset * 2 + 64, length * 2);
@@ -239,8 +231,8 @@ export function decodeCheatcodeCall(
 }
 
 /**
- * Decode ONE value-type arg from its 32-byte head word (64 hex chars, no `0x`),
- * returning both the FULL value (for `args[]`) and a DISPLAY value (addresses
+ * Decode one value-type arg from its 32-byte head word (64 hex chars, no `0x`),
+ * returning both the full value (for `args[]`) and a display value (addresses
  * abbreviated). The dynamic scalars `bytes`/`string` are handled by the caller
  * (their head word is an offset, not a value); any remaining reference type
  * (`*[]`, tuples) is a `<type>` placeholder for both.
@@ -252,8 +244,8 @@ function decodeArg(
   const padded = wordHex.padEnd(64, '0');
   const word = padded.length > 0 ? BigInt('0x' + padded) : 0n;
 
-  // Reference types (`*[]`, tuples) are out of scope — the head word is an ABI
-  // offset, not the value, so render a placeholder rather than a wrong number.
+  // For reference types (`*[]`, tuples) the head word is an ABI offset, not the
+  // value, so render a placeholder rather than a wrong number.
   if (!isValueType(argType)) {
     const placeholder = `<${argType}>`;
     return {full: placeholder, display: placeholder};
@@ -275,9 +267,9 @@ function decodeArg(
   }
   if ((m = /^int(\d+)$/.exec(argType))) {
     const bits = Number(m[1]);
-    // ABI sign-EXTENDS a signed integer to the full 32-byte head word, so for a
+    // ABI sign-extends a signed integer to the full 32-byte head word, so for a
     // narrow intN the high bits above `bits` are all copies of the sign bit and
-    // must be masked off BEFORE the two's-complement fold — otherwise a negative
+    // must be masked off before the two's-complement fold — otherwise a negative
     // narrow int (e.g. int8 -1 = 0xff…ff) reads as a huge positive number. For
     // int256 the mask is a no-op.
     const mask = (1n << BigInt(bits)) - 1n;
@@ -299,12 +291,12 @@ const BYTES_DISPLAY_FULL = 32;
 const STRING_DISPLAY_FULL = 32;
 
 /**
- * Decode a DYNAMIC scalar arg (`bytes` / `string`) from its already-sliced,
+ * Decode a dynamic scalar arg (`bytes` / `string`) from its already-sliced,
  * zero-extended data hex (`dataHex`, exactly `length * 2` chars) and byte
- * `length`. Returns the FULL value for `args[]` and a compact DISPLAY value:
+ * `length`. Returns the full value for `args[]` and a compact display value:
  * - `bytes` → full lowercase `'0x'`+hex (empty → `'0x'`); display shows the full
  *   hex when short, else `0x<8 hex>…(<length> bytes)`.
- * - `string` → the raw UTF-8-decoded string, UNQUOTED; display QUOTES it and
+ * - `string` → the raw UTF-8-decoded string, unquoted; display quotes it and
  *   truncates a long one to `"<head>…"`.
  */
 function decodeDynamicArg(

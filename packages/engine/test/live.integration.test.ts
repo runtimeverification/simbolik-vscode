@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {KontrolNode, devcontainerLaunch} from '../src/index.js';
 
 /**
- * Live integration test against a REAL kontrol-node.
+ * Live integration test against a real kontrol-node.
  *
  * Skipped unless SIMBOLIK_LIVE=1, because it needs the dev-container-provisioned
  * engine (nix dev shell + built KEVM semantics). The core Vitest suite runs on

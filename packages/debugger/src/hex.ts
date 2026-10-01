@@ -6,9 +6,9 @@ export function strip0x(hex: string): string {
 }
 
 /**
- * Parse a machine WORD to a bigint. Kontrol emits MEMORY words WITHOUT a `0x`
- * prefix (`"0000…"`), so a bare `BigInt(word)` would parse them as DECIMAL —
- * silently wrong for any word (and throwing outright on one containing `a-f`).
+ * Parse a machine word to a bigint. Kontrol emits memory words without a `0x`
+ * prefix (`"0000…"`), so a bare `BigInt(word)` would parse them as decimal —
+ * silently wrong (or throwing, for a word containing `a-f`).
  */
 export function wordToBigInt(word: string): bigint {
   return BigInt(`0x${strip0x(word)}`);

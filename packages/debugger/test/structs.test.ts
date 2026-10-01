@@ -1,30 +1,27 @@
 /**
- * A value-type MEMORY STRUCT local decoded as a NESTED DAP variable.
+ * A value-type memory struct local decoded as a nested DAP variable.
  *
  * `Locals.compute(10)` declares `struct Point { uint256 x; uint256 y; }` and the
- * local `Point memory pt = Point(a, small)` = `Point(11, 7)`. This is the smallest
- * reference type: a fixed group of value-type members, unblocking arrays/strings
- * later. The struct's location is runtime data — its memory offset lives in pt's
- * stack slot — so `variablesAt` emits pt's member LAYOUT statically (per-member
- * ethdebug pointers built from `$read` of the stack slot + each member's word
- * offset), and the value is read at dereference time through `@ethdebug/pointers`.
+ * local `Point memory pt = Point(a, small)` = `Point(11, 7)`: a fixed group of
+ * value-type members. The struct's location is runtime data — its memory offset
+ * lives in pt's stack slot — so `variablesAt` emits pt's member layout
+ * statically (per-member ethdebug pointers built from `$read` of the stack slot
+ * + each member's word offset), and the value is read at dereference time
+ * through `@ethdebug/pointers`.
  *
- * ── Trace ground-truth (locals-compute-trace.raw.json) ────────────────────────
- * At pc 436 (line 37, the first `require` — a clean body statement AFTER pt is
+ * ## Trace ground truth (locals-compute-trace.raw.json)
+ * At pc 436 (line 37, the first `require` — a clean body statement after pt is
  * assigned) pt's stack slot holds memory offset 0x120 (=288). In memory:
  *   memory[288..320] = 11  → pt.x
  *   memory[320..352] =  7  → pt.y
- * These were confirmed by reading the recorded trace memory directly (the struct
- * base offset from pt's stack slot, then memory[offset] / memory[offset+32]).
  *
- * Three things are pinned here (the producer SHAPE itself is pinned in
- * `@simbolik/ethdebug-gen`'s `variables.test.ts`):
- *   1. pt's member pointers dereference to 11 and 7 through the REAL ethdebug path
- *      (`machineStateFor` + `readPointerValue`) — proving the memory expression
- *      pointers resolve via `@ethdebug/pointers`.
+ * Pinned here (the producer shape itself is pinned in `@simbolik/ethdebug-gen`'s
+ * `variables.test.ts`):
+ *   1. pt's member pointers dereference to 11 and 7 through the real ethdebug
+ *      path (`machineStateFor` + `readPointerValue`).
  *   2. The session renders pt as a nested variable: a non-zero `variablesReference`
  *      + a `Point` summary, whose children are `x=11`, `y=7`.
- *   3. Regression: the value locals still decode and `nums`/`label` are surfaced.
+ *   3. The value locals decode and `nums`/`label` are surfaced alongside.
  */
 import {describe, expect, it} from 'vitest';
 
@@ -41,9 +38,7 @@ import {
   type Spec,
 } from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
 const CU = 'locals-build-info.json';
 const TRACE = 'locals-compute-trace.raw.json';
@@ -72,9 +67,7 @@ const spec: Spec = {
 };
 const breakAt = (line: number) => breakAtSpec(spec, line);
 
-// ---------------------------------------------------------------------------
-// 1. Member pointers dereference to their recorded values (11, 7)
-// ---------------------------------------------------------------------------
+// ## 1. Member pointers dereference to their recorded values (11, 7)
 
 describe('struct member pointers dereference through @ethdebug/pointers', () => {
   it('pt.x reads 11 and pt.y reads 7 at pc 436 via machineStateFor + readPointerValue', async () => {
@@ -100,9 +93,7 @@ describe('struct member pointers dereference through @ethdebug/pointers', () => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. The session renders pt as a nested variable
-// ---------------------------------------------------------------------------
+// ## 2. The session renders pt as a nested variable
 
 describe('session renders pt as a nested DAP variable', () => {
   it('pt has a non-zero variablesReference + a Point summary; children are x=11, y=7', async () => {
@@ -135,20 +126,17 @@ describe('session renders pt as a nested DAP variable', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Regression: value locals still decode; the reference locals are surfaced too
-// ---------------------------------------------------------------------------
+// ## 3. Value locals decode alongside the surfaced reference locals
 
-describe('regression: value locals decode & nums/label/pt are surfaced', () => {
+describe('value locals decode & nums/label/pt are surfaced', () => {
   it('at line 37 the value locals are correct and nums/label/pt are surfaced', async () => {
     const session = await breakAt(37);
     const m = await localsMap(session);
 
-    // Value locals unaffected.
     expect(m.get('a')).toMatchObject({value: '11', type: 'uint256'});
     expect(m.get('small')).toMatchObject({value: '7', type: 'uint8'});
     expect(m.get('sum')).toMatchObject({value: '0', type: 'uint256'});
-    // `tail` sits AFTER the reference locals — still ranks/reads correctly.
+    // `tail` sits after the reference locals and still ranks/reads correctly.
     expect(m.get('tail')).toMatchObject({value: '18', type: 'uint256'});
 
     // The dynamic array + string are decoded (nums nested, label scalar) —
@@ -157,7 +145,7 @@ describe('regression: value locals decode & nums/label/pt are surfaced', () => {
     expect(m.has('nums')).toBe(true);
     expect(m.has('label')).toBe(true);
 
-    // The struct IS now surfaced (as a nested variable).
+    // The struct is surfaced as a nested variable.
     expect(m.get('pt')).toBeDefined();
     expect(m.get('pt')!.variablesReference).not.toBe(0);
   });

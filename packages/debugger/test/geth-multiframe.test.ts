@@ -1,22 +1,22 @@
 /**
- * Session multi-frame lift for GETH via an address→CU registry.
+ * Session multi-frame lift for geth via an address→CU registry.
  *
- * Drives `SolidityDebugSession` against the REAL recorded anvil (geth-dialect)
+ * Drives `SolidityDebugSession` against the real recorded anvil (geth-dialect)
  * transaction `Caller.go(callee, 7)` → external `Callee.compute(7)` (677 steps;
  * depth-1 = Caller `0xe7f1…512`, depth-2 = Callee `0x5fbd…aa3`, depth-2 span
- * [249..562]). The two contracts live in SEPARATE geth build-infos
+ * [249..562]). The two contracts live in separate geth build-infos
  * (`caller-geth-build-info.json` / `callee-geth-build-info.json`, solc 0.8.35,
  * unopt) each with its own single source (`src/Caller.sol` / `src/Callee.sol`).
  *
- * A geth trace carries NO per-step code (`normalizeGethTrace` leaves
+ * A geth trace carries no per-step code (`normalizeGethTrace` leaves
  * `programChange: null`), so the session's CBOR-from-trace registry
- * (`cursor.at(idx).bytecode`) is EMPTY for geth: every frame falls back to the
- * ENTRY (Caller) CU and the callee frame wrongly maps to `src/Caller.sol`. An
+ * (`cursor.at(idx).bytecode`) is empty for geth: every frame would fall back to
+ * the entry (Caller) CU and the callee frame would map to `src/Caller.sol`. An
  * explicit address→build-info map, `contractsByAddress`, on `LaunchInputs`
- * resolves each frame's CU BY ADDRESS.
+ * resolves each frame's CU by address.
  *
- * Ground-truth (re-derived here against the raw trace + geth build-infos via the
- * real `normalizeGethTrace` + solc source-map / `variablesAt` / pointer path):
+ * Ground truth (from the raw trace + geth build-infos via the real
+ * `normalizeGethTrace` + solc source-map / `variablesAt` / pointer path):
  *   - 677 steps; depth-2 span [249..562] (Callee = 0x5fbd…aa3).
  *   - Callee `compute` body: `src/Callee.sol` line 8 = `stored = x * 2;`,
  *     line 9 = `return stored + 1;`. First depth-2 step at line 8 = 358,
@@ -39,11 +39,9 @@ import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
 
 import {buildInfoOf, readDbgFixture} from './support/harness.js';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+// ## Fixtures
 
-/** REAL recorded anvil (geth) `debug_traceTransaction` response STRING. */
+/** Recorded anvil (geth) `debug_traceTransaction` response, as raw text. */
 const CALLER_GO_TRACE_RAW = readDbgFixture('caller-go-anvil-trace.raw.json');
 
 const CALLER_BI_JSON: unknown = buildInfoOf('caller-geth-build-info.json');
@@ -60,19 +58,17 @@ const ACCT0 = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 const CALLER_PATH = 'src/Caller.sol';
 const CALLEE_PATH = 'src/Callee.sol';
 
-// `src/Callee.sol` line 8 = `stored = x * 2;` (the `compute` body statement,
-// mirroring the mixed-CU test); line 9 = `return stored + 1;`.
+// `src/Callee.sol` line 8 = `stored = x * 2;` (the `compute` body statement);
+// line 9 = `return stored + 1;`.
 const CALLEE_BODY_LINE = 8;
 
-// ---------------------------------------------------------------------------
-// LaunchInputs — the `contractsByAddress` map (loose cast keeps the shape
+// ## LaunchInputs — the `contractsByAddress` map (loose cast keeps the shape
 // type-clean)
-// ---------------------------------------------------------------------------
 
 /**
  * Full geth multi-frame launch: entry = Caller, and an explicit address→CU map
- * so the callee frame resolves to the Callee CU BY ADDRESS (the fix). Keys are
- * lowercase per the API contract.
+ * so the callee frame resolves to the Callee CU by address. Keys are lowercase
+ * per the API contract.
  */
 function gethMultiFrameInputs(): LaunchInputs {
   return {
@@ -105,8 +101,8 @@ function gethMultiFrameInputs(): LaunchInputs {
 }
 
 /**
- * The SAME geth trace WITHOUT `contractsByAddress` — only both build-infos in
- * the `buildInfos` array. Documents the gap: geth carries no per-step code, so
+ * The same geth trace without `contractsByAddress` — only both build-infos in
+ * the `buildInfos` array. Documents the limitation: geth carries no per-step code, so
  * CBOR identification cannot resolve the callee and it falls back to the entry
  * (Caller) CU.
  */
@@ -127,9 +123,7 @@ function gethNoMapInputs(): LaunchInputs {
   } as LaunchInputs;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers (mirroring mixed.test.ts)
-// ---------------------------------------------------------------------------
+// ## Helpers
 
 /** Scope refs for one frame, by name. */
 function scopeRefsFor(
@@ -145,9 +139,8 @@ function scopeRefsFor(
 }
 
 /**
- * Drive from entry to a depth-2 position INSIDE the Callee frame by arming a
- * breakpoint at `src/Callee.sol` line 8 and continuing. Returns once (in GREEN)
- * `stackTrace()` shows two frames.
+ * Drive from entry to a depth-2 position inside the Callee frame by arming a
+ * breakpoint at `src/Callee.sol` line 8 and continuing.
  */
 function continueIntoCallee(session: SolidityDebugSession): void {
   session.setBreakpoints({
@@ -165,9 +158,7 @@ interface V {
   variablesReference?: number;
 }
 
-// ---------------------------------------------------------------------------
-// 1. Full 2-frame geth lift — the address→CU registry
-// ---------------------------------------------------------------------------
+// ## 1. Full 2-frame geth lift — the address→CU registry
 
 describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
   it('at entry reports a single Caller frame in src/Caller.sol', async () => {
@@ -188,9 +179,9 @@ describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
     const {stackFrames} = session.stackTrace();
     expect(stackFrames).toHaveLength(2);
 
-    // TOP-FIRST DAP ordering: innermost (Callee) first, caller last.
+    // Top-first DAP ordering: innermost (Callee) first, caller last.
     const [top, parent] = stackFrames;
-    // The CORE of the fix: the callee frame maps to Callee.sol, NOT Caller.sol.
+    // The callee frame maps to Callee.sol, not Caller.sol.
     expect(top!.source?.path).toContain('Callee.sol');
     expect(top!.source?.path).toBe(CALLEE_PATH);
     expect(top!.name).toContain('compute');
@@ -199,15 +190,15 @@ describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
     expect(parent!.name).toContain('go');
   });
 
-  it('the callee (top) frame does NOT map to the entry Caller CU', async () => {
+  it('the callee (top) frame does not map to the entry Caller CU', async () => {
     const session = new SolidityDebugSession();
     await session.launch(gethMultiFrameInputs());
     continueIntoCallee(session);
 
     const {stackFrames} = session.stackTrace();
     expect(stackFrames).toHaveLength(2);
-    // Regression guard for the entry-CU fallback bug: the top frame's source
-    // must not be the Caller source.
+    // Guards against an entry-CU fallback: the top frame's source must not be
+    // the Caller source.
     expect(stackFrames[0]!.source?.path).not.toBe(CALLER_PATH);
   });
 
@@ -215,9 +206,9 @@ describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
     const session = new SolidityDebugSession();
     await session.launch(gethMultiFrameInputs());
 
-    // Caller.go(callee, x): the `callee` param is `address`, but its VALUE is the
+    // Caller.go(callee, x): the `callee` param is `address`, but its value is the
     // Callee contract's address (in contractsByAddress) → shown as the contract
-    // type with its address, and EXPANDABLE into that contract's storage.
+    // type with its address, and expandable into that contract's storage.
     const frameId = session.stackTrace().stackFrames[0]!.id;
     const localsRef = scopeRefsFor(session, frameId).ref('Locals');
     const locals = (await session.variables(localsRef)).variables as V[];
@@ -238,8 +229,8 @@ describe('geth multi-frame lift — stackTrace via contractsByAddress', () => {
 });
 
 /**
- * The Callee build-info with a same-named DECOY `Callee` (the Caller's code,
- * declared in another file) inserted AHEAD of the real one — mirroring a Foundry
+ * The Callee build-info with a same-named decoy `Callee` (the Caller's code,
+ * declared in another file) inserted ahead of the real one — mirroring a Foundry
  * build where forge-std and solmate both declare `MockERC20`.
  */
 function calleeBuildInfoWithDecoy(): unknown {
@@ -257,7 +248,7 @@ function calleeBuildInfoWithDecoy(): unknown {
 }
 
 describe('geth multi-frame lift — same-named contracts in different files', () => {
-  // With a geth trace (no per-step code) ONLY the entry's sourcePath can tell the
+  // With a geth trace (no per-step code) only the entry's sourcePath can tell the
   // two apart — which is why the resolver sends it. (kontrol traces carry code, so
   // a name-only ambiguous entry is resolved by runtime-code identification.)
   it('a sourcePath-qualified entry resolves the declared contract, not the first same-named decoy', async () => {
@@ -280,9 +271,7 @@ describe('geth multi-frame lift — same-named contracts in different files', ()
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Per-frame variables — decoded against each frame's own (address) CU
-// ---------------------------------------------------------------------------
+// ## 2. Per-frame variables — decoded against each frame's own (address) CU
 
 describe('geth multi-frame lift — per-frame variables', () => {
   it("the callee frame's param x reads 7 (external compute(x))", async () => {
@@ -305,10 +294,9 @@ describe('geth multi-frame lift — per-frame variables', () => {
     await session.launch(gethMultiFrameInputs());
     continueIntoCallee(session);
 
-    // The line-8 breakpoint lands at the FIRST body step, which precedes the
+    // The line-8 breakpoint lands at the first body step, which precedes the
     // SSTORE. Advance instruction-by-instruction (staying in the Callee frame)
-    // until the write is observable in the Callee State scope. (Mirrors the
-    // mixed-CU test.)
+    // until the write is observable in the Callee State scope.
     let stored: V | undefined;
     for (let k = 0; k < 250; k++) {
       const frames = session.stackTrace().stackFrames;
@@ -363,11 +351,9 @@ describe('geth multi-frame lift — per-frame variables', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Regression / gap doc — without the map, geth cannot resolve the callee
-// ---------------------------------------------------------------------------
+// ## 3. Without the map, geth cannot resolve the callee
 
-describe('geth multi-frame gap — without contractsByAddress', () => {
+describe('geth multi-frame limitation — without contractsByAddress', () => {
   it('cannot lift the geth callee to src/Callee.sol via buildInfos alone (CBOR needs per-step code geth lacks)', async () => {
     const session = new SolidityDebugSession();
     await session.launch(gethNoMapInputs());
@@ -375,25 +361,23 @@ describe('geth multi-frame gap — without contractsByAddress', () => {
     // Arm the Callee-source breakpoint and continue. With no address→CU map and
     // no per-step code, the callee cannot be identified, so no step resolves to
     // src/Callee.sol: the breakpoint never matches and continue runs to the
-    // terminal single Caller frame. Assert loosely (documents the gap the
-    // with-map path closes) — the top frame is NOT the Callee source.
+    // terminal single Caller frame. Assert loosely: the top frame is not the
+    // Callee source.
     continueIntoCallee(session);
     const {stackFrames} = session.stackTrace();
     expect(stackFrames[0]!.source?.path).not.toBe(CALLEE_PATH);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. instruction step-over skips an external subcall (raw EVM depth)
-// ---------------------------------------------------------------------------
+// ## 4. instruction step-over skips an external subcall (raw EVM depth)
 
 describe('instruction step-over across an external CALL', () => {
   it('next({granularity:"instruction"}) at the CALL runs the callee to completion', async () => {
     const session = new SolidityDebugSession();
     await session.launch(gethMultiFrameInputs());
 
-    // Advance one opcode at a time until the NEXT instruction enters the callee
-    // (a second, depth-2 frame appears); step back to sit ON the CALL opcode.
+    // Advance one opcode at a time until the next instruction enters the callee
+    // (a second, depth-2 frame appears); step back to sit on the CALL opcode.
     let guard = 0;
     while (guard++ < 5000) {
       if (session.currentStepIndex >= 676) break; // safety: near the last step
@@ -416,19 +400,17 @@ describe('instruction step-over across an external CALL', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. exception filters ("dynamic" breakpoints) — stop on external calls
-// ---------------------------------------------------------------------------
+// ## 5. exception filters ("dynamic" breakpoints) — stop on external calls
 
 describe('exception filter break-on-call stops at the external CALL', () => {
-  it('continue stops ON the CALL op (still depth-1), then steps into the callee', async () => {
+  it('continue stops on the CALL op (still depth-1), then steps into the callee', async () => {
     const session = new SolidityDebugSession();
     await session.launch(gethMultiFrameInputs());
     session.setExceptionBreakpoints({filters: ['break-on-call']});
 
     session.continue();
 
-    // Stopped ON the CALL opcode: still the single (caller) frame, reason set.
+    // Stopped on the CALL opcode: still the single (caller) frame, reason set.
     expect(session.stackTrace().stackFrames.length).toBe(1);
     const stopped = session.events.filter((e) => e.event === 'stopped');
     expect(

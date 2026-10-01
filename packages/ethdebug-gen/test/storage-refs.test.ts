@@ -1,10 +1,9 @@
 /**
- * STORAGE reference structures on the ethdebug producer.
+ * Storage reference layouts on the ethdebug producer.
  *
- * The storage analog of the memory struct / array work. For the
- * `StorageRefs` fixture, `generateEthdebugProgram(...).storageVariables` must carry
- * reference LAYOUT on two storage vars, mirroring the memory `ResolvedVariable`
- * shapes so the session reuses one rendering path:
+ * For the `StorageRefs` fixture, `generateEthdebugProgram(...).storageVariables`
+ * must carry reference layouts in the same shapes as the memory
+ * `ResolvedVariable` layouts:
  *   - `uint256[] public arr` (slot 0) → an `array` structure: a dereferenceable
  *     storage `List` pointer whose element regions are `'element'`, plus the
  *     element type facts (`t_uint256` / `uint256` / 32).
@@ -12,21 +11,20 @@
  *     structure: per-member descriptors, each with its own storage pointer at the
  *     consecutive absolute slot (base + member.slot).
  *
- * This spec pins the STATIC producer shape only; the pointers are dereferenced
- * through the real `@ethdebug/pointers` path in the debugger suite
- * (`storage-refs.test.ts`).
+ * This spec pins the static producer shape only; the pointers are dereferenced
+ * through `@ethdebug/pointers` in the debugger suite (`storage-refs.test.ts`).
  *
- * It ALSO pins the NEW `@simbolik/solc` `StorageType` fields the producer needs
- * (parsed from the raw `storageLayout.types` entry): `base` (array element type),
- * `members` (struct member slots), and `key`/`value` (mapping). These are read
- * through loose casts, so a missing field surfaces as a failed assertion rather
- * than a type error.
+ * It also pins the `@simbolik/solc` `StorageType` fields the producer needs
+ * (parsed from the raw `storageLayout.types` entry): `base` (array element
+ * type), `members` (struct member slots), and `key`/`value` (mapping). These
+ * are read through loose casts, so a missing field surfaces as a failed
+ * assertion rather than a type error.
  *
- * ── Fixture ground truth (storagerefs-build-info.json, deterministic layout) ────
+ * ## Fixture layout (storagerefs-build-info.json)
  *   arr:  type `t_array(t_uint256)dyn_storage`, encoding `dynamic_array`,
  *         base `t_uint256`, slot 0.
  *   pt:   type `t_struct(Point)7_storage`, encoding `inplace`, members
- *         [{x,slot 0},{y,slot 1}] RELATIVE to the struct base slot 5.
+ *         [{x,slot 0},{y,slot 1}] relative to the struct base slot 5.
  *   balances: type `t_mapping(t_uint256,t_uint256)`, key/value `t_uint256`, slot 4.
  */
 import {readFileSync} from 'node:fs';
@@ -45,9 +43,7 @@ import {
   type EthdebugStorageVariable,
 } from '../src/index.js';
 
-// ---------------------------------------------------------------------------
-// Fixture
-// ---------------------------------------------------------------------------
+// ## Fixture
 
 function loadCu(): CompilationUnit {
   const url = new URL(
@@ -69,7 +65,7 @@ function byName(
   return new Map(list.map((v) => [v.name, v]));
 }
 
-// ── Loose accessors for the producer fields ───────────────────────────────────
+// ## Loose accessors for the producer fields
 
 /** The `array` structure under a storage `arr` var. */
 interface StorageArrayShape {
@@ -96,14 +92,12 @@ function membersOf(
   return (sv as unknown as {members?: StorageMemberShape[]}).members;
 }
 
-// ── Loose accessor for the `bytesStorage` descriptor ──────────────────────────
+// ## Loose accessor for the `bytesStorage` descriptor
 
 /**
- * The `bytesStorage` descriptor on a `encoding:'bytes'` storage
- * var. `flagPointer` addresses the inline/flag word (a 32-byte storage word at the
- * base slot); `longBaseSlot` is the CONCRETE keccak256(pad32(slot)) base for the
- * long-form data words; `isString` selects UTF-8 vs `0x…` rendering. Pointer
- * internals are kept loose (location/slot only) to avoid over-specifying.
+ * The `bytesStorage` descriptor on an `encoding:'bytes'` storage variable.
+ * Pointer internals are kept loose (location/slot only) to avoid
+ * over-specifying.
  */
 interface BytesStorageShape {
   flagPointer?: {
@@ -121,16 +115,9 @@ function bytesStorageOf(
   return (sv as unknown as {bytesStorage?: BytesStorageShape}).bytesStorage;
 }
 
-// ── Loose accessor for the `mapping` descriptor ───────────────────────────────
+// ## Loose accessor for the `mapping` descriptor
 
-/**
- * The `mapping` descriptor on an `encoding:'mapping'` storage
- * var. Mapping keys are NOT enumerable statically (only the base slot is fixed);
- * the descriptor records the base slot + key/value solc types so the debugger can
- * enumerate observed keys from the trace and compute each entry slot as
- * `keccak256(key32 ‖ baseSlot32)`. Read loosely so a missing field surfaces as a
- * failed assertion, not a type error.
- */
+/** The `mapping` descriptor on an `encoding:'mapping'` storage variable. */
 interface MappingShape {
   baseSlot?: number;
   keyType?: string;
@@ -151,9 +138,7 @@ function extra(t: StorageType | undefined): StorageTypeExtra {
   return t as unknown as StorageTypeExtra;
 }
 
-// ---------------------------------------------------------------------------
-// 1. The producer emits reference structures on storage vars
-// ---------------------------------------------------------------------------
+// ## The producer emits reference structures on storage vars
 
 describe('generateEthdebugProgram emits storage reference structures', () => {
   it('arr carries an `array` structure (uint256 elements) with a storage pointer', () => {
@@ -195,9 +180,9 @@ describe('generateEthdebugProgram emits storage reference structures', () => {
   });
 
   it('value-slot storage vars are unchanged — arr/pt still expose their scalar slot pointer', () => {
-    // The reference vars keep their existing scalar `pointer` (a storage pointer at
-    // the base slot); the reference structure is ADDITIVE. Out-of-scope reference
-    // vars (string/bytes/mapping) carry no array/members.
+    // Reference vars keep their scalar `pointer` (a storage pointer at the base
+    // slot) alongside the reference structure. string/bytes/mapping vars carry
+    // no array/members.
     const m = byName(storageVars());
     for (const name of ['shortStr', 'longStr', 'blob', 'balances']) {
       const sv = m.get(name)!;
@@ -208,19 +193,15 @@ describe('generateEthdebugProgram emits storage reference structures', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 1b. The producer emits a `bytesStorage` descriptor on the three
-//     dynamic string/bytes storage vars (shortStr / longStr / blob).
+// ## The producer emits a `bytesStorage` descriptor on the three dynamic
+// string/bytes storage vars (shortStr / longStr / blob).
 //
-// Layout facts (slots + the STATIC keccak base) come from the producer; the
-// session owns the encoding RULES (parity-select). This spec pins the descriptor
-// SHAPE + the static long base slot only. Ground truth (re-derived from the
-// folded trace + verified with ethereum-cryptography/keccak):
+// The producer supplies layout facts (slots and the static keccak base); the
+// consumer applies the encoding rules. Expected values:
 //   shortStr @slot 1, t_string_storage, isString true
 //   longStr  @slot 2, t_string_storage, isString true,
 //            longBaseSlot = keccak256(pad32(2)) = 0x405787fa…5ace
 //   blob     @slot 3, t_bytes_storage,  isString false
-// ---------------------------------------------------------------------------
 
 describe('generateEthdebugProgram emits a bytesStorage descriptor', () => {
   it('shortStr carries a string bytesStorage with a storage flag pointer @slot 1', () => {
@@ -252,7 +233,7 @@ describe('generateEthdebugProgram emits a bytesStorage descriptor', () => {
     expect(bs!.flagPointer, 'the flag word needs a storage pointer').toBeDefined();
     expect(bs!.flagPointer!.location).toBe('storage');
     expect(bs!.flagPointer!.slot).toBe(2);
-    // The concrete keccak256(pad32(2)) — computed statically at gen time.
+    // keccak256(pad32(2)), computed statically.
     expect(bs!.longBaseSlot).toBe(
       '0x405787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace',
     );
@@ -273,24 +254,18 @@ describe('generateEthdebugProgram emits a bytesStorage descriptor', () => {
   });
 
   it('the mapping `balances` has no bytesStorage', () => {
-    // Mappings must NOT gain a bytesStorage descriptor.
     const balances = byName(storageVars()).get('balances')!;
     expect(balances, 'balances still listed').toBeDefined();
     expect(bytesStorageOf(balances), 'balances is not a bytes/string var').toBeUndefined();
   });
 });
 
-// ---------------------------------------------------------------------------
-// 1c. The producer marks the mapping `balances` with a `mapping`
-//     descriptor (base slot + key/value types + the keccak entry-slot rule).
+// ## The producer marks the mapping `balances` with a `mapping` descriptor.
 //
-// Mapping keys are NOT enumerable from the storage layout — only the base slot is
-// static. The producer records the STATIC facts (base slot 4, key/value
-// t_uint256); the debugger enumerates observed keys from the trace's SHA3
-// preimages and computes each entry slot as keccak256(key ‖ baseSlot). So the
-// mapping var carries NEITHER an array/members pointer NOR a bytesStorage — it
-// gets its own `mapping` descriptor.
-// ---------------------------------------------------------------------------
+// Mapping keys are not enumerable from the storage layout; only the base slot
+// is static. The producer records the static facts (base slot 4, key/value
+// t_uint256), so the mapping var carries neither an array/members pointer nor
+// a bytesStorage, only its own `mapping` descriptor.
 
 describe('generateEthdebugProgram marks the mapping storage var', () => {
   it('balances carries a mapping descriptor (baseSlot 4, uint256 key/value)', () => {
@@ -321,9 +296,7 @@ describe('generateEthdebugProgram marks the mapping storage var', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. The solc StorageType now exposes base / members / key-value
-// ---------------------------------------------------------------------------
+// ## The solc StorageType exposes base / members / key-value
 
 describe('@simbolik/solc StorageType exposes reference-layout fields', () => {
   it('the dynamic-array type carries its element base type', () => {

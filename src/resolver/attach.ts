@@ -1,14 +1,12 @@
 /**
- * The attach / remote-replay flow: replay an ALREADY-MINED tx from a generic
- * Ethereum node, resolving each frame's sources via Sourcify.
+ * The attach flow: replay an already-mined tx from a generic Ethereum node,
+ * resolving each frame's sources via Sourcify.
  *
- * Flow: `fetchAttachContext` (tx context + trace envelope + dialect) → the RAW
- * trace STRING (precision-safe, see {@link fetchRawTrace}) → reconstruct the
- * step model to enumerate the distinct executing code addresses → per address,
- * resolve verified sources on Sourcify + recompile to a build-info (concurrent,
- * per-address failures are NON-FATAL: an unverified frame simply won't map to
- * source) → assemble {@link LaunchInputs}. The ENTRY contract (`txContext.to`)
- * MUST be verified (else a clear throw).
+ * `fetchAttachContext` yields the tx context, trace envelope and dialect; the
+ * raw trace string is fetched separately (see {@link fetchRawTrace}). Each
+ * executed code address is resolved on Sourcify and recompiled to a build-info.
+ * Per-address failures are non-fatal (that frame just won't map to source), but
+ * the entry contract (`txContext.to`) must be verified.
  */
 import type {LaunchInputs, ResolveContext} from '@simbolik/debugger';
 import {fetchAttachContext} from '@simbolik/engine';

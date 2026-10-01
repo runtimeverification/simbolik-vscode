@@ -34,7 +34,7 @@ export interface AttachContext {
 
 /**
  * Fetch a transaction's context + trace from a node and classify the dialect.
- * Issues BOTH `eth_getTransactionByHash` and a trace call, keyed off the same
+ * Issues both `eth_getTransactionByHash` and a trace call, keyed off the same
  * `txHash`. The node type is unknown, so the trace methods of
  * {@link TRACE_METHODS} are tried in order until one is not "Method not found"
  * (`debug_traceTransaction` on anvil/geth, `kontrol_traceTransaction` on

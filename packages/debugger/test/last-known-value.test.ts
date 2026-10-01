@@ -1,12 +1,12 @@
 /**
  * Last-known-value retention: a value-type local that is still in lexical scope
  * but has no live location (its stack slot was freed/reused after its last use —
- * common under viaIR) is shown with its LAST KNOWN value rather than
+ * common under viaIR) is shown with its last known value rather than
  * disappearing.
  *
  * Soundness contract (what this pins):
- *   - the stale value is the one the variable GENUINELY held — decoded at the most
- *     recent earlier step of the SAME frame invocation where it was located, never
+ *   - the stale value is the one the variable genuinely held — decoded at the most
+ *     recent earlier step of the same frame invocation where it was located, never
  *     read from the current (reused) slot; so it equals the value seen while live;
  *   - it is rendered exactly like a live value (no marker, not read-only).
  *
@@ -14,8 +14,8 @@
  *   line 42  Token _a = mint(0x11);
  *   line 43  Token _b = mint(0x22);
  *   line 45  (a, b) = order(Token.unwrap(_a), Token.unwrap(_b), 1);
- * `_a`/`_b` are consumed by the `order` call on line 45. Stepping INTO `order` and
- * back OUT lands on line 45 again, now past their last use — where they are still
+ * `_a`/`_b` are consumed by the `order` call on line 45. Stepping into `order` and
+ * back out lands on line 45 again, now past their last use — where they are still
  * in scope but their slots are gone. Ground truth: mint(0x11)=0x12, mint(0x22)=0x23.
  */
 import {describe, expect, it} from 'vitest';
@@ -69,7 +69,7 @@ describe('last-known value for a freed-but-in-scope local (viaIR)', () => {
     // Rendered like any live value: no marker, no read-only hint.
     expect(a!.value).not.toMatch(/last known/);
     expect(a!.presentationHint).toBeUndefined();
-    // SOUND: the stale value is the very value held while live (not a reused slot).
+    // Sound: the stale value is the very value held while live (not a reused slot).
     expect(BigInt(a!.value)).toBe(0x12n);
     expect(BigInt(b!.value)).toBe(0x23n);
   });

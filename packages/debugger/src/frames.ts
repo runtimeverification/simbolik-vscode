@@ -13,12 +13,12 @@ import type {Trace} from './trace.js';
 
 /**
  * Whether a frame is a raw EVM-depth frame (`'evm'`), a reconstructed
- * internal-function sub-frame (`'internal'`), or a Solidity MODIFIER body frame
+ * internal-function sub-frame (`'internal'`), or a Solidity modifier body frame
  * (`'modifier'`, named after its ModifierDefinition). A `'cheatcode'` frame is a
- * synthetic TOP frame for a cheatcode CALL: its name is the decoded invocation
- * and it has NO Solidity function of its own (non-descendable). A `'foreign'`
- * frame runs code we cannot attribute to any compilation unit (etched raw
- * bytecode, an unknown callee): it has NO `contract`/`cu`, no Solidity source,
+ * synthetic top frame for a cheatcode CALL: its name is the decoded invocation
+ * and it has no Solidity function of its own (non-descendable). A `'foreign'`
+ * frame runs code that cannot be attributed to any compilation unit (etched raw
+ * bytecode, an unknown callee): it has no `contract`/`cu`, no Solidity source,
  * an address-derived `name`, and is non-descendable.
  */
 export type FrameKind =
@@ -36,9 +36,9 @@ export interface FrameInfo {
   depth: number;
   /** Lowercase hex address of the running contract. */
   address: string;
-  /** The resolved contract, or `undefined` for a FOREIGN frame. */
+  /** The resolved contract, or `undefined` for a foreign frame. */
   contract: Contract | undefined;
-  /** The resolved compilation unit, or `undefined` for a FOREIGN frame. */
+  /** The resolved compilation unit, or `undefined` for a foreign frame. */
   cu: CompilationUnit | undefined;
   optimized: boolean;
   /** Trace step index this frame is positioned at (top = current; parent = CALL site). */
@@ -114,7 +114,7 @@ function positionAt(
 }
 
 /**
- * The frames at `stop`, BOTTOM-first (outermost first).
+ * The frames at `stop`, bottom-first (outermost first).
  *
  * Folds the trace up to the stop, maintaining a frame stack indexed by EVM
  * depth: each step overwrites `frame[depth-1]`, pushing on depth increase and
@@ -144,14 +144,13 @@ export function reconstructFrames(trace: Trace, stop: Stop): FrameInfo[] {
     stack.length = depth; // pop any frames deeper than the current depth
   }
 
-  // Expand EVERY EVM frame into its internal-function sub-frames (constant-
+  // Expand every EVM frame into its internal-function sub-frames (constant-
   // EVM-depth JUMPs). A parent frame is replayed up to its CALL site, so its
-  // innermost sub-frame sits at the call. Expanding only the innermost frame
-  // collapsed the caller's internal call chain into one frame while a subcall
-  // ran, and re-expanded it on return — so returning from an external call
-  // looked like entering several frames at once. On any inconsistency the
-  // reconstruction returns undefined and that depth falls back to a single
-  // EVM frame.
+  // innermost sub-frame sits at the call. Expanding parents too keeps the
+  // caller's internal call chain stable across a subcall, so returning from an
+  // external call does not look like entering several frames at once. On any
+  // inconsistency the reconstruction returns undefined and that depth falls
+  // back to a single EVM frame.
   const frames: FrameInfo[] = [];
   let id = 1;
   for (const f of stack) {
@@ -187,7 +186,7 @@ export function reconstructFrames(trace: Trace, stop: Stop): FrameInfo[] {
   }
 
   // A cheatcode runs as an atomic, self-contained CALL with no descendable
-  // sub-trace. When the CURRENT step is one, surface it as a synthetic TOP frame
+  // sub-trace. When the current step is one, surface it as a synthetic top frame
   // labelled with the decoded invocation, sharing the innermost real frame's
   // source position (the call site).
   const current = steps[step];
@@ -228,7 +227,7 @@ function commonFrames(from: FrameInfo[], to: FrameInfo[]): number {
 }
 
 /**
- * Step-into's target, limited to entering ONE frame. When `target` would push
+ * Step-into's target, limited to entering one frame. When `target` would push
  * several frames at once — the first statement of a call lies in a further
  * nested call (a constructor whose body is its base-constructor invocation,
  * `new X()` whose first code is inherited, …) — stop instead where the first
@@ -267,12 +266,12 @@ type SubFrame = {stepIndex: number; kind: 'internal' | 'modifier'};
  * current step), or `undefined` to signal a fail-safe fallback to the single
  * EVM frame. Never throws.
  *
- * A genuine internal-function ENTRY is a JUMPDEST landing (a step whose
+ * A genuine internal-function entry is a JUMPDEST landing (a step whose
  * predecessor at this EVM depth had source-map `jump:'i'`) whose enclosing scope
- * is a `FunctionDefinition`. The FIRST entry establishes the base frame (the
- * entry function itself, via the dispatcher's jump-in). A RETURN is a landing
+ * is a `FunctionDefinition`. The first entry establishes the base frame (the
+ * entry function itself, via the dispatcher's jump-in). A return is a landing
  * whose predecessor had `jump:'o'` → pop. Landings inside a modifier body (or
- * unmapped) resolve to no `FunctionDefinition` and are NOT pushed. Underflow
+ * unmapped) resolve to no `FunctionDefinition` and are not pushed. Underflow
  * below the base triggers the fallback.
  */
 function internalFrames(
@@ -282,7 +281,7 @@ function internalFrames(
   cur: number
 ): SubFrame[] | undefined {
   const {steps, model} = trace;
-  // A FOREIGN frame has no contract/CU, so there is nothing to reconstruct.
+  // A foreign frame has no contract/CU, so there is nothing to reconstruct.
   const resolution = trace.registry.contractAt(address);
   if (resolution === undefined) return undefined;
 
@@ -296,19 +295,19 @@ function internalFrames(
     }
   }
 
-  // A stack over ALL internal jumps (every `jump:'i'` pushes, every `jump:'o'`
+  // A stack over all internal jumps (every `jump:'i'` pushes, every `jump:'o'`
   // pops), so it stays balanced across compiler-generated internal routines
-  // (ABI en/decoders, allocators) whose landings resolve to NO user function,
-  // and across the dispatcher→wrapper→body jumps that map to a function's OWN
-  // body. Only `real` entries — a jump into a DIFFERENT user `FunctionDefinition`
+  // (ABI en/decoders, allocators) whose landings resolve to no user function,
+  // and across the dispatcher→wrapper→body jumps that map to a function's own
+  // body. Only `real` entries — a jump into a different user `FunctionDefinition`
   // — become DAP frames; `real:false` entries are "phantoms" that keep the depth
   // honest. A real frame renders at its call site (a parent) or at the current
   // step (the innermost, finalized below).
-  // `lastOwn`: the latest step of a real frame that lies in its OWN function —
+  // `lastOwn`: the latest step of a real frame that lies in its own function —
   // its call site when it calls out. The step just before a call's jump can lie
   // elsewhere (a modifier body; viaIR's function-pointer dispatcher, which maps
   // to the ContractDefinition), where the frame would be named after the contract.
-  // `viaModifier`: the call site's step when a MODIFIER body made the call — the
+  // `viaModifier`: the call site's step when a modifier body made the call — the
   // modifier then stays on the stack beneath the callee (it is suspended there,
   // not finished) instead of vanishing while the callee runs.
   type Entry = {
@@ -347,8 +346,8 @@ function internalFrames(
     const caller = topReal();
 
     if (prevJump === 'i') {
-      // `i` is a JUMPDEST landing. A jump into a DIFFERENT user function is a
-      // genuine call → a real frame. A landing in the SAME function (the
+      // `i` is a JUMPDEST landing. A jump into a different user function is a
+      // genuine call → a real frame. A landing in the same function (the
       // dispatcher→wrapper→body path, or intra-function jumps), a modifier body,
       // a compiler routine, or an unmapped pc → a phantom that only balances the
       // depth.
@@ -374,10 +373,11 @@ function internalFrames(
       fn !== undefined &&
       fn.id !== caller.fnId
     ) {
-      // Straight from the caller's own code into ANOTHER user function without
+      // Straight from the caller's own code into another user function without
       // a `jump:'i'`: viaIR calls a function that never returns (one that
       // always reverts) with a plain JUMP, or inlines its body outright. It is
-      // still a call — otherwise the callee REPLACED its caller on the stack.
+      // still a call; otherwise the callee would replace its caller on the
+      // stack.
       // Falling back into the frame below (an inlined body that returns)
       // pops it again.
       const below = stack.filter(f => f.real).at(-2);
@@ -388,7 +388,7 @@ function internalFrames(
         stack.push({stepIndex: i, real: true, fnId: fn.id, inline: true});
       }
     } else if (caller === undefined && fn !== undefined) {
-      // The entry function is reached from the dispatcher WITHOUT a `jump:'i'`,
+      // The entry function is reached from the dispatcher without a `jump:'i'`,
       // so seed the base frame from the first step whose enclosing scope is a
       // FunctionDefinition (the entry-function body).
       stack.push({stepIndex: i, real: true, fnId: fn.id});
@@ -414,16 +414,16 @@ function internalFrames(
       {stepIndex: f.stepIndex, kind: 'internal'},
     ]);
 
-  // If the CURRENT step sits inside a ModifierDefinition body (an INLINE
+  // If the current step sits inside a ModifierDefinition body (an inline
   // modifier — no jump:'i'/'o', the only signal is the AST climb), materialize
-  // a MODIFIER frame ON TOP of the function it decorates, leaving the function
+  // a modifier frame on top of the function it decorates, leaving the function
   // frame at its call site. Suspend/resume fall out for free: at the placeholder
   // `_;` control lands in the function body (no modifier frame); on resume it is
   // back in the ModifierDefinition (the frame is re-emitted).
   //
   // Unmapped compiler-generated helper steps (ABI coders, checked arithmetic,
   // allocators) called from the modifier or function body carry no source
-  // position of their own, so walk back over them — within THIS same EVM frame
+  // position of their own, so walk back over them — within this same EVM frame
   // — to the nearest step that resolves to a user def. Without this, a helper
   // called from the modifier body (e.g. the checked-mul for `x * 2`) would drop
   // the modifier frame and mislabel the function frame as the contract.
@@ -461,7 +461,7 @@ function buildFrame(
   const {contract, cu, optimized} = resolution;
 
   // Resolve the position at the frame's pc; if unmapped, walk back within the
-  // SAME frame (same depth + address) to the nearest mapped step.
+  // same frame (same depth + address) to the nearest mapped step.
   let pos = positionAt(trace, resolution, stepIndex);
   for (
     let j = stepIndex - 1;
@@ -471,12 +471,12 @@ function buildFrame(
     pos = positionAt(trace, resolution, j);
   }
 
-  // A constructor (init) frame has no function NAME in the AST, so label it by
+  // A constructor (init) frame has no function name in the AST, so label it by
   // its contract; a modifier frame is named after its ModifierDefinition (the
   // function-only `fnNode` is undefined inside a modifier body); else the
   // function's own name, falling back to the contract name.
   const fnName = kind === 'modifier' ? pos?.defNode?.name : pos?.fnNode?.name;
-  // In init code a nameless function is a constructor — possibly a BASE
+  // In init code a nameless function is a constructor — possibly a base
   // contract's, so it is named after the contract that declares it.
   const ctorOf = pos?.fnNode?.parent();
   const name =
@@ -504,10 +504,10 @@ function buildFrame(
 }
 
 /**
- * A FOREIGN frame: a NON-descendable EVM-only frame for a code address running
- * bytecode we could not attribute to any compilation unit. It carries NO
- * contract/cu (→ no Solidity `source`) and its name is derived from its CODE
- * ADDRESS, so it is never mis-attributed to the entry contract's source.
+ * A foreign frame: a non-descendable EVM-only frame for a code address running
+ * bytecode that could not be attributed to any compilation unit. It carries no
+ * contract/cu (→ no Solidity `source`) and its name is derived from its code
+ * address, so it is never mis-attributed to the entry contract's source.
  */
 function foreignFrame(
   depth: number,

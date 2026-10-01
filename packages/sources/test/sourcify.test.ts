@@ -4,21 +4,19 @@ import {describe, expect, it} from 'vitest';
 /**
  * Tests for `SourcifyRepository`.
  *
- * We import the public entry point with a LOOSE dynamic-import cast: that keeps
- * the suite type-clean (no "has no exported member" compile error) and surfaces
- * a missing export as a runtime/assertion failure rather than a compile error.
+ * The public entry point is imported with a loose dynamic-import cast, so a
+ * missing export surfaces as an assertion failure rather than a compile error.
  */
 
 const ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
 
-/** Load a fixture JSON resolved relative to this test's src/ location. */
+/** Load a JSON fixture from `test/fixtures`. */
 function loadFixture(name: string): unknown {
   const url = new URL(`./fixtures/${name}`, import.meta.url);
   return JSON.parse(readFileSync(url, 'utf8')) as unknown;
 }
 
-// Minimal structural shape of what we exercise on the (future) exports. Kept
-// loose on purpose so importing symbols that don't exist yet is not a TS error.
+// Minimal structural shape of what the tests exercise on the exports.
 type ResolvedContractLike = {
   chainId: number;
   address: string;
@@ -118,7 +116,7 @@ describe('SourcifyRepository', () => {
       });
       expect(r!.standardJsonInput.settings.evmVersion).toBe('london');
       // Wrong-path guard. The fixture carries an identical optimizer/evmVersion
-      // under BOTH `compilation.compilerSettings` and the top-level solc
+      // under both `compilation.compilerSettings` and the top-level solc
       // `metadata.settings`, so the two assertions above alone cannot tell the
       // paths apart. The distinguishing key is `compilationTarget`: it exists
       // only in `metadata.settings`, never in `compilation.compilerSettings`.

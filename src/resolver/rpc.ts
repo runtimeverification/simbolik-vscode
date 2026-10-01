@@ -43,7 +43,7 @@ function summarizeRpcParams(method: string, params: unknown[]): string {
 
 /**
  * Fetch a trace response (via the node's `traceMethod`, see `NODE_RPC_METHODS`)
- * as the RAW JSON-RPC body STRING — what `LaunchInputs.traceJson` wants. The
+ * as the raw JSON-RPC body string that `LaunchInputs.traceJson` expects. The
  * session re-parses it losslessly; re-stringifying a parsed envelope instead
  * would round-trip kontrol's decimal bigints through `number`.
  */
@@ -68,10 +68,9 @@ const sleep = (ms: number): Promise<void> =>
 
 /**
  * Poll `eth_getTransactionReceipt` until the tx is mined (or the timeout / an
- * unsupported-method error ends the wait). Essential before tracing: tracing an
- * unmined tx yields an EMPTY trace. Returns the
- * receipt, or `undefined` if none appeared (the caller proceeds best-effort —
- * e.g. a node without receipt support).
+ * unsupported-method error ends the wait). Tracing an unmined tx yields an
+ * empty trace. Returns the receipt, or `undefined` if none appeared (the caller
+ * proceeds best-effort, e.g. on a node without receipt support).
  */
 export async function waitForReceipt(
   client: JsonRpcClient,

@@ -2,7 +2,7 @@
  * DAP `Source`s for build-info source files.
  *
  * Trace sources live in the build-info (relative paths; possibly recompiled and
- * not on the client's disk). On a LOCAL launch a file that exists under the
+ * not on the client's disk). On a local launch a file that exists under the
  * project root is referenced by its real absolute path, so VSCode opens the
  * editable document and gutter breakpoints work. Otherwise its content is served
  * through the `source` request under a stable `sourceReference`, keeping the
@@ -80,7 +80,7 @@ export class SourceRegistry {
   /**
    * Map an incoming breakpoint source path back to the relative build-info path
    * the stepping model keys breakpoints by: when frames reference the real
-   * on-disk file, VSCode sends an ABSOLUTE path.
+   * on-disk file, VSCode sends an absolute path.
    */
   relativePath(path: string): string {
     if (this.#root !== undefined && nodePath.isAbsolute(path)) {
