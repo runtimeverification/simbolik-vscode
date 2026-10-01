@@ -48,7 +48,8 @@ describe('devcontainerLaunch', () => {
     expect(launch.command).toBe('nix');
     expect(launch.cwd).toBe('/home/node/kontrol-node');
     expect(launch.args.at(-1)).toContain('--port 8899');
-    expect(launch.args.at(-1)).toContain('--steps-tracing');
+    // Removed upstream (tracing is always on); the node rejects the flag.
+    expect(launch.args.at(-1)).not.toContain('--steps-tracing');
   });
 
   it('points KDIST_DIR at the pre-built semantics so RPC calls resolve', () => {
@@ -60,7 +61,7 @@ describe('devcontainerLaunch', () => {
 });
 
 describe('kontrolNodeLaunch', () => {
-  it('runs the installed binary with step-tracing on the chosen port', () => {
+  it('runs the installed binary on the chosen port', () => {
     const launch = kontrolNodeLaunch(
       8899,
       '/opt/kup/bin/kontrol-node',
@@ -73,7 +74,6 @@ describe('kontrolNodeLaunch', () => {
       '127.0.0.1',
       '--port',
       '8899',
-      '--steps-tracing',
     ]);
     expect(launch.cwd).toBe('/tmp/w');
   });
@@ -94,7 +94,7 @@ describe('devcontainerLaunch — work dir', () => {
     // directories must land in the throwaway work dir instead.
     expect(launch.cwd).toBe('/home/node/kontrol-node');
     expect(launch.args.at(-1)).toBe(
-      "cd '/tmp/it'\\''s' && '/home/node/kontrol-node'/.venv/bin/kontrol-node run --port 8899 --steps-tracing",
+      "cd '/tmp/it'\\''s' && '/home/node/kontrol-node'/.venv/bin/kontrol-node run --port 8899",
     );
   });
 });

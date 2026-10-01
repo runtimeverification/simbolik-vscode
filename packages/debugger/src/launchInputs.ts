@@ -8,7 +8,7 @@ export interface LaunchInputs {
   buildInfoJson?: unknown;
   /** Order-independent array of standard-json build-infos. */
   buildInfos?: unknown[];
-  /** The raw `debug_traceTransaction` JSON-RPC response STRING (has `.result`). */
+  /** The raw trace JSON-RPC response STRING (has `.result`). */
   traceJson: unknown;
   /** Source path within the build-info, e.g. `'src/Counter.sol'`. */
   sourcePath: string;

@@ -65,7 +65,7 @@ export function loadTrace(inputs: LaunchInputs): Trace {
   return {cus, registry, steps, cursor, model, exceptions, errors};
 }
 
-/** Parse the raw `debug_traceTransaction` response into steps, per dialect. */
+/** Parse the raw trace JSON-RPC response into steps, per dialect. */
 function parseSteps(inputs: LaunchInputs): Step[] {
   const parsed = parseJsonLossless(inputs.traceJson as string) as {
     result: unknown;

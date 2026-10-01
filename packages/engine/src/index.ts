@@ -36,6 +36,11 @@ export {
 } from './locate.js';
 export {fetchAttachContext, type AttachContext} from './attach.js';
 export {
+  NODE_RPC_METHODS,
+  TRACE_METHODS,
+  type NodeRpcMethods,
+} from './rpcMethods.js';
+export {
   parseStateDump,
   type StateDump,
   type DumpedAccount,

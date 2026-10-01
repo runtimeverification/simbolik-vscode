@@ -147,7 +147,7 @@ package venv, with `KDIST_DIR` pointing at the pre-built KEVM semantics — see
 - kontrol-node emits addresses and 256-bit values as **decimal integers that overflow
   `Number.MAX_SAFE_INTEGER`** → parsed as `bigint` (never plain `JSON.parse`).
 - kontrol-node is an **eager whole-trace tracer**: `eth_sendTransaction` runs + traces
-  the tx; `debug_traceTransaction` streams back the precomputed trace. There is **no
+  the tx; `kontrol_traceTransaction` streams back the precomputed trace. There is **no
   interactive stepping in the node** — all stepping/breakpoints/reverse are implemented
   client-side over the trace.
 - Trace change-fields are **delta-encoded** (populated only on the step they change).

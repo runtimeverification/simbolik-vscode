@@ -1,5 +1,5 @@
 /**
- * Pre-trace state for a local launch: the `anvil_dumpState` snapshot and the
+ * Pre-trace state for a local launch: the node's state-dump snapshot and the
  * `initialStorage` seed derived from it (or, on nodes without the dump, from
  * per-slot `eth_getStorageAt` reads).
  *
@@ -20,18 +20,19 @@ import type {ContractsByAddress} from './contracts';
 type StorageSeed = NonNullable<LaunchInputs['initialStorage']>;
 
 /**
- * Fetch the whole-chain pre-state in ONE `anvil_dumpState` call (supported by
- * both kontrol-node and anvil, with different wire formats — see
+ * Fetch the whole-chain pre-state in ONE `dumpStateMethod` call
+ * (`anvil_dumpState` / `kontrol_dumpState`, with different wire formats — see
  * {@link parseStateDump}). Returns `undefined` on any failure (unsupported node,
  * malformed blob) so the caller falls back to the per-slot `eth_getStorageAt`
  * path. MUST be called at the desired pre-state point (after `setUp()`, before
- * the traced call), since `anvil_dumpState` snapshots the CURRENT state.
+ * the traced call), since the dump snapshots the CURRENT state.
  */
 export async function fetchStateDump(
-  client: JsonRpcClient
+  client: JsonRpcClient,
+  dumpStateMethod: string
 ): Promise<StateDump | undefined> {
   try {
-    const raw = await client.call<unknown>('anvil_dumpState', []);
+    const raw = await client.call<unknown>(dumpStateMethod, []);
     return parseStateDump(raw);
   } catch {
     return undefined;
@@ -40,7 +41,7 @@ export async function fetchStateDump(
 
 /**
  * The `initialStorage` seed for a launch, or `undefined` when there is nothing
- * to seed. Preferred path: the single `anvil_dumpState` snapshot (full storage,
+ * to seed. Preferred path: the single state-dump snapshot (full storage,
  * incl. mapping / dynamic-array slots the static-layout reader cannot
  * enumerate), restricted to the entry contract + every address the trace
  * executed. Fallback (unsupported node): read each known contract's static

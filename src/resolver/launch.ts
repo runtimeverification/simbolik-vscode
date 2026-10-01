@@ -7,7 +7,7 @@
 import * as fs from 'node:fs';
 
 import type {LaunchInputs, ResolveContext} from '@simbolik/debugger';
-import type {JsonRpcClient} from '@simbolik/engine';
+import {NODE_RPC_METHODS, type JsonRpcClient} from '@simbolik/engine';
 import type {Contract} from '@simbolik/solc';
 
 import {
@@ -67,8 +67,8 @@ const TX_GAS = '0x2540be400'; // 10_000_000_000
  * — which revert with a balance underflow when the contract is deployed with a
  * plain zero-value transaction (as we do) and thus starts with 0 ETH. `uint96`
  * max (~7.9e10 ETH) matches Foundry's default and is applied via
- * `anvil_setBalance` (supported by both anvil and kontrol-node); best-effort, so
- * a node without it simply keeps today's behavior.
+ * `anvil_setBalance` / `kontrol_setBalance`; best-effort, so a node without it
+ * simply keeps today's behavior.
  */
 const TEST_BALANCE = '0xffffffffffffffffffffffff';
 
@@ -117,6 +117,8 @@ export async function launchInputs(
 
   const dialect: 'kontrol' | 'geth' =
     rpcNodeType === 'kontrol-node' ? 'kontrol' : 'geth';
+  const methods =
+    NODE_RPC_METHODS[rpcNodeType === 'kontrol-node' ? 'kontrol-node' : 'anvil'];
   ctx?.log(
     `Backend: ${rpcNodeType} (${dialect} trace dialect) at ${jsonRpcUrl}`
   );
@@ -124,7 +126,10 @@ export async function launchInputs(
 
   ctx?.log(`Deploying ${contractName} …`);
   const contractAddress = await deploy(client, contract);
-  await fundAccounts(client, [contractAddress, DEFAULT_ACCOUNT]);
+  await fundAccounts(client, methods.setBalance, [
+    contractAddress,
+    DEFAULT_ACCOUNT,
+  ]);
 
   // Foundry semantics: `setUp()` establishes the fixture state a test/debug
   // method depends on (deploy tokens, fund actors, …). Our launch calls ONE
@@ -139,18 +144,22 @@ export async function launchInputs(
   }
 
   // Snapshot the PRE-CALL state (after deploy + setUp, before the traced call) in
-  // ONE `anvil_dumpState` request — the source for both contract identification
+  // ONE state-dump request — the source for both contract identification
   // (runtime code) and pre-trace storage seeding, replacing N × eth_getCode +
   // M × eth_getStorageAt. Must be taken HERE, before the call, since the dump is
   // of the CURRENT state. `undefined` on an unsupported node → per-slot fallback.
-  const preState = await fetchStateDump(client);
+  const preState = await fetchStateDump(client, methods.dumpState);
 
   ctx?.log(`Calling ${methodName}() at ${contractAddress} …`);
-  // Waiting for the receipt is CRITICAL: `debug_traceTransaction` on an unmined
-  // hash returns empty `structLogs` (a 0-step trace), which then has no frames.
+  // Waiting for the receipt is CRITICAL: tracing an unmined hash returns
+  // empty `structLogs` (a 0-step trace), which then has no frames.
   // The receipt's block number also anchors the fallback pre-trace storage read.
   const call = await transact(client, {to: contractAddress, data: calldata});
-  const traceJson = await fetchRawTrace(client, call.hash);
+  const traceJson = await fetchRawTrace(
+    client,
+    methods.traceTransaction,
+    call.hash
+  );
 
   // Resolve every EXTERNAL contract the tx touched to its CU. A geth trace has
   // no per-step code, so without this the debugger can't identify a callee (e.g.
@@ -256,20 +265,21 @@ async function deploy(
  * ETH — yet its `setUp()`/method may make value-bearing calls (a native-currency
  * pool seed sends `1 ether` from `address(this)`), which revert with a balance
  * underflow. Foundry avoids this by giving the test contract a large balance; we
- * mirror that via `anvil_setBalance`. Best-effort: a node lacking the method
+ * mirror that via the node's `setBalanceMethod`. Best-effort: a node lacking it
  * leaves balances unchanged (the setUp-revert warning still fires). Cannot use a
  * value-bearing transfer instead — a test contract is rarely `payable`, so a
  * plain send would itself revert.
  */
 async function fundAccounts(
   client: JsonRpcClient,
+  setBalanceMethod: string,
   accounts: string[]
 ): Promise<void> {
   for (const acct of accounts) {
     try {
-      await client.call('anvil_setBalance', [acct, TEST_BALANCE]);
+      await client.call(setBalanceMethod, [acct, TEST_BALANCE]);
     } catch {
-      // Node without anvil_setBalance — skip (non-fatal).
+      // Node without the method — skip (non-fatal).
     }
   }
 }

@@ -57,7 +57,7 @@ describe('kontrol-node — installed (kup / PATH)', () => {
     if (!setup.ok) throw new Error('unreachable');
     expect(setup.launch(8899, '/tmp/w')).toMatchObject({
       command: file,
-      args: ['run', '--host', '127.0.0.1', '--port', '8899', '--steps-tracing'],
+      args: ['run', '--host', '127.0.0.1', '--port', '8899'],
       cwd: '/tmp/w',
     });
   });

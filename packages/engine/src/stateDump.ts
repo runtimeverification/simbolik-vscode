@@ -1,7 +1,8 @@
 /**
- * Parse an `anvil_dumpState` result into a normalized pre-state snapshot.
+ * Parse a state-dump result (`anvil_dumpState` / `kontrol_dumpState`) into a
+ * normalized pre-state snapshot.
  *
- * `anvil_dumpState` returns the FULL chain state in one call, letting the
+ * The dump returns the FULL chain state in one call, letting the
  * resolver seed a traced transaction's pre-state (code + storage a prior tx like
  * `setUp()` wrote and the trace only reads) with a SINGLE request instead of
  * one `eth_getCode` per contract plus one `eth_getStorageAt` per storage slot.
@@ -61,7 +62,7 @@ function minimalHex(value: string): Hex | undefined {
 }
 
 /**
- * Parse a raw `anvil_dumpState` result (JSON object OR gzip-hex string) into a
+ * Parse a raw state-dump result (JSON object OR gzip-hex string) into a
  * normalized {@link StateDump}, or `undefined` if it cannot be parsed.
  */
 export function parseStateDump(rawResult: unknown): StateDump | undefined {

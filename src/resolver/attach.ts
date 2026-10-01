@@ -35,14 +35,14 @@ export async function attachInputs(
   ctx?.log(`Attaching to ${txHash} at ${jsonRpcUrl} …`);
   const client = loggingClient(jsonRpcUrl, ctx);
 
-  const {dialect, envelope, txContext} = await fetchAttachContext(
+  const {dialect, envelope, txContext, traceMethod} = await fetchAttachContext(
     client,
     txHash
   );
   ctx?.log(`Backend: ${dialect} trace dialect`);
   // Re-fetch the trace unparsed rather than re-stringifying the parsed
   // envelope, so kontrol's decimal-bigint fields keep full precision.
-  const traceJson = await fetchRawTrace(client, txHash);
+  const traceJson = await fetchRawTrace(client, traceMethod, txHash);
 
   // An explicit arg wins; else the node's, robust to hex/decimal.
   const chainId = args.chainId ?? toChainId(await client.call('eth_chainId'));

@@ -65,12 +65,16 @@ const TX_RESPONSE = JSON.stringify({jsonrpc: '2.0', id: 0, result: TX_RESULT});
 
 /**
  * `fetch` that dispatches by the request `method` in the POST body: the tx
- * result for `eth_getTransactionByHash`, the raw trace text for
- * `debug_traceTransaction`. Any other method is a JSON-RPC error. Every method
- * seen is recorded in `calls` (with the params) so a test can assert that BOTH
- * RPCs were actually issued — not that the result was fabricated from one call.
+ * result for `eth_getTransactionByHash`, the raw trace text for `traceMethod`
+ * (anvil's `debug_traceTransaction` by default). Any other method is a JSON-RPC
+ * "Method not found". Every method seen is recorded in `calls` (with the params)
+ * so a test can assert that BOTH RPCs were actually issued — not that the result
+ * was fabricated from one call.
  */
-function fakeFetch(calls: {method: string; params: unknown[]}[]): FetchLike {
+function fakeFetch(
+  calls: {method: string; params: unknown[]}[],
+  traceMethod = 'debug_traceTransaction',
+): FetchLike {
   return (async (_url: string, init?: {body?: string}) => {
     const {method, params} = JSON.parse(init?.body ?? '{}') as {
       method: string;
@@ -80,7 +84,7 @@ function fakeFetch(calls: {method: string; params: unknown[]}[]): FetchLike {
     if (method === 'eth_getTransactionByHash') {
       return new Response(TX_RESPONSE, {status: 200});
     }
-    if (method === 'debug_traceTransaction') {
+    if (method === traceMethod) {
       return new Response(ANVIL_TRACE_RAW, {status: 200});
     }
     return new Response(
@@ -100,10 +104,8 @@ describe('fetchAttachContext', () => {
       fetch: fakeFetch(calls),
     });
 
-    const {dialect, envelope, txContext} = await fetchAttachContext(
-      client,
-      META.callTxHash,
-    );
+    const {dialect, envelope, txContext, traceMethod} =
+      await fetchAttachContext(client, META.callTxHash);
 
     // It must issue BOTH JSON-RPC calls — the tx lookup (for the context) AND
     // the trace fetch (for the envelope). Neither may be skipped or fabricated.
@@ -115,6 +117,9 @@ describe('fetchAttachContext', () => {
     const traceCall = calls.find((c) => c.method === 'debug_traceTransaction');
     expect(txCall!.params[0]).toBe(META.callTxHash);
     expect(traceCall!.params[0]).toBe(META.callTxHash);
+    // anvil answers the standard method, so kontrol's is never tried.
+    expect(traceMethod).toBe('debug_traceTransaction');
+    expect(methods).not.toContain('kontrol_traceTransaction');
 
     // The recorded anvil trace is the geth dialect, 118 structLogs.
     expect(dialect).toBe('geth');
@@ -125,6 +130,38 @@ describe('fetchAttachContext', () => {
     expect(txContext.to).toBe(META.txTo);
     expect(txContext.from).toBe(META.txFrom);
     expect(txContext.input).toBe(META.txInput);
+  });
+
+  it('falls back to kontrol_traceTransaction on a kontrol-node', async () => {
+    const calls: {method: string; params: unknown[]}[] = [];
+    const client = new JsonRpcClient({
+      url: 'http://node',
+      fetch: fakeFetch(calls, 'kontrol_traceTransaction'),
+    });
+
+    const {envelope, traceMethod} = await fetchAttachContext(
+      client,
+      META.callTxHash,
+    );
+
+    expect(traceMethod).toBe('kontrol_traceTransaction');
+    expect(calls.map((c) => c.method)).toEqual([
+      'eth_getTransactionByHash',
+      'debug_traceTransaction',
+      'kontrol_traceTransaction',
+    ]);
+    expect((envelope as {structLogs: unknown[]}).structLogs).toHaveLength(118);
+  });
+
+  it('fails clearly when the node supports no trace method', async () => {
+    const client = new JsonRpcClient({
+      url: 'http://node',
+      fetch: fakeFetch([], 'none'),
+    });
+
+    await expect(fetchAttachContext(client, META.callTxHash)).rejects.toThrow(
+      /supports none of debug_traceTransaction, kontrol_traceTransaction/,
+    );
   });
 
   it('throws a clear error when the tx hash is unknown (node returns null)', async () => {

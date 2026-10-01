@@ -12,7 +12,7 @@ export interface KontrolNodeLaunch {
 /**
  * Launch recipe for an installed `kontrol-node` (e.g. `kup install
  * kontrol-node`), which bundles the K runtime and the KEVM semantics:
- *   kontrol-node run --host 127.0.0.1 --port <p> --steps-tracing
+ *   kontrol-node run --host 127.0.0.1 --port <p>
  *
  * `binary` defaults to the bare command name (resolved on `PATH`). The node
  * writes an `io_dir*` scratch directory (28–250 MB) into its working directory
@@ -27,7 +27,7 @@ export function kontrolNodeLaunch(
 ): KontrolNodeLaunch {
   return {
     command: binary,
-    args: ['run', '--host', host, '--port', String(port), '--steps-tracing'],
+    args: ['run', '--host', host, '--port', String(port)],
     cwd: workDir,
     env: {...process.env},
   };
@@ -37,7 +37,7 @@ export function kontrolNodeLaunch(
  * Launch recipe for a development checkout of kontrol-node (the dev container's
  * provisioned engine):
  *   cd $KONTROL_NODE_DIR
- *   nix develop --command bash -c 'cd <workDir> && $KONTROL_NODE_DIR/.venv/bin/kontrol-node run --port <p> --steps-tracing'
+ *   nix develop --command bash -c 'cd <workDir> && $KONTROL_NODE_DIR/.venv/bin/kontrol-node run --port <p>'
  *
  * The nix dev shell supplies the K runtime (`kompile` etc.); the venv supplies
  * the `kontrol-node` CLI. `KDIST_DIR` must point at the pre-built KEVM
@@ -54,7 +54,7 @@ export function devcontainerLaunch(
   kontrolNodeDir = process.env.KONTROL_NODE_DIR ?? '/home/node/kontrol-node',
   workDir?: string,
 ): KontrolNodeLaunch {
-  const run = `.venv/bin/kontrol-node run --port ${port} --steps-tracing`;
+  const run = `.venv/bin/kontrol-node run --port ${port}`;
   const script =
     workDir === undefined
       ? run

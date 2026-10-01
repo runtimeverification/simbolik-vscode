@@ -50,7 +50,7 @@ describe.skipIf(!live)('kontrol-node live', () => {
 
         const trace = await node.client.call<{
           structLogs: Array<{codeAddress: bigint; pc: number}>;
-        }>('debug_traceTransaction', [txHash, {}]);
+        }>('kontrol_traceTransaction', [txHash, {}]);
 
         expect(trace.structLogs.length).toBeGreaterThan(0);
         // The precision-critical field: a 160-bit address as exact bigint.

@@ -13,7 +13,7 @@ export type Hex = `0x${string}`;
 /**
  * One step of a kontrol-node trace.
  * Source of truth: kontrol-node `kdist/trace-json.md` (`traceItemToJson`),
- * example `test-data/output/debug_traceTransaction_0.expected.json`.
+ * example `test-data/output/kontrol_traceTransaction_0.expected.json`.
  *
  * ── Delta semantics (critical) ──────────────────────────────────────────────
  * The `*Change` / `*Changes` fields are populated ONLY on the step where the

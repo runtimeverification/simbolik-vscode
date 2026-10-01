@@ -99,7 +99,7 @@ export function methodNameFromInput(
 
 // ─── trace → executed contracts ──────────────────────────────────────────────
 
-/** Parse a raw `debug_traceTransaction` response STRING to its trace envelope. */
+/** Parse a raw trace response STRING to its trace envelope. */
 export function parseTraceEnvelope(traceJson: string): unknown {
   const parsed = parseJsonLossless(traceJson) as {result?: unknown};
   return parsed !== null && typeof parsed === 'object' && 'result' in parsed
@@ -133,7 +133,7 @@ export function executedAddresses(
  * matching the address's runtime code (see `identifyContractByRuntimeCode`).
  * The session resolves callee frames through this map — a geth trace carries no
  * per-step code, so this is the only way to identify external calls. Runtime
- * code comes from `preState` (the one `anvil_dumpState` snapshot) when
+ * code comes from `preState` (the one state-dump snapshot) when
  * available, else per-address `eth_getCode`. Best-effort: an address whose code
  * can't be fetched or matched is skipped (that frame just won't map to source).
  */

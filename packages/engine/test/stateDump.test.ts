@@ -1,6 +1,7 @@
 /**
- * `parseStateDump` — normalize an `anvil_dumpState` result from BOTH wire formats
- * (kontrol-node raw JSON; anvil gzip-hex) into one snapshot.
+ * `parseStateDump` — normalize a state-dump result from BOTH wire formats
+ * (kontrol-node `kontrol_dumpState` raw JSON; anvil `anvil_dumpState` gzip-hex)
+ * into one snapshot.
  *
  * The two formats were captured empirically (2026-09-03) from live nodes:
  *   - kontrol-node: raw JSON object; `nonce` a NUMBER; storage VALUES minimal hex;
