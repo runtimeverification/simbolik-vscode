@@ -14,7 +14,7 @@
   "version": "15.0.1",
   "engines": {
     "vscode": "^1.79.0",
-    "node": ">=16.0.0"
+    "node": ">=22.0.0"
   },
   "icon": "images/simbolik-icon-light.png",
   "categories": [
