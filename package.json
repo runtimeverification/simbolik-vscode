@@ -225,7 +225,7 @@
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
-    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-server -- --minify",
+    "vscode:prepublish": "tsc -b tsconfig.packages.json && npm run esbuild-base -- --minify && npm run esbuild-server -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
     "esbuild-server": "esbuild ./src/server.ts       --bundle --outfile=build/server.mjs      --external:vscode --format=esm --platform=node",
     "esbuild": "npm run esbuild-base -- --sourcemap && npm run esbuild-server -- --sourcemap",
