@@ -45,7 +45,7 @@ export function globalGroupVariables(
         },
         {
           name: 'sig',
-          value: '0x' + ms.calldata.slice(2, 10),
+          value: '0x' + ms.calldata.slice(2, 10).padEnd(8, '0'),
           type: 'bytes4',
           variablesReference: 0,
         },
