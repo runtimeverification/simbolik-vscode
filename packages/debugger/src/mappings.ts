@@ -35,9 +35,14 @@ export function mappingValueSlot(key: bigint, baseSlot: bigint): bigint {
 }
 
 /**
- * Enumerate the observed keys of the mapping at `baseSlot`, scanning every
- * `KECCAK256`/`SHA3` op at trace `index <= uptoStepIndex` whose 64-byte memory
- * preimage is `key ‖ baseSlot`. De-duplicated, in first-seen order.
+ * Enumerate the observed keys of the mapping at `baseSlot` in the storage of
+ * `storageAddress`, scanning every `KECCAK256`/`SHA3` op at trace
+ * `index <= uptoStepIndex` that runs against that storage and whose 64-byte
+ * memory preimage is `key ‖ baseSlot`. De-duplicated, in first-seen order.
+ *
+ * Steps are filtered by `targetAddress` (the account whose storage the frame
+ * uses), not `codeAddress`: two contracts with a mapping at the same slot must
+ * not share keys, and a delegatecalled frame hashes keys of the caller's storage.
  *
  * The op's operands come from the stack (top-of-stack last): `offset =
  * stack[len-1]`, `size = stack[len-2]`; only size `0x40` hashes are
@@ -51,6 +56,7 @@ export function enumerateMappingKeys(
   cursor: StateCursor,
   baseSlot: number,
   uptoStepIndex: number,
+  storageAddress: bigint,
 ): bigint[] {
   const base = BigInt(baseSlot);
   const keys: bigint[] = [];
@@ -59,6 +65,7 @@ export function enumerateMappingKeys(
   for (let index = 0; index <= last; index++) {
     const step = steps[index]!;
     if (!KECCAK_OPS.has(step.op)) continue;
+    if (step.targetAddress !== storageAddress) continue;
     const len = step.stack.length;
     if (len < 2) continue;
     const size = BigInt(step.stack[len - 2]!);

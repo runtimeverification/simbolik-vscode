@@ -443,13 +443,14 @@ describe('dereference oracle: mapping value slots read 100/250', () => {
 // modules (debugger or lifting), falling back to `undefined`, so the test stays
 // type-clean wherever it is exported; the "must be defined" assertion guards
 // that the export exists. The signature is
-// `enumerateMappingKeys(steps, cursor, baseSlot, uptoStepIndex): bigint[]`.
+// `enumerateMappingKeys(steps, cursor, baseSlot, uptoStepIndex, storageAddress): bigint[]`.
 
 type EnumerateFn = (
   steps: Step[],
   cursor: StateCursor,
   baseSlot: number,
   uptoStepIndex: number,
+  storageAddress: bigint,
 ) => bigint[];
 
 /** Find `enumerateMappingKeys` among the candidate modules. */
@@ -483,17 +484,18 @@ describe('enumerateMappingKeys recovers observed keys from the trace', () => {
     const {steps, cursor} = cursorFor(TRACE);
     const endIndex = ownStepIndexAtPc(CLEAN_PC);
     expect(endIndex, `no own-contract step at pc ${CLEAN_PC}`).toBeGreaterThanOrEqual(0);
+    const own = steps[endIndex]!.targetAddress;
 
     // At the clean body pc both mapping SHA3s (idx 834, 853) have run → keys 7, 9
     // in first-seen order.
-    expect(enumerate!(steps, cursor, 4, endIndex)).toEqual([7n, 9n]);
+    expect(enumerate!(steps, cursor, 4, endIndex, own)).toEqual([7n, 9n]);
 
     // Bounded by the current step: before the first mapping SHA3 (idx 834) no key
     // is observable yet.
-    expect(enumerate!(steps, cursor, 4, 833)).toEqual([]);
+    expect(enumerate!(steps, cursor, 4, 833, own)).toEqual([]);
 
     // After the first SHA3 (idx 834) but before the second (idx 853): only key 7.
-    expect(enumerate!(steps, cursor, 4, 840)).toEqual([7n]);
+    expect(enumerate!(steps, cursor, 4, 840, own)).toEqual([7n]);
   });
 
   it('recovers an address key whose preimage word contains a-f (no-0x kontrol memory)', async () => {
@@ -529,7 +531,45 @@ describe('enumerateMappingKeys recovers observed keys from the trace', () => {
       initCodeChanges: {},
     };
     const cursor = new StateCursor([step]);
-    expect(enumerate!([step], cursor, 1, 0)).toEqual([alice]);
+    expect(enumerate!([step], cursor, 1, 0, 0n)).toEqual([alice]);
+  });
+
+  it('only lists keys hashed against the requested storage account', async () => {
+    // Contracts A and B both keep a mapping at slot 4; key 7 is touched in A,
+    // key 9 in B. B is reached by DELEGATECALL from A for key 11, so that hash
+    // runs B's code against A's storage and belongs to A.
+    const enumerate = await loadEnumerateMappingKeys();
+    const A = 0xaan;
+    const B = 0xbbn;
+    const pad = (n: bigint) => n.toString(16).padStart(64, '0');
+    const sha3 = (index: number, code: bigint, target: bigint, key: bigint): Step => ({
+      index,
+      pc: 0,
+      op: 'SHA3',
+      depth: 1,
+      gas: 0,
+      isInitCode: false,
+      codeAddress: code,
+      targetAddress: target,
+      msgSender: 0n,
+      msgValue: 0n,
+      txOrigin: 0n,
+      statusCode: 'ok',
+      stack: ['0x40', '0x0'],
+      memoryChange: [pad(key), pad(4n)] as Step['memoryChange'],
+      programChange: null,
+      callDataChange: null,
+      returnDataChange: null,
+      storageChanges: {},
+      balanceChanges: {},
+      nonceChanges: {},
+      deployedCodeChanges: {},
+      initCodeChanges: {},
+    });
+    const steps = [sha3(0, A, A, 7n), sha3(1, B, B, 9n), sha3(2, B, A, 11n)];
+    const cursor = new StateCursor(steps);
+    expect(enumerate!(steps, cursor, 4, 2, A)).toEqual([7n, 11n]);
+    expect(enumerate!(steps, cursor, 4, 2, B)).toEqual([9n]);
   });
 });
 

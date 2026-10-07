@@ -138,7 +138,7 @@ export class SolidityVariables {
   async state(frame: FrameInfo): Promise<DebugProtocol.Variable[]> {
     if (!isSolidityFrame(frame)) return [];
     const {contract, cu} = frame;
-    const ms = this.#machineState(frame, frame.stepIndex);
+    const ms = this.#machineState(frame.stepIndex);
     const variables: DebugProtocol.Variable[] = [];
     for (const sv of ethdebugProgram(contract, cu).storageVariables) {
       const label = contract.storageType(sv.solcType)?.label;
@@ -223,7 +223,7 @@ export class SolidityVariables {
     const {steps} = this.#trace;
     // Read at the frame's live body position (see LocalsHistory.readStep).
     const step = this.#history.readStep(frame);
-    const ms = this.#machineState(frame, step);
+    const ms = this.#machineState(step);
     const modelRef = this.#history.modelReference(frame, step);
 
     const variables: DebugProtocol.Variable[] = [];
@@ -328,7 +328,7 @@ export class SolidityVariables {
       step,
       modelRef
     )) {
-      const ms = this.#machineState(frame, j);
+      const ms = this.#machineState(j);
       if (v.bytes === undefined) {
         return this.#scalar(
           cu,
@@ -369,13 +369,13 @@ export class SolidityVariables {
       parent = ethdebugProgram(contract, cu).storageVariables.find(
         sv => sv.name === varName
       );
-      ms = this.#machineState(frame, frame.stepIndex);
+      ms = this.#machineState(frame.stepIndex);
     } else {
       const step = this.#history.readStep(frame);
       parent = variablesAtStep(frame, this.#trace.steps[step]!).find(
         v => v.name === varName
       );
-      ms = this.#machineState(frame, step);
+      ms = this.#machineState(step);
     }
     if (parent === undefined) return [];
 
@@ -491,7 +491,8 @@ export class SolidityVariables {
       this.#trace.steps,
       this.#trace.cursor,
       mapping.baseSlot,
-      frame.stepIndex
+      frame.stepIndex,
+      this.#trace.steps[frame.stepIndex]!.targetAddress
     );
     const typeOf = (solcType: string): ValueType => {
       const t = contract.storageType(solcType);
@@ -597,7 +598,13 @@ export class SolidityVariables {
     return decodeValue(field, t.solcType, t.numberOfBytes, ctx);
   }
 
-  #machineState(frame: FrameInfo, step: number): Machine.State {
-    return machineStateFor(this.#trace.cursor.at(step), frame.address);
+  /**
+   * Machine state at `step` with storage read from the frame's storage account
+   * (`targetAddress`), which differs from `frame.address` (the code address)
+   * under DELEGATECALL.
+   */
+  #machineState(step: number): Machine.State {
+    const storageAddress = addressHex(this.#trace.steps[step]!.targetAddress);
+    return machineStateFor(this.#trace.cursor.at(step), storageAddress);
   }
 }
