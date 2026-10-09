@@ -13,8 +13,8 @@
   "description": "Advanced Solidity and EVM Debugger",
   "version": "15.0.1",
   "engines": {
-    "vscode": "^1.79.0",
-    "node": ">=22.0.0"
+    "vscode": "^1.93.0",
+    "node": ">=20.17.0"
   },
   "icon": "images/simbolik-icon-light.png",
   "categories": [
@@ -247,7 +247,7 @@
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.1",
     "@types/node": "^20.13.1",
-    "@types/vscode": "^1.79.0",
+    "@types/vscode": "^1.93.0",
     "@typescript-eslint/eslint-plugin": "^5.59.8",
     "@typescript-eslint/parser": "^5.59.8",
     "@vscode/test-electron": "^2.3.2",
