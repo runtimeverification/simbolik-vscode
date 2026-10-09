@@ -1,0 +1,9 @@
+{
+ "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+ "calldata": "0xc0406226",
+ "callTxHash": "0xcccc3cbd2323f5d08b8d51e723e7003f765316353737160caea6a351dae6a5e4",
+ "status": "0x1",
+ "traceStepCount": 687,
+ "note": "CtorFactory.run() — new Ctor(5, 7) — legacy, recorded on kontrol-node (fresh node)",
+ "derivedAddress": "0xa16e02e87b7454126e5e10d957a927a7f5b5d2be"
+}

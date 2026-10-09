@@ -1,0 +1,10 @@
+{
+ "contractAddress": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+ "calldata": "0x9bbc59f90000000000000000000000000000000000000000000000000000000000000003",
+ "callTxHash": "0x638cb68707e42bf5fd335451307f36cb36512ca02aab218f6aab78ddf1847ef3",
+ "status": "0x0",
+ "failed": true,
+ "returnValue": "",
+ "traceStepCount": 308,
+ "note": "Exceptions.direct(3) — viair, recorded on kontrol-node (fresh node)"
+}

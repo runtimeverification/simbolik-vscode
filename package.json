@@ -13,8 +13,8 @@
   "description": "Advanced Solidity and EVM Debugger",
   "version": "15.0.1",
   "engines": {
-    "vscode": "^1.79.0",
-    "node": ">=16.0.0"
+    "vscode": "^1.93.0",
+    "node": ">=20.17.0"
   },
   "icon": "images/simbolik-icon-light.png",
   "categories": [
@@ -26,7 +26,9 @@
     "*"
   ],
   "main": "./build/extension.js",
-  "browser": "./build/extension.web.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "contributes": {
     "menus": {
       "editor/title": [
@@ -50,18 +52,6 @@
     "configuration": {
       "title": "Simbolik: Solidity Debugger",
       "properties": {
-        "simbolik.api-key": {
-          "type": "string",
-          "default": "valid-api-key",
-          "description": "The API key to authenticate with the simbolik server.",
-          "order": 0
-        },
-        "simbolik.server": {
-          "type": "string",
-          "default": "wss://code.simbolik.dev",
-          "description": "The websocket URL where the simbolik server is listening. Do not change this unless you are running your own simbolik server.",
-          "order": 1
-        },
         "simbolik.forge-path": {
           "type": "string",
           "default": "forge",
@@ -84,12 +74,6 @@
           "description": "Chose when Simbolik should build the project.",
           "order": 3
         },
-        "simbolik.show-sourcemaps": {
-          "type": "boolean",
-          "default": false,
-          "description": "If set to true, the debugger will include sourcemaps in the disassembly view. This is useful when debugging sourcemaps.",
-          "order": 7
-        },
         "simbolik.auto-open-disassembly-view": {
           "type": "boolean",
           "description": "If set to true, the debugger will automatically open the disassembly view when starting a debugging session.",
@@ -99,7 +83,7 @@
         "simbolik.json-rpc-url": {
           "type": "string",
           "default": "http://localhost:8545",
-          "description": "Attach requests use this URL as the JSON-RPC endpoint. Notice, that the JSON RPC server must be reachable from the simbolik server. `localhost` here refers to the machine where the simbolik server is running.",
+          "markdownDescription": "JSON-RPC endpoint to use when the extension is **not** auto-starting a node (`#simbolik.auto-start-node#` is off), and for `attach` requests. When auto-start is on, launch sessions use a freshly started node on an ephemeral port and this value is ignored.",
           "order": 9
         },
         "simbolik.sourcify-url": {
@@ -107,6 +91,58 @@
           "description": "Attach requests use this Sourcify endpoint to download the source code of the debugged transaction.",
           "default": "http://localhost:5555",
           "order": 10
+        },
+        "simbolik.adapterMode": {
+          "type": "string",
+          "enum": [
+            "inline",
+            "tcp"
+          ],
+          "default": "inline",
+          "markdownEnumDescriptions": [
+            "Run the debug server in-process in the extension host (default). No socket; the bundled TypeScript server drives the session directly.",
+            "Spawn the bundled TypeScript server as a standalone Node process and connect over TCP. Useful for out-of-process/remote-host debugging and standalone testing."
+          ],
+          "description": "How the extension hosts the local Solidity debug server.",
+          "order": 11
+        },
+        "simbolik.auto-start-node": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Automatically start a fresh execution node (anvil or kontrol-node) for each launch debugging session, so debugging stays one click. Turn this off to debug against your own already-running node at `#simbolik.json-rpc-url#`.",
+          "order": 12
+        },
+        "simbolik.rpc-node-type": {
+          "type": "string",
+          "enum": [
+            "kontrol-node",
+            "anvil"
+          ],
+          "default": "kontrol-node",
+          "markdownEnumDescriptions": [
+            "Kontrol Node — the KEVM (K Framework) execution engine (default). Install it with `kup install kontrol-node`; found at `#simbolik.kontrol-node-path#`.",
+            "Anvil — the Foundry EVM node. A fallback with limitations; prefer kontrol-node. Requires [Foundry](https://getfoundry.sh) at `#simbolik.anvil-path#`."
+          ],
+          "markdownDescription": "Which execution node the extension auto-starts for launch debugging sessions. Use `kontrol-node` (the default); `anvil` is a fallback with limitations, for when kontrol-node cannot be used.",
+          "order": 13
+        },
+        "simbolik.anvil-path": {
+          "type": "string",
+          "default": "anvil",
+          "markdownDescription": "Path to the `anvil` binary used to auto-start a node when `#simbolik.rpc-node-type#` is `anvil`. Defaults to `anvil` on your `PATH`; set an absolute path if it is installed elsewhere. Requires [Foundry](https://getfoundry.sh).",
+          "order": 14
+        },
+        "simbolik.kontrol-node-path": {
+          "type": "string",
+          "default": "kontrol-node",
+          "markdownDescription": "Path to the `kontrol-node` binary used to auto-start a node when `#simbolik.rpc-node-type#` is `kontrol-node`. Defaults to `kontrol-node` on your `PATH` (then the Nix profiles `kup` installs into); set an absolute path if it is installed elsewhere. Install it with `kup install kontrol-node` — see the [installation guide](https://github.com/runtimeverification/simbolik-vscode#installation).",
+          "order": 15
+        },
+        "simbolik.kontrol-node-dir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**For kontrol-node development.** A kontrol-node source checkout to run through its Nix dev shell instead of `#simbolik.kontrol-node-path#`. When empty, falls back to the `KONTROL_NODE_DIR` environment variable; leave both unset to use the installed `kontrol-node`. See `.devcontainer/setup-kontrol-node.sh`.",
+          "order": 16
         }
       }
     },
@@ -145,8 +181,7 @@
             "required": [
               "txHash",
               "jsonRpcUrl",
-              "sourcifyUrl",
-              "clientMount"
+              "sourcifyUrl"
             ],
             "properties": {
               "txHash": {
@@ -160,20 +195,6 @@
               "sourcifyUrl": {
                 "type": "string",
                 "description": "The URL of the Sourcify server."
-              },
-              "stopAtFirstOpcode": {
-                "type": "boolean",
-                "description": "If set to true, the debugger will stop at the first opcode.",
-                "default": false
-              },
-              "showSourcemaps": {
-                "type": "boolean",
-                "description": "If set to true, the debugger will include sourcemaps in the disassembly view.",
-                "default": false
-              },
-              "clientMount": {
-                "type": "string",
-                "description": "The absolute file system path to the project root."
               },
               "chainId": {
                 "type": "number",
@@ -204,18 +225,19 @@
   },
   "scripts": {
     "build": "npm run vscode:prepublish",
-    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run esbuild-base-web -- --minify",
+    "vscode:prepublish": "tsc -b tsconfig.packages.json && npm run esbuild-base -- --minify && npm run esbuild-server -- --minify",
     "esbuild-base": "esbuild ./src/extension.ts     --bundle --outfile=build/extension.js     --external:vscode --format=cjs --platform=node",
-    "esbuild-base-web": "esbuild ./src/extension.web.ts --bundle --outfile=build/extension.web.js --external:vscode --format=cjs --platform=browser --target=es2020 --minify",
-    "esbuild": "npm run esbuild-base -- --sourcemap",
+    "esbuild-server": "esbuild ./src/server.ts       --bundle --outfile=build/server.mjs      --external:vscode --format=esm --platform=node",
+    "esbuild": "npm run esbuild-base -- --sourcemap && npm run esbuild-server -- --sourcemap",
     "compile": "tsc -p ./tsconfig.json",
-    "compile-web": "tsc -p ./tsconfig.web.json",
-    "pretest": "npm run compile && npm run lint",
+    "build:dev": "tsc -b tsconfig.packages.json && npm run compile && npm run esbuild-server -- --sourcemap",
+    "typecheck": "tsc -b tsconfig.packages.json && tsc -p tsconfig.server.json",
     "lint": "gts lint",
-    "test": "node ./out/test/runTest.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "SIMBOLIK_LIVE=1 vitest run packages/engine/test/live.integration.test.ts",
     "clean": "gts clean",
     "fix": "gts fix",
-    "posttest": "npm run lint",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
     "version:major": "npm version major --no-git-tag-version",
@@ -225,7 +247,7 @@
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.1",
     "@types/node": "^20.13.1",
-    "@types/vscode": "^1.79.0",
+    "@types/vscode": "^1.93.0",
     "@typescript-eslint/eslint-plugin": "^5.59.8",
     "@typescript-eslint/parser": "^5.59.8",
     "@vscode/test-electron": "^2.3.2",
@@ -238,17 +260,21 @@
     "mocha": "^10.2.0",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
-    "typescript": "^5.2.0"
+    "typescript": "^5.2.0",
+    "vitest": "^2.1.8"
   },
   "dependencies": {
     "@andrewbranch/untar.js": "^1.0.3",
     "@metamask/abi-utils": "^3.0.0",
+    "@simbolik/debugger": "*",
+    "@simbolik/engine": "*",
+    "@simbolik/lifting": "*",
+    "@simbolik/solc": "*",
+    "@simbolik/sources": "*",
     "@solidity-parser/parser": "^0.18.0",
-    "@types/ws": "^8.5.10",
     "fflate": "^0.8.2",
     "smol-toml": "^1.2.0",
-    "vscode-uri": "^3.0.8",
-    "ws": "^8.18.1"
+    "vscode-uri": "^3.0.8"
   },
   "husky": {
     "hooks": {

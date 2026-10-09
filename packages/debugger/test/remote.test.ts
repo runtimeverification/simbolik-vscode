@@ -1,0 +1,126 @@
+/**
+ * Geth-dialect launch through the full debugger pipeline.
+ *
+ * The session must accept `dialect: 'geth'` + a `txContext` on `LaunchInputs`
+ * and drive the same pipeline it uses for kontrol traces, reading `number = 42`
+ * (storage slot 0) and `newNumber = 42` (calldata[4:36]) from a real recorded
+ * anvil (geth-format) trace — identically to the kontrol Counter path.
+ *
+ * The geth envelope has none of the rich fields `normalizeKontrolTrace` reads, so
+ * `launch` routes geth traces through the geth normalizer to produce a valid step
+ * model from them.
+ *
+ * A kontrol launch (no `dialect`, the default) is covered too.
+ */
+import {describe, expect, it} from 'vitest';
+
+import {SolidityDebugSession, type LaunchInputs} from '../src/index.js';
+
+import {buildInfoOf, metaOf, readDbgFixture} from './support/harness.js';
+
+// ## Fixtures
+
+/** Recorded anvil (geth) `debug_traceTransaction` response, as raw text. */
+const ANVIL_TRACE_RAW = readDbgFixture('anvil-setNumber-trace.raw.json');
+
+/** Recorded kontrol Counter trace, as raw text. */
+const KONTROL_TRACE_RAW = readDbgFixture('counter-setNumber-trace.raw.json');
+
+/** solc standard-json build-info for Counter (matches the traced bytecode). */
+const BUILD_INFO_JSON: unknown = buildInfoOf('counter-build-info.json');
+
+const ANVIL_META = JSON.parse(
+  readDbgFixture('anvil-setNumber-meta.json'),
+) as {contractAddress: string; txFrom: string; txTo: string; txInput: string};
+
+const KONTROL_META = metaOf('counter-setNumber-meta.json');
+
+// ## LaunchInputs builders
+
+/** A geth-dialect launch driven by the tx context from the anvil meta. */
+function gethLaunchInputs(): LaunchInputs {
+  return {
+    dialect: 'geth',
+    txContext: {
+      to: ANVIL_META.txTo,
+      from: ANVIL_META.txFrom,
+      input: ANVIL_META.txInput,
+    },
+    buildInfoJson: BUILD_INFO_JSON,
+    traceJson: ANVIL_TRACE_RAW,
+    sourcePath: 'src/Counter.sol',
+    contractName: 'Counter',
+    methodName: 'setNumber',
+    // Entry frame code address == txContext.to for geth.
+    codeAddress: ANVIL_META.txTo,
+  } as LaunchInputs;
+}
+
+/** A kontrol launch (no dialect — kontrol is the default). */
+function kontrolLaunchInputs(): LaunchInputs {
+  return {
+    buildInfoJson: BUILD_INFO_JSON,
+    traceJson: KONTROL_TRACE_RAW,
+    sourcePath: 'src/Counter.sol',
+    contractName: 'Counter',
+    methodName: 'setNumber',
+    codeAddress: KONTROL_META.contractAddress,
+  };
+}
+
+/** Read a single scope's variables for the sole (entry) frame. */
+async function scopeVars(
+  session: SolidityDebugSession,
+  scopeName: 'State' | 'Locals',
+): Promise<{name: string; value: string}[]> {
+  const frameId = session.stackTrace().stackFrames[0]!.id;
+  const {scopes} = session.scopes(frameId);
+  const scope = scopes.find((s) => s.name === scopeName)!;
+  const {variables} = await session.variables(scope.variablesReference);
+  return variables.map((v) => ({name: v.name, value: v.value}));
+}
+
+// ## geth-dialect launch
+
+describe('SolidityDebugSession geth-dialect launch (anvil trace)', () => {
+  it('stops at the entry statement (line 8) with reason "entry"', async () => {
+    const session = new SolidityDebugSession();
+    await session.launch(gethLaunchInputs());
+
+    const stopped = session.events.find((e) => e.event === 'stopped') as
+      | {body: {reason: string}}
+      | undefined;
+    expect(stopped?.body.reason).toBe('entry');
+
+    const {stackFrames} = session.stackTrace();
+    expect(stackFrames).toHaveLength(1);
+    expect(stackFrames[0]!.name).toBe('setNumber');
+    expect(stackFrames[0]!.source?.path).toBe('src/Counter.sol');
+    expect(stackFrames[0]!.line).toBe(8);
+  });
+
+  it('reads number = 42 (State) and newNumber = 42 (Locals) after continue()', async () => {
+    const session = new SolidityDebugSession();
+    await session.launch(gethLaunchInputs());
+    await session.continue();
+
+    const state = await scopeVars(session, 'State');
+    expect(state).toContainEqual({name: 'number', value: '42'});
+
+    const locals = await scopeVars(session, 'Locals');
+    expect(locals).toContainEqual({name: 'newNumber', value: '42'});
+  });
+});
+
+// ## kontrol launch (default dialect)
+
+describe('SolidityDebugSession kontrol launch (default, no dialect)', () => {
+  it('reads number = 42 after continue()', async () => {
+    const session = new SolidityDebugSession();
+    await session.launch(kontrolLaunchInputs());
+    await session.continue();
+
+    const state = await scopeVars(session, 'State');
+    expect(state).toContainEqual({name: 'number', value: '42'});
+  });
+});

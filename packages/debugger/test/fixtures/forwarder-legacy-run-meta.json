@@ -1,0 +1,9 @@
+{
+ "contractAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+ "calleeAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+ "calldata": "0x37d457f50000000000000000000000005fbdb2315678afecb367f032d93f642f64180aa30000000000000000000000000000000000000000000000000000000000000015",
+ "callTxHash": "0x1a7c4806dccbb6fbb12d8a744770d4b7f116445e7916960d2dea39c616291ac6",
+ "status": "0x1",
+ "traceStepCount": 755,
+ "note": "Forwarder.go(callee, 21) → _forward → Callee.compute(21) — legacy, recorded on kontrol-node"
+}

@@ -1,0 +1,16 @@
+{
+  "//": "Type-checks the ESM server entry (src/server.ts + src/resolver/ → build/server.mjs) as ES modules. It is excluded from tsconfig.json (the CJS extension compile) because it uses import.meta, which the commonjs target cannot compile.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "rootDir": "src",
+    "verbatimModuleSyntax": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": ["src/server.ts", "src/resolver/**/*.ts"]
+}

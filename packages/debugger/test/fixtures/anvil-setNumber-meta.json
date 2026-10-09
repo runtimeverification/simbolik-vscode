@@ -1,0 +1,10 @@
+{
+  "description": "anvil Counter.setNumber(42), geth-format trace (deployed from counter-build-info.json bytecode)",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "txFrom": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+  "txTo": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "txInput": "0x3fb5c1cb000000000000000000000000000000000000000000000000000000000000002a",
+  "callTxHash": "0xf51211ced90009f56879798ddba26ae5d31f28f7a1b908536925703b72f04654",
+  "storageSlot0": "0x000000000000000000000000000000000000000000000000000000000000002a",
+  "traceStepCount": 118
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Modifiers.bump(5) with modifier onlyPositive(x). Inside the modifier body (line 12/13) the stack is [onlyPositive, bump]; inside the function body (line 18) it is [bump] (modifier suspended). r=6, stored=6.",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0xb20eb4c40000000000000000000000000000000000000000000000000000000000000005",
+  "callTxHash": "0x04f7f7d46ea7e1600385b6f9e524372e58e7c500c4f422d91661c2dd9ba7590f",
+  "traceStepCount": 326,
+  "storageSlot0Stored": "0x6"
+}

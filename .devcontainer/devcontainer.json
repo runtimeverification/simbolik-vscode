@@ -1,0 +1,27 @@
+{
+  "name": "simbolik-vscode",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "node",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "mounts": [
+    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=simbolik-ssh-${devcontainerId},target=/home/node/.ssh,type=volume",
+    "source=kontrol-node-${devcontainerId},target=/home/node/kontrol-node,type=volume"
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "KONTROL_NODE_DIR": "/home/node/kontrol-node",
+    "KDIST_DIR": "/home/node/kontrol-node/.kdist"
+  },
+  "postCreateCommand": "sudo chown -R node:node /home/node/.claude /home/node/.ssh /home/node/kontrol-node && chmod 700 /home/node/.ssh && bash /workspace/.devcontainer/setup-kontrol-node.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code"
+      ]
+    }
+  }
+}

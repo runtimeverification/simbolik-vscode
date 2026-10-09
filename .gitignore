@@ -2,4 +2,12 @@ build
 build-web
 node_modules
 
+# Workspace package build outputs
+packages/*/dist
+*.tsbuildinfo
+
 .direnv
+
+# Foundry build output for test fixtures (artifacts copied into packages/*/test/fixtures)
+test/fixtures/**/out/
+test/fixtures/**/cache/

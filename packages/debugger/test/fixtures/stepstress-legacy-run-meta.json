@@ -1,0 +1,7 @@
+{
+  "contractAddress": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+  "calldata": "0xc0406226",
+  "traceStepCount": 568,
+  "status": "0x1",
+  "contract": "StepStress"
+}

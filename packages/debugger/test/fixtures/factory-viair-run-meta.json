@@ -1,0 +1,9 @@
+{
+ "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+ "calldata": "0xc6dad082",
+ "callTxHash": "0x89a7d535a20b607b7bc3edb46fdc6a1e35ec872eb1ce60e67349166a45a2deeb",
+ "status": "0x1",
+ "traceStepCount": 575,
+ "note": "Factory.make() \u2014 viair, recorded on kontrol-node (fresh node)",
+ "derivedAddress": "0xa16e02e87b7454126e5e10d957a927a7f5b5d2be"
+}

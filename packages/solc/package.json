@@ -1,0 +1,23 @@
+{
+  "name": "@simbolik/solc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "solc standard-json artifact model: source maps, AST navigation, storage layout, and CBOR-metadata contract identification.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@simbolik/protocol": "*",
+    "ethereum-cryptography": "2.2.1"
+  }
+}

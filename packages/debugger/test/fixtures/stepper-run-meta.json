@@ -1,0 +1,8 @@
+{
+  "description": "Stepper.run(10) on unoptimized Stepper (solc 0.8.35), recorded from kontrol-node. run: a=11,b=double(11)=22,total=33",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "runCalldata": "0xa444f5e9000000000000000000000000000000000000000000000000000000000000000a",
+  "callTxHash": "0x65bd8967b8ecf3a7e8d04f220108b015669a15b7cb723418e7b14d7b1a3ab401",
+  "storageSlot0AfterCall": "0x21",
+  "traceStepCount": 339
+}

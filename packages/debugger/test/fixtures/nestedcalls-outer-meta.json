@@ -1,0 +1,8 @@
+{
+  "description": "NestedCalls.outer(5): nested outer→level1→level2 and sequential outer→leaf. level2(5)=10, level1=11 (a), leaf(5)=105 (b), result=116. Stacks: inside level2 → [outer@11, level1@18, level2@23]; inside leaf → [outer@12, leaf@27].",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0x94209e430000000000000000000000000000000000000000000000000000000000000005",
+  "callTxHash": "0xfb301e57d8ec223a075c243c3cc095cad7b65e19b724eb65e2dc8f616885c08a",
+  "traceStepCount": 489,
+  "storageSlot0Result": "0x74"
+}
