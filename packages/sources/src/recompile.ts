@@ -7,7 +7,8 @@
  * remote contract's trace can be lifted.
  *
  * `solc` is a multi-MB emscripten blob, so it is lazily `import()`-ed only when
- * recompiling (keeps the extension bundle lean).
+ * recompiling. The server bundle is built with esbuild `--splitting`, which
+ * turns this dynamic import into a separate chunk instead of inlining it.
  */
 
 import type {ResolvedContract, StandardJsonInput} from './sourcify.js';

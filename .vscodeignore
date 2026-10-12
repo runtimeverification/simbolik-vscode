@@ -1,14 +1,11 @@
-.github/**
-.vscode/**
-node_modules/**
-sampleWorkspace/**
-src/**
-.editorconfig
-.eslintignore
-.eslint.json
-.gitignore
-.gitmodules
-.prettierrc.js
-.vscodeignore
-tsconfig.json
-tsconfig.web.json
+# Allowlist: the extension is fully bundled by esbuild (build/extension.js +
+# build/server.mjs + its lazily loaded chunks), so nothing else needs to ship.
+**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE.md
+!images/**
+!build/extension.js
+!build/server.mjs
+!build/chunks/**
