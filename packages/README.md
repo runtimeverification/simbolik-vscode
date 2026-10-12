@@ -65,8 +65,6 @@ settings. Every frame is resolved against its own CU.
 
 ## Known limitations
 
-- Storage reads use the frame's code address. Under `DELEGATECALL` they should use the
-  caller's storage instead.
 - Mapping keys are recovered from `KECCAK256` preimages observed in the trace, so only
   keys the transaction actually touched are shown. Keys of type `string`/`bytes` are
   not enumerated.
@@ -103,7 +101,7 @@ npm run test:live
 ```
 
 The devcontainer provisions kontrol-node with `.devcontainer/setup-kontrol-node.sh`.
-`@simbolik/engine`'s `devcontainerLaunch` starts it from there.
+`@simbolik/engine`'s `checkoutLaunch` starts it from there.
 
 ### Engine behavior the code relies on
 

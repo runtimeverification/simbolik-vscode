@@ -2,6 +2,30 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
+## [16.0.0] - Unreleased
+
+The debugger now runs locally. The remote Simbolik server is replaced by a
+TypeScript debug server bundled with the extension, backed by a local execution
+node (kontrol-node or anvil) that the extension starts for each debug session.
+
+Breaking changes:
+
+- Removed the browser/web build of the extension (vscode.dev, github.dev)
+- Removed the `simbolik.api-key` and `simbolik.server` settings; no account or
+  API key is needed any more
+- Removed the `simbolik.show-sourcemaps` setting
+- Raised the minimum versions to VSCode 1.93 and Node.js 20.17
+
+New settings:
+
+- `simbolik.rpc-node-type`: the execution node to debug against
+  (`kontrol-node` or `anvil`)
+- `simbolik.auto-start-node`: start a fresh node for every launch session
+- `simbolik.kontrol-node-path`, `simbolik.kontrol-node-dir`, `simbolik.anvil-path`:
+  where to find the execution node
+- `simbolik.adapterMode`: host the debug server in-process (`inline`, default)
+  or as a separate process over TCP (`tcp`)
+
 ## [15.0.1] - 2026-03-25
 
 - Fixed a bug, that caused test runs to fail after refreshing the test explorer view
