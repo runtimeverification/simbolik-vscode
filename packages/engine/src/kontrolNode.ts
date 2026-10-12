@@ -34,8 +34,8 @@ export function kontrolNodeLaunch(
 }
 
 /**
- * Launch recipe for a development checkout of kontrol-node (the dev container's
- * provisioned engine):
+ * Launch recipe for a development checkout of kontrol-node (e.g. the dev
+ * container's provisioned engine):
  *   cd $KONTROL_NODE_DIR
  *   nix develop --command bash -c 'cd <workDir> && $KONTROL_NODE_DIR/.venv/bin/kontrol-node run --port <p>'
  *
@@ -49,9 +49,9 @@ export function kontrolNodeLaunch(
  * `io_dir*` scratch directories do not pile up in the checkout (see
  * {@link kontrolNodeLaunch}).
  */
-export function devcontainerLaunch(
+export function checkoutLaunch(
   port: number,
-  kontrolNodeDir = process.env.KONTROL_NODE_DIR ?? '/home/node/kontrol-node',
+  kontrolNodeDir: string,
   workDir?: string,
 ): KontrolNodeLaunch {
   const run = `.venv/bin/kontrol-node run --port ${port}`;

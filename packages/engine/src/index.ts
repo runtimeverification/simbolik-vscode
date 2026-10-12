@@ -19,7 +19,7 @@ export {
   // so it drives anvil too; `ManagedNode` is the dialect-neutral alias.
   KontrolNode as ManagedNode,
   kontrolNodeLaunch,
-  devcontainerLaunch,
+  checkoutLaunch,
   anvilLaunch,
   type KontrolNodeLaunch,
   type KontrolNodeLaunch as NodeLaunch,

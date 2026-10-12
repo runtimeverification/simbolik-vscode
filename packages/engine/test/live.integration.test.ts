@@ -1,16 +1,18 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {KontrolNode, devcontainerLaunch} from '../src/index.js';
+import {KontrolNode, checkoutLaunch} from '../src/index.js';
 
 /**
  * Live integration test against a real kontrol-node.
  *
- * Skipped unless SIMBOLIK_LIVE=1, because it needs the dev-container-provisioned
- * engine (nix dev shell + built KEVM semantics). The core Vitest suite runs on
+ * Skipped unless SIMBOLIK_LIVE=1 and KONTROL_NODE_DIR is set, because it needs
+ * a kontrol-node development checkout with the nix dev shell and built KEVM
+ * semantics (e.g. the dev-container-provisioned engine). The core Vitest suite runs on
  * recorded fixtures and never requires the K runtime. Run locally with:
  *   SIMBOLIK_LIVE=1 npx vitest run packages/engine/test/live.integration.test.ts
  */
 const live = process.env.SIMBOLIK_LIVE === '1';
+const kontrolNodeDir = process.env.KONTROL_NODE_DIR ?? '';
 
 function loadDeployParams(): Record<string, string> {
   const doc = JSON.parse(
@@ -25,7 +27,7 @@ function loadDeployParams(): Record<string, string> {
   return doc.params[0];
 }
 
-describe.skipIf(!live)('kontrol-node live', () => {
+describe.skipIf(!live || !kontrolNodeDir)('kontrol-node live', () => {
   it(
     'spawns, deploys Counter, and returns a lossless trace',
     async () => {
@@ -33,7 +35,7 @@ describe.skipIf(!live)('kontrol-node live', () => {
       const port = 8720 + Math.floor((Date.now() % 200));
       const node = new KontrolNode({
         port,
-        launch: devcontainerLaunch(port),
+        launch: checkoutLaunch(port, kontrolNodeDir),
         readyTimeoutMs: 240_000,
         readyPollMs: 1000,
       });

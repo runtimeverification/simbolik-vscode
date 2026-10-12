@@ -5,7 +5,7 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   KontrolNode,
   kontrolNodeLaunch,
-  devcontainerLaunch,
+  checkoutLaunch,
   anvilLaunch,
   type FetchLike,
 } from '../src/index.js';
@@ -42,21 +42,21 @@ function emittingProc(): ChildProcess & EventEmitter {
 const spawnStub = (proc: ChildProcess) =>
   (vi.fn(() => proc) as unknown as typeof spawn);
 
-describe('devcontainerLaunch', () => {
+describe('checkoutLaunch', () => {
   it('builds the nix + venv run recipe with the chosen port', () => {
-    const launch = devcontainerLaunch(8899, '/home/node/kontrol-node');
+    const launch = checkoutLaunch(8899, '/opt/kontrol-node');
     expect(launch.command).toBe('nix');
-    expect(launch.cwd).toBe('/home/node/kontrol-node');
+    expect(launch.cwd).toBe('/opt/kontrol-node');
     expect(launch.args.at(-1)).toContain('--port 8899');
     // kontrol-node always traces and rejects this flag.
     expect(launch.args.at(-1)).not.toContain('--steps-tracing');
   });
 
   it('points KDIST_DIR at the pre-built semantics so RPC calls resolve', () => {
-    const launch = devcontainerLaunch(8899, '/home/node/kontrol-node');
+    const launch = checkoutLaunch(8899, '/opt/kontrol-node');
     // Without this, every kontrol-node RPC fails with
     // "Target undefined or not built: kontrol-node.simbolik".
-    expect(launch.env?.KDIST_DIR).toBe('/home/node/kontrol-node/.kdist');
+    expect(launch.env?.KDIST_DIR).toBe('/opt/kontrol-node/.kdist');
   });
 });
 
@@ -83,18 +83,18 @@ describe('kontrolNodeLaunch', () => {
   });
 });
 
-describe('devcontainerLaunch — work dir', () => {
+describe('checkoutLaunch — work dir', () => {
   it('runs nix in the checkout but the node in the work dir', () => {
-    const launch = devcontainerLaunch(
+    const launch = checkoutLaunch(
       8899,
-      '/home/node/kontrol-node',
+      '/opt/kontrol-node',
       "/tmp/it's",
     );
     // `nix develop` needs the checkout's flake; the node's io_dir* scratch
     // directories must land in the throwaway work dir instead.
-    expect(launch.cwd).toBe('/home/node/kontrol-node');
+    expect(launch.cwd).toBe('/opt/kontrol-node');
     expect(launch.args.at(-1)).toBe(
-      "cd '/tmp/it'\\''s' && '/home/node/kontrol-node'/.venv/bin/kontrol-node run --port 8899",
+      "cd '/tmp/it'\\''s' && '/opt/kontrol-node'/.venv/bin/kontrol-node run --port 8899",
     );
   });
 });
@@ -103,7 +103,7 @@ describe('KontrolNode', () => {
   it('start() resolves once the node answers eth_chainId', async () => {
     const node = new KontrolNode({
       port: 8899,
-      launch: devcontainerLaunch(8899),
+      launch: checkoutLaunch(8899, '/opt/kontrol-node'),
       fetch: chainIdOk,
       spawnFn: spawnStub(fakeProc(null)),
       readyPollMs: 1,
@@ -116,7 +116,7 @@ describe('KontrolNode', () => {
   it('start() rejects if the process exits during startup', async () => {
     const node = new KontrolNode({
       port: 8899,
-      launch: devcontainerLaunch(8899),
+      launch: checkoutLaunch(8899, '/opt/kontrol-node'),
       fetch: chainIdOk,
       spawnFn: spawnStub(fakeProc(1)),
       readyPollMs: 1,

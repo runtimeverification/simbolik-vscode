@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   anvilLaunch,
-  devcontainerLaunch,
+  checkoutLaunch,
   kontrolNodeLaunch,
   locateExecutable,
   probeKontrolNode,
@@ -247,7 +247,7 @@ function checkCheckout(
     ok: true,
     description: `kontrol-node development checkout at ${dir} (via ${nix.path})`,
     needsWorkDir: true,
-    launch: (port, workDir) => devcontainerLaunch(port, dir, workDir),
+    launch: (port, workDir) => checkoutLaunch(port, dir, workDir),
   };
 }
 
