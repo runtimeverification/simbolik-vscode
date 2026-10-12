@@ -29,6 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
     nodeManager
   );
   context.subscriptions.push(
+    factory,
     vscode.debug.registerDebugAdapterDescriptorFactory('solidity', factory)
   );
 
@@ -85,9 +86,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.debug.onDidTerminateDebugSession(session => {
     outputChannel.info(`Debug session ended: ${session.id}`);
-    // One fresh node per session: tear down the node started for this one.
+    // One fresh node (and, in tcp mode, one server process) per session: tear
+    // down the ones started for this one.
     if (session.type === 'solidity') {
       void nodeManager.stop(session.id);
+      factory.stopServer(session.id);
     }
   });
 }

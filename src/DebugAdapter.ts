@@ -1,4 +1,8 @@
-import {spawn, type ChildProcessByStdio} from 'child_process';
+import {
+  spawn,
+  type ChildProcess,
+  type ChildProcessByStdio,
+} from 'child_process';
 import type {Readable} from 'stream';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -24,16 +28,19 @@ const SERVER_START_TIMEOUT = 10_000;
  *     ({@link loadServer}) and drive its {@link DapDispatcher} directly through a
  *     thin {@link DispatcherAdapter} (no socket).
  *   - `tcp`: spawn `node build/server.mjs --port 0` and connect over TCP via
- *     `vscode.DebugAdapterServer`.
+ *     `vscode.DebugAdapterServer`. The server process outlives its socket, so
+ *     it is killed when its session terminates ({@link stopServer}).
  *
  * In both modes the launch configuration is first populated
  * ({@link populateDebugConfiguration}: forge build → method signature → payload)
  * and flows to the server's `productionResolver` as the DAP launch arguments.
  */
 export class SolidityDebugAdapterDescriptorFactory
-  implements vscode.DebugAdapterDescriptorFactory
+  implements vscode.DebugAdapterDescriptorFactory, vscode.Disposable
 {
   #outputChannel: vscode.OutputChannel | undefined;
+  /** Spawned tcp-mode server processes, keyed by debug session id. */
+  #servers = new Map<string, ChildProcess>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -85,7 +92,7 @@ export class SolidityDebugAdapterDescriptorFactory
       // back to the debug console via `activeDebugConsole` on session start.
       Object.assign(session.configuration, config);
       this.#flushToDebugConsole(session.id, hostLog);
-      return this.#createTcp();
+      return this.#createTcp(session.id);
     }
     // Inline: the adapter owns the emitter, so host logs stream through it as
     // `output` events — ordered ahead of the server-side launch diagnostics.
@@ -110,7 +117,7 @@ export class SolidityDebugAdapterDescriptorFactory
    * merged onto `session.configuration` (the object VSCode sends as the launch
    * arguments) rather than intercepted per-message.
    */
-  async #createTcp(): Promise<vscode.DebugAdapterDescriptor> {
+  async #createTcp(sessionId: string): Promise<vscode.DebugAdapterDescriptor> {
     const serverPath = path.join(
       this.context.extensionPath,
       'build',
@@ -120,8 +127,27 @@ export class SolidityDebugAdapterDescriptorFactory
     const child = spawn(process.execPath, [serverPath, '--port', '0'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    this.#servers.set(sessionId, child);
+    child.once('exit', () => {
+      if (this.#servers.get(sessionId) === child) {
+        this.#servers.delete(sessionId);
+      }
+    });
     const port = await waitForPort(child, channel);
     return new vscode.DebugAdapterServer(port);
+  }
+
+  /** Kill the tcp-mode server spawned for `sessionId`, if any. */
+  stopServer(sessionId: string): void {
+    const child = this.#servers.get(sessionId);
+    if (child === undefined) return;
+    this.#servers.delete(sessionId);
+    child.kill();
+  }
+
+  dispose(): void {
+    for (const child of this.#servers.values()) child.kill();
+    this.#servers.clear();
   }
 
   /**
