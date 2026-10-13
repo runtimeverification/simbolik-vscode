@@ -1,5 +1,6 @@
 build
 build-web
+dist
 node_modules
 
 # Workspace package build outputs

@@ -84,8 +84,10 @@ simbolik-vscode/
 ├── .vscode/
 │   └── launch.json           # Debug configurations
 ├── .github/workflows/
-│   ├── release.yml           # Automated release pipeline
+│   ├── release.yml           # Former release pipeline (GitHub Actions publishing is unavailable)
 │   └── test.yml              # CI tests
+├── scripts/
+│   └── release.mjs           # Publishes to the Marketplace, Open VSX and GitHub releases
 └── package.json              # Extension manifest
 ```
 
@@ -221,10 +223,23 @@ npm run version:major
 
 5. **Create PR & Merge**
 
-6. **Trigger Release:**
-   - Go to GitHub Actions
-   - Run "Publish VS Code Extension" workflow manually
-   - This will create release, publish to marketplace, and attach `.vsix`
+6. **Publish:**
+   From an up-to-date checkout of master, run:
+   ```bash
+   npm run release
+   ```
+   The script checks the CHANGELOG entry, builds and packages the `.vsix`,
+   publishes it to the Visual Studio Marketplace and Open VSX, and attaches it
+   to a GitHub release tagged with the version. It prompts for the Marketplace
+   PAT and the Open VSX token (input is hidden) and verifies both before
+   building. Requirements: Node.js 22+ and a logged-in GitHub CLI (`gh auth login`).
+
+   Options go after `--`, e.g. `npm run release -- --dry-run` (see `--help`):
+   - `--dry-run` builds and packages without publishing
+   - `--skip-marketplace`, `--skip-openvsx`, `--skip-github` publish selectively,
+     e.g. to retry a registry that failed (re-publishing an existing version is skipped)
+   - Tokens can come from a password manager via `VSCE_PAT` and `OVSX_PAT`
+     instead of the prompt
 
 ## 🛠️ Development Tips
 

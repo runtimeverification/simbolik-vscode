@@ -241,6 +241,7 @@
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
     "version:major": "npm version major --no-git-tag-version",
+    "release": "node scripts/release.mjs",
     "prepare": "husky || true"
   },
   "devDependencies": {
@@ -251,6 +252,7 @@
     "@typescript-eslint/eslint-plugin": "^5.59.8",
     "@typescript-eslint/parser": "^5.59.8",
     "@vscode/test-electron": "^2.3.2",
+    "@vscode/vsce": "4.0.0",
     "esbuild": "^0.20.2",
     "eslint": "^8.41.0",
     "glob": "^8.1.0",
@@ -258,6 +260,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "mocha": "^10.2.0",
+    "ovsx": "1.2.0",
     "process": "^0.11.10",
     "ts-loader": "^9.5.1",
     "typescript": "^5.2.0",
