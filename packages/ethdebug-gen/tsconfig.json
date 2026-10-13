@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@ethdebug/pointers": ["../../node_modules/@ethdebug/pointers/dist/src/index.d.ts"],
+      "@ethdebug/format": ["../../node_modules/@ethdebug/format/dist/src/index.d.ts"]
+    }
+  },
+  "references": [{"path": "../protocol"}, {"path": "../solc"}],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

@@ -1,0 +1,8 @@
+{
+  "contractAddress": "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707",
+  "reverterAddress": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+  "calldata": "0x522bb704000000000000000000000000dc64a140aa3e981100a9beca4e685f962f0cf6c9",
+  "callTxHash": "0x041417a16b8170e5efa78060fe1733cf4d57087a49cd323006bffe02344ad5ef",
+  "traceStepCount": 313,
+  "description": "RevertStep.run(reverter): a=1 (stmt1) -> Reverter.boom() reverts, caught (stmt2) -> b=2 (stmt3). Regression for combinedDepth drift: step-over from stmt1 must land on stmt3."
+}

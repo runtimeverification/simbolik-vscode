@@ -1,0 +1,8 @@
+{
+ "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+ "calldata": "0xa444f5e90000000000000000000000000000000000000000000000000000000000000005",
+ "callTxHash": "0x8b439a8ccf86046cf1261e7bf17e4f75f0336742957c69b0584357ff02a28b76",
+ "status": "0x1",
+ "traceStepCount": 270,
+ "note": "ModCall.run(5) — legacy, recorded on kontrol-node (fresh node)"
+}

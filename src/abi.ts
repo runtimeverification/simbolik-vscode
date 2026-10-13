@@ -49,14 +49,12 @@ export function abiEncode(type: string, input: string): string {
   }
 }
 
-/**
- * We expect the user to provide function parameters in Solidity syntax.
- * The metamask abi encoder expects a different syntax.
- *
- * This function normalizes the user input to match the expected syntax of the abi encoder.
- */
 type NormalizedValue = bigint | boolean | string | NormalizedValue[];
 
+/**
+ * Convert a value parsed from Solidity literal syntax into the shape the
+ * MetaMask ABI encoder expects for `type`, or `undefined` if it doesn't fit.
+ */
 function normalize(value: Param, type: string): NormalizedValue | undefined {
   if (address.isType(type)) {
     if (typeof value === 'bigint') {

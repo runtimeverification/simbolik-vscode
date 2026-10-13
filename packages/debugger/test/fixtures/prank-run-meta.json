@@ -1,0 +1,8 @@
+{
+  "description": "Prank.run(deadbeef...) — deploys Target, calls Target.record() once WITHOUT a prank (msg.sender=Prank) and once DURING vm.startPrank(who) (msg.sender should be who=0xdead...beef). Records what kontrol-node emits for per-step msgSender in the pranked callee frame.",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0x522bb704000000000000000000000000deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "callTxHash": "0xc2a79dd4f925554d4549ef6754347949017ca1404f5c14c38a0b32c77d2b9ddf",
+  "prankedAddress": "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "traceStepCount": 933
+}

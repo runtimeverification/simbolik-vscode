@@ -17,7 +17,21 @@ Simbolik brings decades of research and engineering in software quality assuranc
 
 ## 🚀 Quick Start
 
-On first use Simbolik may ask for GitHub access. Alternatively, you can provide a Simbolik API key, [read more](https://docs.runtimeverification.com/simbolik/overview/getting-started).
+### Installation
+
+Simbolik runs your code on `kontrol-node`, Runtime Verification's EVM execution engine. Install it with `kup`, the K Framework package manager:
+
+```sh
+# 1. Install kup
+bash <(curl https://kframework.org/install)
+
+# 2. Install kontrol-node
+kup install kontrol-node
+```
+
+Then install the Simbolik extension in Visual Studio Code or Cursor. Simbolik finds `kontrol-node` on your `PATH`; if it is installed elsewhere, set `simbolik.kontrol-node-path` to its location.
+
+### Debugging
 
 Simbolik follows a **zero-configuration** approach where possible and falls back to **configuration-as-code** where needed.
 For simple smart contracts, you can start debugging with just a single click on the `▷ Debug`-button.

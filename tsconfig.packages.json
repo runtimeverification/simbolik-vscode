@@ -1,0 +1,27 @@
+{
+  "//": "Solution file: typecheck/build all workspace packages via project references (npm run typecheck).",
+  "files": [],
+  "references": [
+    {
+      "path": "packages/protocol"
+    },
+    {
+      "path": "packages/engine"
+    },
+    {
+      "path": "packages/solc"
+    },
+    {
+      "path": "packages/lifting"
+    },
+    {
+      "path": "packages/ethdebug-gen"
+    },
+    {
+      "path": "packages/debugger"
+    },
+    {
+      "path": "packages/sources"
+    }
+  ]
+}

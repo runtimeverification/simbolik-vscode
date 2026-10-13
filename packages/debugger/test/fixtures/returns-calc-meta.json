@@ -1,0 +1,8 @@
+{
+  "description": "Returns.calc(5): doubled=10,tmp=helper(5)[local=6,out=12],tripled=17,stored=27",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0x38c9027a0000000000000000000000000000000000000000000000000000000000000005",
+  "callTxHash": "0x6834f6e5cd007ae22c2c6699e9d3031732bb1055b2b0bf9d6b07dd03a563be55",
+  "slot0": "0x1b",
+  "traceStepCount": 563
+}

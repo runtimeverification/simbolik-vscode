@@ -100,12 +100,6 @@ export function executeCommand(
   return done;
 }
 
-/**
- * Convert an async iterable stream of strings into a single concatenated string.
- *
- * @param stream The async iterable stream of strings to convert.
- * @returns A promise that resolves to the concatenated string.
- */
 async function streamToString(stream: AsyncIterable<string>): Promise<string> {
   let result = '';
   for await (const chunk of stream) {
@@ -114,12 +108,7 @@ async function streamToString(stream: AsyncIterable<string>): Promise<string> {
   return result;
 }
 
-/**
- * Remove terminal control sequences from a string.
- *
- * @param input The string from which to remove terminal control sequences.
- * @returns The input string with terminal control sequences removed.
- */
+/** Remove ANSI terminal control sequences (OSC, CSI, DCS, ESC) from a string. */
 function stripTerminalControlSequences(input: string): string {
   // OSC: ESC ] ... BEL  OR  ESC ] ... ESC \
   // eslint-disable-next-line no-control-regex

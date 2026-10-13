@@ -1,0 +1,8 @@
+{
+  "description": "Locals.compute(10) on unoptimized Locals (solc 0.8.35), recorded from kontrol-node. Exercises all value-type locals + loop/nested block scopes. total=126.",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "computeCalldata": "0x5ed86d5c000000000000000000000000000000000000000000000000000000000000000a",
+  "callTxHash": "0xe37b54302a30e9c62fa1abfa4218dc92d5dd5fadf66a54c628bfce09530b2c08",
+  "storageSlot0AfterCall": "0x7e",
+  "traceStepCount": 1766
+}

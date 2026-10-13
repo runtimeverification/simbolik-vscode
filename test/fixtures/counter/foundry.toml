@@ -1,0 +1,9 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = []
+optimizer = false
+build_info = true
+extra_output = ["storageLayout", "evm.bytecode", "evm.deployedBytecode", "evm.methodIdentifiers"]
+extra_output_files = ["metadata"]
+ast = true

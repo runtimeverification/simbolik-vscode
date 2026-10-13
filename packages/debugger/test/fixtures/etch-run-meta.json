@@ -1,0 +1,9 @@
+{
+  "description": "Etch.run(): vm.etch(TARGET=0x...beef, Impl.runtimeCode) then Impl(TARGET).setStored(21) -> result=42 (slot 0). Records how kontrol traces a CALL into an ETCHED address whose code = Impl runtime (CBOR-identifiable). Used for 4b: etched-frame source resolution + parent-frame integrity.",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0xc0406226",
+  "callTxHash": "0xcccc3cbd2323f5d08b8d51e723e7003f765316353737160caea6a351dae6a5e4",
+  "traceStepCount": 761,
+  "target": "0x000000000000000000000000000000000000beef",
+  "expectedResultSlot0": "0x2a"
+}

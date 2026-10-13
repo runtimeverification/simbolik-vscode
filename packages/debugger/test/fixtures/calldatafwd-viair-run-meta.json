@@ -1,0 +1,8 @@
+{
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0xc0406226",
+  "status": "0x1",
+  "sourceFile": "src/CalldataFwd.sol",
+  "contract": "CalldataFwd",
+  "steps": 1716
+}

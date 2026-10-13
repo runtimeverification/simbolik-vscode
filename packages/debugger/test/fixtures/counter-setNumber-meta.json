@@ -1,0 +1,8 @@
+{
+  "description": "Counter.setNumber(42) on unoptimized Counter (solc 0.8.35), recorded from kontrol-node",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "setNumberCalldata": "0x3fb5c1cb000000000000000000000000000000000000000000000000000000000000002a",
+  "callTxHash": "0xba0c2c9d722a445828f029d9b5556c9bf15f13eff68c7b7a7d3a2a6eedb5d7b4",
+  "storageSlot0AfterCall": "0x2a",
+  "traceStepCount": 118
+}

@@ -1,0 +1,10 @@
+{
+  "description": "Caller.go(callee, 7) -> Callee.compute(7); geth-dialect (anvil) multi-frame trace. result=15, stored=14.",
+  "callerAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "calleeAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "goCalldata": "0x37d457f50000000000000000000000005fbdb2315678afecb367f032d93f642f64180aa30000000000000000000000000000000000000000000000000000000000000007",
+  "callTxHash": "0x11f2f87cbb36babf14f772244838c670bdb6e161b4cdc6743604a664b5c2ba41",
+  "traceStepCount": 677,
+  "x": 7,
+  "notes": "Depth-2 (Callee frame) structLog indices span [249..562] (314 steps). The depth-1 CALL op into the Callee is at structLog index 248. Callee address (lowercase): 0x5fbdb2315678afecb367f032d93f642f64180aa3."
+}

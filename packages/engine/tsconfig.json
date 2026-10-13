@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [{"path": "../protocol"}, {"path": "../lifting"}],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

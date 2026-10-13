@@ -1,0 +1,16 @@
+{
+  "description": "FixedArrays.fill(): storage uint256[3] fixedArr = [111,222,333] at slots 0,1,2 (inplace, no keccak); sum=66 at slot 3; a memory uint256[3] local = [11,22,33] (inline, no length prefix).",
+  "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "calldata": "0xd9c55ce1",
+  "callTxHash": "0xf24727774c7dc5fb5f9e6c405e146a52308efe8c834cf4cd8ddc4789c76e7527",
+  "traceStepCount": 324,
+  "storageSlot0": "0x6f",
+  "storageSlot1": "0xde",
+  "storageSlot2": "0x14d",
+  "storageSlot3Sum": "0x42",
+  "memoryLocal": [
+    11,
+    22,
+    33
+  ]
+}

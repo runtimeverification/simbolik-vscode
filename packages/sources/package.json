@@ -1,0 +1,23 @@
+{
+  "name": "@simbolik/sources",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Source repositories for remote-replay mode: fetch verified sources + compiler settings (Sourcify, local) and recompile to a solc standard-json build-info.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@simbolik/solc": "*",
+    "solc": "^0.8.36"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@ethdebug/pointers": ["../../node_modules/@ethdebug/pointers/dist/src/index.d.ts"]
+    }
+  },
+  "references": [
+    {"path": "../protocol"},
+    {"path": "../engine"},
+    {"path": "../lifting"},
+    {"path": "../solc"},
+    {"path": "../ethdebug-gen"}
+  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

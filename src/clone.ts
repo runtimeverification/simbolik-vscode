@@ -26,17 +26,15 @@ export async function downloadAndExtract(url: string): Promise<void> {
     const uri = vscode.Uri.parse(`tmp://${entry.name}`);
 
     if (entry.typeflag === FILETYPE_DIRECTORY) {
-      // '5' indicates a directory in tar format
       await vscode.workspace.fs.createDirectory(uri);
     } else if (entry.typeflag === FILETYPE_FILE || entry.typeflag === '') {
-      // '0' or '' indicates a file in tar format
       await vscode.workspace.fs.writeFile(uri, entry.fileData);
     }
   }
 }
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
-  // Fast path: view already spans an ArrayBuffer
+  // Reuse the buffer when the view spans all of it.
   if (
     u8.byteOffset === 0 &&
     u8.byteLength === u8.buffer.byteLength &&
@@ -44,7 +42,6 @@ function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   ) {
     return u8.buffer;
   }
-  // Safe copy into a fresh ArrayBuffer
   const copy = u8.slice();
   return copy.buffer;
 }

@@ -1,0 +1,18 @@
+{
+  "name": "@simbolik/ethdebug-gen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generate ethdebug/format debug info from unoptimized solc standard-json output.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc -b", "typecheck": "tsc -b" },
+  "dependencies": {
+    "@simbolik/protocol": "*",
+    "@simbolik/solc": "*",
+    "@ethdebug/format": "0.1.0-0",
+    "@ethdebug/pointers": "0.1.0-0",
+    "ethereum-cryptography": "2.2.1"
+  }
+}

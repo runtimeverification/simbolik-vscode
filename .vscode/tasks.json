@@ -5,14 +5,22 @@
 	"tasks": [
 		{
 			"type": "npm",
-			"script": "compile",
+			"script": "build:dev",
 			"group": {
 				"kind": "build",
 				"isDefault": true
 			},
-			"problemMatcher": [],
+			"problemMatcher": ["$tsc"],
+			"label": "npm: build:dev",
+			"detail": "Build packages (tsc -b) + extension (tsc) + server bundle (esbuild) — the full F5 dev build"
+		},
+		{
+			"type": "npm",
+			"script": "compile",
+			"group": "build",
+			"problemMatcher": ["$tsc"],
 			"label": "npm: compile",
-			"detail": "tsc -p ./"
+			"detail": "tsc -p ./ (extension source only — does NOT rebuild build/server.mjs)"
 		},
 	]
 }
