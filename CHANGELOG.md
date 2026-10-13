@@ -2,7 +2,7 @@
 
 All notable changes to the "Simbolik VSCode" extension will be documented in this file.
 
-## [16.0.0] - Unreleased
+## [16.0.0] - 2026-10-13
 
 The debugger now runs locally. The remote Simbolik server is replaced by a
 TypeScript debug server bundled with the extension, backed by a local execution
